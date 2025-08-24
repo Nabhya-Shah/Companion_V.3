@@ -1,4 +1,28 @@
-# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.sqlite
+*.db*
+*.env
+.env
+.env.local
+venv/
+.venv/
+env/
+build/
+dist/
+data/companion_ai.db
+data/logs/*.jsonl
+memory_export_*.txt
+/.pytest_cache/
+/.mypy_cache/
+/.ruff_cache/
+coverage.xml
+htmlcov/
+/.DS_Store
+Thumbs.db# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
@@ -60,6 +84,7 @@ cover/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+data/logs/*.jsonl
 
 # Flask stuff:
 instance/

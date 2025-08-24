@@ -1,0 +1,44 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "run-pytests",
+			"type": "shell",
+			"command": "pytest -q",
+			"problemMatcher": [
+				"$pytest"
+			],
+			"group": "test"
+		},
+		{
+			"label": "install-pytest",
+			"type": "shell",
+			"command": "pip install pytest",
+			"group": "build"
+		},
+		{
+			"label": "run-chat",
+			"type": "shell",
+			"command": "python chat_cli.py",
+			"group": "run"
+		},
+		{
+			"label": "run-companion",
+			"type": "shell",
+			"command": "python run_companion.py",
+			"group": "run"
+		},
+		{
+			"label": "run-companion",
+			"type": "shell",
+			"command": "python run_companion.py --memstats",
+			"group": "run"
+		},
+		{
+			"label": "run-companion",
+			"type": "shell",
+			"command": "python run_companion.py --memstats",
+			"group": "run"
+		}
+	]
+}

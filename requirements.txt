@@ -1,0 +1,20 @@
+# Core Dependencies
+groq>=0.4.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+flask>=2.3.0
+PyYAML>=6.0
+
+# GUI Dependencies (tkinter is part of the standard library on most Python distributions; do not list as pip dep)
+# tkinter
+
+# Audio Processing (for voice features)
+pyaudio>=0.2.11
+numpy>=1.24.0
+azure-cognitiveservices-speech>=1.30.0
+
+# Optional: Advanced audio processing
+openai-whisper>=20231117
+
+# Development/Testing
+pytest>=7.0.0
