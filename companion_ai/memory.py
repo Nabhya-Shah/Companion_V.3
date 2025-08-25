@@ -2,7 +2,7 @@
 import sqlite3
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 
 # Define database path
@@ -200,7 +200,11 @@ def get_latest_summary(n: int = 1) -> list[dict]:
 
 # Enhanced Insight functions with deduplication
 def add_insight(insight_text: str, category: str = 'general', relevance_score: float = 1.0):
-    """Add insight with deduplication and categorization."""
+    """Add insight with deduplication, categorization, and freshness guard.
+
+    Freshness guard: if the last 5 insights contain a very similar (>=0.6) one OR
+    share same leading 6 words, skip to reduce repetitive mood statements.
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -213,16 +217,23 @@ def add_insight(insight_text: str, category: str = 'general', relevance_score: f
         conn.close()
         return
     
-    # Check for similar insights (>=75% similarity after normalization)
+    # Fetch recent insights for similarity + freshness
     cursor.execute("SELECT insight_text FROM ai_insights ORDER BY timestamp DESC LIMIT 15")
     recent_insights = cursor.fetchall()
-    
-    for row in recent_insights:
-        similarity = calculate_text_similarity(insight_text, row[0])
+
+    lowered_new = insight_text.lower().strip()
+    new_prefix = ' '.join(lowered_new.split()[:6])
+    for idx, row in enumerate(recent_insights):
+        existing = row[0]
+        similarity = calculate_text_similarity(insight_text, existing)
+        existing_lower = existing.lower().strip()
+        prefix_match = new_prefix and existing_lower.startswith(new_prefix)
         if similarity >= 0.75:
             print(f"🔄 Similar insight detected ({similarity:.2f} similarity), skipping...")
-            conn.close()
-            return
+            conn.close(); return
+        if idx < 5 and (similarity >= 0.6 or prefix_match):
+            print("🔁 Freshness guard: recent similar insight, skipping...")
+            conn.close(); return
     
     # Add new insight
     cursor.execute('''
@@ -497,3 +508,68 @@ def clear_all_memory():
         raise e
     finally:
         conn.close()
+
+# --- Memory Search (for tool integration) ---
+def search_memory(query: str, limit: int = 10) -> list[dict]:
+    """Search across profile facts, recent summaries, and insights.
+
+    Scoring: simple token overlap (#matches / #tokens) with light recency boost for
+    summaries & insights (newer = higher). Returns list of dicts:
+      { 'type': 'profile'|'summary'|'insight', 'text': str, 'score': float }
+    """
+    q = (query or '').strip()
+    if not q:
+        return []
+    tokens = [t.lower() for t in q.split() if len(t) > 2]
+    if not tokens:
+        return []
+    token_set = set(tokens)
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    results: list[dict] = []
+    # Profile facts
+    cursor.execute("SELECT key, value FROM user_profile")
+    for key, value in cursor.fetchall():
+        blob = f"{key} {value}".lower()
+        matches = sum(1 for t in token_set if t in blob)
+        if matches:
+            score = matches / len(token_set) + 0.2  # small boost for explicit facts
+            results.append({'type': 'profile', 'text': f"{key}={value}", 'score': score})
+
+    # Recent summaries
+    cursor.execute("SELECT summary_text, timestamp FROM conversation_summaries ORDER BY timestamp DESC LIMIT 50")
+    now = datetime.now(timezone.utc)
+    for summary_text, ts in cursor.fetchall():
+        blob = summary_text.lower()
+        matches = sum(1 for t in token_set if t in blob)
+        if matches:
+            # recency boost (within ~7 days decays)
+            try:
+                dt = datetime.fromisoformat(ts) if isinstance(ts, str) else now
+            except Exception:
+                dt = now
+            age_days = max((now - dt).total_seconds() / 86400.0, 0.0)
+            recency = max(0.0, 1.0 - (age_days / 7.0)) * 0.3
+            score = matches / len(token_set) + recency
+            results.append({'type': 'summary', 'text': summary_text, 'score': score})
+
+    # Recent insights
+    cursor.execute("SELECT insight_text, timestamp FROM ai_insights ORDER BY timestamp DESC LIMIT 80")
+    for insight_text, ts in cursor.fetchall():
+        blob = insight_text.lower()
+        matches = sum(1 for t in token_set if t in blob)
+        if matches:
+            try:
+                dt = datetime.fromisoformat(ts) if isinstance(ts, str) else now
+            except Exception:
+                dt = now
+            age_days = max((now - dt).total_seconds() / 86400.0, 0.0)
+            recency = max(0.0, 1.0 - (age_days / 14.0)) * 0.25
+            score = matches / len(token_set) + recency
+            results.append({'type': 'insight', 'text': insight_text, 'score': score})
+
+    conn.close()
+    results.sort(key=lambda r: r['score'], reverse=True)
+    return results[:limit]

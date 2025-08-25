@@ -9,6 +9,7 @@ from threading import Lock
 from typing import Optional, Dict, Any
 
 from . import config
+from . import metrics
 
 _lock = Lock()
 
@@ -54,5 +55,9 @@ def log_interaction(user_message: str,
     with _lock:
         with open(path, 'a', encoding='utf-8') as f:
             f.write(line + '\n')
+    try:
+        metrics.update(model, latency_ms if latency_ms is not None else None)
+    except Exception:
+        pass
 
 __all__ = ["log_interaction"]

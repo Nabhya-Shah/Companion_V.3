@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Companion AI</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <div id="app-root">
+    <header class="topbar">
+      <div class="brand">Companion<span class="accent">AI</span></div>
+      <div class="controls">
+        <input id="tokenInput" placeholder="API Token" style="width:120px;display:none;" />
+        <select id="personaSelect">
+          <option value="Companion" selected>Companion</option>
+          <option value="Aether">Aether</option>
+          <option value="Lilith">Lilith</option>
+        </select>
+        <select id="modelSelect">
+          <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
+          <option value="llama-3.3-70b-versatile" selected>llama-3.3-70b-versatile</option>
+          <option value="deepseek-r1-distill-llama-70b">deepseek-r1-distill-llama-70b</option>
+        </select>
+  <button id="healthBtn" title="Refresh Health">Health</button>
+      </div>
+    </header>
+    <main class="layout">
+      <section class="chat" id="chatPane"></section>
+      <aside class="side">
+        <nav class="tabs">
+          <button class="tab active" data-tab="memory">Memory</button>
+          <button class="tab" data-tab="search">Search</button>
+          <button class="tab" data-tab="metrics">Metrics</button>
+        </nav>
+        <div class="tabpanes">
+          <div class="pane active" id="pane-memory">
+            <h3>Profile Facts</h3>
+            <ul id="profileList" class="kv"></ul>
+            <h3>Summaries</h3>
+            <ul id="summaryList" class="bullets"></ul>
+            <h3>Insights</h3>
+            <ul id="insightList" class="bullets"></ul>
+          </div>
+          <div class="pane" id="pane-search">
+            <div class="searchBox">
+              <input id="searchInput" placeholder="Search memory or web..." />
+              <button id="searchBtn">Go</button>
+            </div>
+            <div id="searchResults" class="results"></div>
+          </div>
+          <div class="pane" id="pane-metrics">
+            <pre id="metricsOut" class="metrics"></pre>
+          </div>
+        </div>
+      </aside>
+    </main>
+    <footer class="composer">
+      <div class="composer-col">
+        <textarea id="userInput" rows="1" placeholder="Type your message... /help for commands" spellcheck="false"></textarea>
+        <div id="cmdHints" class="cmd-hints" style="display:none;"></div>
+      </div>
+      <div class="composer-actions">
+        <button id="sendBtn">Send</button>
+        <span id="status" class="status"></span>
+      </div>
+    </footer>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

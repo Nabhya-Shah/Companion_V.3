@@ -3,7 +3,13 @@
 Tools are simple callables returning text. Later phases can add schema & args.
 """
 from __future__ import annotations
-import math, datetime, re
+import math, datetime, re, os, textwrap, json
+from typing import Callable, Dict
+from companion_ai import memory as mem
+try:
+    import requests  # for optional web snippet
+except ImportError:  # graceful degrade
+    requests = None
 from typing import Callable, Dict
 
 ToolFn = Callable[[str], str]
@@ -32,14 +38,52 @@ def tool_calc(expr: str) -> str:
 
 @tool('search')
 def tool_search(query: str) -> str:
-    """Stub search tool returning keyword echo.
-    Future: integrate actual retrieval.
+    """Memory-first search with optional lightweight web enrichment.
+
+    Query format (simple):
+      <free text>
+    To disable web fallback explicitly append: --no-web
     """
-    q = query.strip()
+    q = (query or '').strip()
     if not q:
-        return 'search: (empty query)'
-    terms = [t for t in re.split(r'\W+', q.lower()) if len(t) > 3][:6]
-    return f"search_results_stub: keywords={terms}"
+        return 'SEARCH_RESULTS (empty query)'
+    use_web = True
+    if '--no-web' in q:
+        q = q.replace('--no-web', '').strip()
+        use_web = False
+
+    # Memory search
+    mem_hits = mem.search_memory(q, limit=8)
+    if not mem_hits and len(q.split()) == 1:
+        # broaden by not requiring >1 char tokens (already simple)
+        pass
+
+    lines = [f"SEARCH_RESULTS (query='{q}', memory_hits={len(mem_hits)})"]
+    for i, hit in enumerate(mem_hits, 1):
+        snippet = hit['text']
+        if len(snippet) > 140:
+            snippet = snippet[:137] + '...'
+        lines.append(f"{i}. [{hit['type']}] score={hit['score']:.2f} | {snippet}")
+
+    # Optional small web snippet: simple Wikipedia-style summary fallback
+    if use_web and requests and len(mem_hits) < 3:
+        try:
+            # naive endpoint (could swap later); using duckduckgo instant answer style
+            resp = requests.get(
+                'https://api.duckduckgo.com/',
+                params={'q': q, 'format': 'json', 'no_html': 1, 'skip_disambig': 1}, timeout=3.5
+            )
+            if resp.ok:
+                data = resp.json()
+                abstract = data.get('AbstractText') or ''
+                if abstract:
+                    abstract = re.sub(r'\s+', ' ', abstract).strip()
+                    if abstract:
+                        short = abstract[:220] + ('...' if len(abstract) > 220 else '')
+                        lines.append(f"WEB: {short}")
+        except Exception:
+            lines.append("WEB: (unavailable)")
+    return '\n'.join(lines)
 
 def list_tools() -> list[str]:
     return sorted(_TOOLS.keys())

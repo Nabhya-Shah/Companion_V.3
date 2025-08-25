@@ -39,6 +39,12 @@
 			"type": "shell",
 			"command": "python run_companion.py --memstats",
 			"group": "run"
+		},
+		{
+			"label": "run-web",
+			"type": "shell",
+			"command": "python run_companion.py --web",
+			"group": "run"
 		}
 	]
 }

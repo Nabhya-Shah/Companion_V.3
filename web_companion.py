@@ -4,7 +4,7 @@ Web-based Companion AI Interface
 Modern, responsive web portal for better UX
 """
 
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify
 import threading
 import webbrowser
 import time
@@ -14,6 +14,7 @@ from companion_ai.core import config as core_config
 from companion_ai import memory as db
 from companion_ai.tts_manager import tts_manager
 from companion_ai.tools import run_tool, list_tools
+from companion_ai.core import metrics
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,14 +34,13 @@ def index():
 def chat():
     """Handle chat messages"""
     try:
-        data = request.json
-        # Auth (only for state-modifying endpoints)
-        token = request.headers.get('X-API-TOKEN') or data.get('token') if isinstance(data, dict) else None
+        data = request.json or {}
+        token = request.headers.get('X-API-TOKEN') or data.get('token')
         if not core_config.require_auth(token):
             return jsonify({'error': 'Unauthorized'}), 401
         user_message = data.get('message', '').strip()
-    persona = data.get('persona', 'Companion')
-    model = data.get('model', 'llama-3.1-8b-instant')
+        persona = data.get('persona', 'Companion')
+        model = data.get('model', core_config.DEFAULT_CONVERSATION_MODEL)
         
         if not user_message:
             return jsonify({'error': 'Empty message'}), 400
@@ -56,7 +56,7 @@ def chat():
         if user_message.startswith('!') and ' ' in user_message:
             first, rest = user_message[1:].split(' ', 1)
             tool_result = run_tool(first, rest)
-            ai_response = f"[tool:{first}] {tool_result}"
+            ai_response = f"[tool:{first}]\n{tool_result}"
         else:
             # Generate response via LLM
             ai_response = generate_response(user_message, memory_context, model, persona)
@@ -156,17 +156,58 @@ def change_voice():
         logger.error(f"Voice change error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/search')
+def search():
+    """Structured memory + optional web snippet search."""
+    try:
+        q = request.args.get('q', '').strip()
+        if not q:
+            return jsonify({'query': q, 'memory_hits': [], 'web_snippet': None})
+        # Use memory.search_memory directly for structured hits
+        hits = db.search_memory(q, limit=8)
+        # Optional web snippet via tool (parsing WEB line)
+        web_snippet = None
+        tool_text = run_tool('search', q)
+        for line in tool_text.splitlines():
+            if line.startswith('WEB:'):
+                web_snippet = line[4:].strip()
+        # Convert hits to safe subset
+        return jsonify({
+            'query': q,
+            'memory_hits': hits,
+            'web_snippet': web_snippet
+        })
+    except Exception as e:
+        logger.error(f"Search error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/health')
+def health():
+    try:
+        memstats = db.get_memory_stats()
+        mstats = metrics.snapshot()
+        return jsonify({'memory': memstats, 'metrics': mstats})
+    except Exception as e:
+        logger.error(f"Health error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/config')
+def config_info():
+    """Expose minimal safe config needed by front-end (e.g., auth requirement)."""
+    return jsonify({'auth_required': bool(core_config.API_AUTH_TOKEN)})
+
 def open_browser():
     """Open browser after a short delay"""
     time.sleep(1.5)
     webbrowser.open('http://localhost:5000')
 
+def run_web(host: str = 'localhost', port: int = 5000, open_browser_flag: bool = True):
+    """Start the web UI programmatically (used by unified launcher)."""
+    print(f"🚀 Starting Companion AI Web Portal on http://{host}:{port}")
+    if open_browser_flag:
+        print("📱 Opening browser...")
+        threading.Thread(target=open_browser, daemon=True).start()
+    app.run(debug=False, host=host, port=port)
+
 if __name__ == '__main__':
-    print("🚀 Starting Companion AI Web Portal...")
-    print("📱 Opening browser at http://localhost:5000")
-    
-    # Open browser in background
-    threading.Thread(target=open_browser, daemon=True).start()
-    
-    # Start Flask app
-    app.run(debug=False, host='localhost', port=5000)
+    run_web()

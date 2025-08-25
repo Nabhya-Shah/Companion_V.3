@@ -39,7 +39,7 @@ def print_banner():
     print("\n=== Companion Chat (Adaptive Persona) ===")
     if not have_groq():
         print("[WARN] GROQ_API_KEY not set – responses will say offline.")
-    print("Commands: /exit /quit /memstats /help")
+    print("Commands: /exit /quit /memstats /health /help")
 
 def main():
     print_banner()
@@ -61,12 +61,23 @@ def main():
             print("Bye.")
             break
         if cmd in {"/help", "help"}:
-            print("Commands: /exit /quit /memstats /help")
+            print("Commands: /exit /quit /memstats /health /help")
             continue
         if cmd == "/memstats":
             from companion_ai.memory import get_memory_stats
             stats = get_memory_stats()
             print(f"Memory: profiles={stats['profile_facts']} summaries={stats['summaries']} insights={stats['insights']}")
+            continue
+        if cmd == "/health":
+            from companion_ai.core import metrics
+            from companion_ai.memory import get_memory_stats
+            mstats = metrics.snapshot()
+            memstats = get_memory_stats()
+            print("Health:")
+            print(f"  interactions: {mstats.get('total_interactions')} models={list(mstats.get('models',{}).keys())}")
+            for model, data in mstats.get('models', {}).items():
+                print(f"   - {model}: count={data['count']} avg={data.get('avg_latency_ms',0)}ms p95={data.get('p95_latency_ms',0)}ms")
+            print(f"  memory: facts={memstats['profile_facts']} summaries={memstats['summaries']} insights={memstats['insights']}")
             continue
 
         # Repetition guard
@@ -96,6 +107,10 @@ def main():
             importance_hint = 0.6 if any(tok in user.lower() for tok in ["favorite", "like", "love", "prefer", "enjoy"]) else 0.4
             if len(user) < 15 and importance_hint < 0.5:
                 importance_hint = 0.2  # deemphasize trivial short turns
+
+            # Throttle: if last 3 inputs are all very short (<18 chars) skip writes
+            if len(recent_inputs) == 3 and all(len(x) < 18 for x in recent_inputs):
+                continue  # skip all memory artifacts for rapid micro-chat
 
             # Summaries: only if importance >=0.4 and not trivially short
             if importance_hint >= 0.4 and len(user) > 8:
