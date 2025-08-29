@@ -14,6 +14,13 @@ _state: Dict[str, Any] = {
     'models': {},              # model -> {'count': int, 'latencies': [ms,...] (capped)}
     'total_interactions': 0,
     'last_update_ts': None,
+    'tools': {
+        'total_invocations': 0,
+        'by_name': {},        # name -> count
+        'blocked': 0,         # cooldown or rejection
+        'failures': 0,
+        'decision_types': {}  # e.g. model_directive, heuristic_override
+    }
 }
 _LATENCY_CAP = 200  # keep last 200 latencies per model
 _STATE_FILE = os.path.join(config.LOG_DIR, 'metrics_state.json')
@@ -52,6 +59,26 @@ def snapshot() -> Dict[str, Any]:
             data['avg_latency_ms'] = 0.0
             data['p95_latency_ms'] = 0.0
     return snap
+
+def record_tool(name: str, success: bool = True, blocked: bool = False, decision_type: str = 'model_directive'):
+    with _lock:
+        t = _state['tools']
+        if blocked:
+            t['blocked'] += 1
+        else:
+            t['total_invocations'] += 1
+            t['by_name'][name] = t['by_name'].get(name, 0) + 1
+            if not success:
+                t['failures'] += 1
+        t['decision_types'][decision_type] = t['decision_types'].get(decision_type, 0) + 1
+        _ensure_dir()
+        try:
+            with open(_STATE_FILE, 'w', encoding='utf-8') as f:
+                json.dump(_state, f)
+        except Exception:
+            pass
+
+__all__ = ['update', 'snapshot', 'record_tool']
 
 def _pct(values: list[float], p: float) -> float:
     if not values:

@@ -2,6 +2,7 @@
 
 import os
 import json
+import hashlib
 import traceback
 from dotenv import load_dotenv
 import time
@@ -11,6 +12,9 @@ from typing import Dict, Any
 
 from companion_ai.core import config as core_config
 from companion_ai.core.context_builder import build_system_prompt_with_meta
+from companion_ai.tools import run_tool, list_tools
+from companion_ai.core import metrics as core_metrics
+import time as _time
 from companion_ai.core.conversation_logger import log_interaction
 
 # Configure logging
@@ -128,6 +132,24 @@ def build_system_prompt(memory_context: dict, persona: str = "Aether") -> str:
     else:  # Default to Aether
         return build_aether_prompt(profile_str)
 
+def _augment_system_with_tools(base_prompt: str) -> str:
+    """Append tool instruction block for autonomous tool invocation."""
+    tool_list = list_tools()
+    if not tool_list:
+        return base_prompt
+    tools_desc = '\n'.join(f"- {t}" for t in tool_list)
+    guidance = (
+        "\nTOOL USE INSTRUCTIONS:\n"
+        "You may decide to use ONE tool proactively when it clearly helps the user.\n"
+        "Respond in one of two formats ONLY for your first reply: \n"
+        "1) TOOL:<name>|<input>  (no other text)\n"
+        "2) CHAT: <your natural reply>\n"
+        "After a TOOL call is executed your final answer will be generated with the results appended.\n"
+        "Strictly use tool names from the list; if no tool is useful choose CHAT.\n"
+        f"Available tools:\n{tools_desc}\n"
+    )
+    return base_prompt + guidance
+
 def generate_response(user_message: str, memory_context: dict, model: str | None = None, persona: str = "Companion") -> str:
     """Generate response using specified model.
 
@@ -144,17 +166,77 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
         if persona.lower() == 'companion':
             meta = build_system_prompt_with_meta(user_message)
             system_prompt = meta['system_prompt']
+            if core_config.ENABLE_AUTO_TOOLS:
+                system_prompt = _augment_system_with_tools(system_prompt)
             mode = meta['mode']
             memory_meta = meta['memory_meta']
         else:
             system_prompt = build_system_prompt(memory_context, persona)
+            if core_config.ENABLE_AUTO_TOOLS:
+                system_prompt = _augment_system_with_tools(system_prompt)
             mode = 'legacy'
             memory_meta = None
         start_t = time.perf_counter()
-        output = generate_model_response(user_message, system_prompt, chosen_model)
+        first_output = generate_model_response(user_message, system_prompt, chosen_model)
+        tool_used = None
+        tool_result = None
+        final_output = first_output
+        if core_config.ENABLE_AUTO_TOOLS:
+            stripped = first_output.strip()
+            if stripped.startswith('TOOL:'):
+                # Parse TOOL:name|input
+                spec = stripped[5:].strip()
+                if '|' in spec:
+                    name, arg = spec.split('|', 1)
+                    name = name.strip().lower()
+                    arg = arg.strip()
+                    if name in list_tools():
+                        # Cooldown suppression (simple in-memory cache)
+                        _tool_cache = getattr(generate_response, '_recent_tools', {})
+                        now = _time.time()
+                        # prune old
+                        for k,v in list(_tool_cache.items()):
+                            if now - v['ts'] > 120:  # 2 min TTL
+                                del _tool_cache[k]
+                        repeated = False
+                        key = f"{name}:{arg.lower()[:80]}"
+                        if key in _tool_cache:
+                            repeated = True
+                        if repeated:
+                            core_metrics.record_tool(name, success=True, blocked=True, decision_type='cooldown')
+                            final_output = f"(Suppressed repeat {name} call) " + first_output
+                        else:
+                            tool_used = name
+                            tool_result = run_tool(name, arg)
+                            _tool_cache[key] = {'ts': now}
+                            setattr(generate_response, '_recent_tools', _tool_cache)
+                            core_metrics.record_tool(name, success=True, blocked=False)
+                            follow_sys = system_prompt + f"\n\nTool {name} result (read-only):\n{tool_result}\nNow provide the final answer to the user (no TOOL: prefix)."
+                            final_output = generate_model_response(user_message, follow_sys, chosen_model)
+                    else:
+                        core_metrics.record_tool(name or 'invalid', success=False, blocked=False, decision_type='invalid')
+                        final_output = 'Tool request invalid (unknown tool). ' + first_output
+                else:
+                    core_metrics.record_tool('malformed', success=False, blocked=False, decision_type='malformed')
+                    final_output = 'Malformed tool directive. ' + first_output
+            elif stripped.startswith('CHAT:'):
+                final_output = stripped[5:].strip() or first_output
+        output = final_output
         latency_ms = (time.perf_counter() - start_t) * 1000.0
         try:
-            log_interaction(user_message, output, mode, system_prompt, memory_meta, model=chosen_model, complexity=complexity, latency_ms=round(latency_ms,2))
+            log_interaction(
+                user_message,
+                output,
+                mode,
+                system_prompt,
+                memory_meta,
+                model=chosen_model,
+                complexity=complexity,
+                latency_ms=round(latency_ms,2),
+                tool_used=tool_used,
+                tool_result_len=len(tool_result) if tool_result else None,
+                tool_blocked=True if (tool_used and '(Suppressed' in final_output) else False
+            )
         except Exception as log_err:
             logger.debug(f"Logging failed: {log_err}")
         return output
@@ -162,24 +244,44 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
         logger.error(f"Generation failed: {e}")
         return "Encountered an internal error generating a response."
 
+def _maybe_cache_opts(system_prompt: str) -> dict:
+    """Return cache options dict if prompt caching enabled and supported."""
+    if not core_config.ENABLE_PROMPT_CACHING:
+        return {}
+    # Stable hash of system prompt content acts as cache key
+    key = hashlib.sha256(system_prompt.encode('utf-8')).hexdigest()[:40]
+    # Groq prompt caching (if supported by SDK) typically via `cache_key` or `cache` param
+    return {"cache_key": f"sys:{key}"}
+
 def generate_model_response(user_message: str, system_prompt: str, model: str) -> str:
-    """Generate response using specified model through Groq"""
+    """Generate response using specified model through Groq with optional prompt caching."""
     if not groq_client:
         raise Exception("Groq client not available")
-
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message}
     ]
-
-    response = groq_client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=0.8,
-        max_tokens=1024,
-        top_p=0.9,
-        stream=False
-    )
+    extra = _maybe_cache_opts(system_prompt)
+    try:
+        response = groq_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.8,
+            max_tokens=1024,
+            top_p=0.9,
+            stream=False,
+            **extra
+        )
+    except TypeError:
+        # SDK might not yet support cache params; retry without extras
+        response = groq_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.8,
+            max_tokens=1024,
+            top_p=0.9,
+            stream=False
+        )
     raw = response.choices[0].message.content.strip()
     return sanitize_output(raw)
 
@@ -280,16 +382,54 @@ Summary:"""
     return ""
 
 def extract_profile_facts(user_msg: str, ai_msg: str) -> dict:
-    """Extract explicit user-stated profile facts from the latest turn.
+    """Extract explicit user-stated profile facts (structured output if available).
 
-    Rules enforced via prompt + post-filter:
-    - Only include facts the USER explicitly stated (not the AI)
-    - No inferences, guesses, or traits deduced indirectly
-    - If none, return an empty JSON object {}
-    - Keys normalized to snake_case
-    - Discard any key/value where the key or value text does not literally appear in the user's message
+    Fallback path keeps legacy parsing to remain robust if structured outputs unsupported.
     """
+    if not groq_client:
+        return {}
+    model = core_config.choose_model('facts')
+    logger.debug(f"extract_profile_facts using model={model}")
 
+    # Structured outputs attempt
+    if core_config.ENABLE_STRUCTURED_FACTS:
+        try:
+            # Some Groq SDK versions expose `responses.create` with json_schema / structured mode.
+            if hasattr(groq_client, 'responses'):
+                schema = {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"}
+                }
+                # Minimal prompt so model returns only explicit facts
+                prompt = (
+                    "Return ONLY a JSON object of explicit self-facts user stated this turn."\
+                    " No inferences. If none, return {}. Keys should mirror literal user phrasing."\
+                    f"\nUser: {user_msg}\nAssistant (ignore for extraction): {ai_msg}"
+                )
+                try:
+                    resp = groq_client.responses.create(
+                        model=model,
+                        input=[{"role": "user", "content": prompt}],
+                        structured_output=schema,
+                    )
+                    # Expected: resp.output / or resp.output_text / or resp.response depending on SDK;
+                    # we defensively extract JSON string.
+                    raw_json = None
+                    for part in getattr(resp, 'output', []) or []:
+                        if getattr(part, 'type', None) == 'output_text':
+                            raw_json = getattr(part, 'text', None)
+                    if not raw_json and hasattr(resp, 'output_text'):
+                        raw_json = resp.output_text
+                    if isinstance(raw_json, str):
+                        parsed = json.loads(raw_json)
+                        if isinstance(parsed, dict):
+                            return _filter_fact_dict(parsed, user_msg)
+                except Exception as se:
+                    logger.debug(f"Structured fact extraction failed: {se}; falling back")
+        except Exception:
+            pass
+
+    # Legacy fallback path
     prompt = (
         "You extract ONLY explicit self-descriptive facts the USER stated in their own message.\n"
         f'User message: "{user_msg}"\n'
@@ -303,46 +443,37 @@ def extract_profile_facts(user_msg: str, ai_msg: str) -> dict:
         "6. Forbidden: guesses, advice, rephrasings, unstated traits.\n\n"
         "JSON:"
     )
-
     try:
-        if not groq_client:
-            return {}
-        model = core_config.choose_model('facts')
-        logger.debug(f"extract_profile_facts using model={model}")
         response = generate_groq_response(prompt, model=model)
         if not response:
             return {}
-        try:
-            parsed = json.loads(response.strip())
-        except Exception:
-            logger.debug("Fact JSON parse failed; returning empty dict")
-            return {}
+        parsed = json.loads(response.strip())
         if not isinstance(parsed, dict):
             return {}
-        user_lower = user_msg.lower()
-        filtered: dict[str,str] = {}
-
-        def norm_key(k: str) -> str:
-            import re
-            k2 = re.sub(r'[^a-zA-Z0-9]+', '_', k.lower()).strip('_')
-            # collapse consecutive underscores
-            k2 = re.sub(r'_+', '_', k2)
-            return k2[:60]
-
-        for k, v in parsed.items():
-            if not isinstance(k, str) or not isinstance(v, str):
-                continue
-            k_clean = k.strip()
-            v_clean = v.strip()
-            if not k_clean or not v_clean:
-                continue
-            # literal presence check in user message to avoid hallucinations
-            if (k_clean.lower() in user_lower) or (v_clean.lower() in user_lower):
-                filtered[norm_key(k_clean)] = v_clean[:160]
-        return filtered
+        return _filter_fact_dict(parsed, user_msg)
     except Exception as e:
-        logger.error(f"Profile fact extraction failed: {str(e)}")
+        logger.error(f"Profile fact extraction failed: {e}")
         return {}
+
+def _filter_fact_dict(parsed: dict, user_msg: str) -> dict:
+    """Apply literal presence + key normalization filtering to parsed fact dict."""
+    user_lower = user_msg.lower()
+    filtered: dict[str,str] = {}
+    import re
+    def norm_key(k: str) -> str:
+        k2 = re.sub(r'[^a-zA-Z0-9]+', '_', k.lower()).strip('_')
+        k2 = re.sub(r'_+', '_', k2)
+        return k2[:60]
+    for k, v in parsed.items():
+        if not isinstance(k, str) or not isinstance(v, (str, int, float)):
+            continue
+        v_str = str(v).strip()
+        k_str = k.strip()
+        if not k_str or not v_str:
+            continue
+        if (k_str.lower() in user_lower) or (v_str.lower() in user_lower):
+            filtered[norm_key(k_str)] = v_str[:160]
+    return filtered
 
 def generate_insight(user_msg: str, ai_msg: str, context: dict) -> str:
     """Generate insights about the user or conversation"""

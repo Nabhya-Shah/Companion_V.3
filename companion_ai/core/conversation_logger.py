@@ -33,7 +33,10 @@ def log_interaction(user_message: str,
                     success: bool = True,
                     error: Optional[str] = None,
                     complexity: Optional[int] = None,
-                    latency_ms: Optional[float] = None):
+                    latency_ms: Optional[float] = None,
+                    tool_used: Optional[str] = None,
+                    tool_result_len: Optional[int] = None,
+                    tool_blocked: Optional[bool] = None):
     record = {
         'ts': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'user': user_message,
@@ -50,6 +53,12 @@ def log_interaction(user_message: str,
         record['complexity'] = complexity
     if latency_ms is not None:
         record['latency_ms'] = latency_ms
+    if tool_used:
+        record['tool_used'] = tool_used
+        if tool_result_len is not None:
+            record['tool_result_len'] = tool_result_len
+        if tool_blocked is not None:
+            record['tool_blocked'] = tool_blocked
     path = _log_path()
     line = json.dumps(record, ensure_ascii=False)
     with _lock:

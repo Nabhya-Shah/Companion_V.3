@@ -5,10 +5,7 @@
 			"label": "run-pytests",
 			"type": "shell",
 			"command": "pytest -q",
-			"problemMatcher": [
-				"$pytest"
-			],
-			"group": "test"
+			"group": { "kind": "test", "isDefault": true }
 		},
 		{
 			"label": "install-pytest",
@@ -20,31 +17,26 @@
 			"label": "run-chat",
 			"type": "shell",
 			"command": "python chat_cli.py",
-			"group": "run"
+			"group": { "kind": "none" }
 		},
 		{
 			"label": "run-companion",
 			"type": "shell",
 			"command": "python run_companion.py",
-			"group": "run"
-		},
-		{
-			"label": "run-companion",
-			"type": "shell",
-			"command": "python run_companion.py --memstats",
-			"group": "run"
-		},
-		{
-			"label": "run-companion",
-			"type": "shell",
-			"command": "python run_companion.py --memstats",
-			"group": "run"
+			"group": { "kind": "none" }
 		},
 		{
 			"label": "run-web",
 			"type": "shell",
 			"command": "python run_companion.py --web",
-			"group": "run"
+			"group": { "kind": "none" }
+		},
+		{
+			"label": "run-web-warm",
+			"type": "shell",
+			"command": "python run_web_with_warmup.py",
+			"group": { "kind": "none" },
+			"detail": "Warm up model (prompt cache) then start web UI"
 		}
 	]
 }

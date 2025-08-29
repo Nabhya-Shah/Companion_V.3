@@ -114,6 +114,143 @@ MEMORY_MODEL_CONFIG = ModelConfig(name=MEMORY_FAST_MODEL, temperature=0.3)
 ENABLE_TOOL_CALLING = False  # Will turn on in later phases
 ENABLE_STREAMING = False     # Planned Phase 3
 ENABLE_FTS = True            # Phase 0 quick win placeholder
+ENABLE_PROMPT_CACHING = True # Use Groq prompt caching when available
+ENABLE_STRUCTURED_FACTS = True # Use structured outputs for fact extraction if SDK supports
+ENABLE_CAPABILITY_ROUTER = True # Use capability metadata to inform selection (non-breaking initial)
+ENABLE_AUTO_TOOLS = True       # Allow heuristic autonomous tool invocation
+VERIFY_FACTS_SECOND_PASS = True # Second-pass heavy model verification of extracted facts
+ALWAYS_HEAVY_CHAT = False       # Force all chat on heavy model (developer showcase)
+AGGRESSIVE_ESCALATION = True    # Lower thresholds for heavy escalation
+HEAVY_MEMORY = True             # Use heavy model for important memory ops (summary/insight)
+
+# ---- Model Capability Registry ----
+# Light metadata to support smarter routing and future observability. Values are heuristic.
+# speed: 1(fast) .. 5(slowest) relative; quality: 1(low) .. 5(high). cost_weight rough relative.
+MODEL_CAPABILITIES: dict[str, dict] = {
+    "llama-3.1-8b-instant": {
+        "speed": 1,
+        "quality": 2,
+        "cost_weight": 1,
+        "tier": "fast",
+        "supports_reasoning_effort": False,
+        "supports_reasoning_field": False,
+        "default_temperature": 0.8,
+        "roles": ["chat.fast_fallback","facts","summary.standard"]
+    },
+    "llama-3.3-70b-versatile": {
+        "speed": 3,
+        "quality": 4,
+        "cost_weight": 3,
+        "tier": "balanced_high",
+        "supports_reasoning_effort": False,
+        "supports_reasoning_field": False,
+        "default_temperature": 0.8,
+        "roles": ["chat.primary","summary.high","insight"]
+    },
+    "deepseek-r1-distill-llama-70b": {
+        "speed": 4,
+        "quality": 5,
+        "cost_weight": 4,
+        "tier": "reasoning",
+        "supports_reasoning_effort": False,  # placeholder until verified
+        "supports_reasoning_field": False,
+        "default_temperature": 0.7,
+        "roles": ["reasoning","analysis"]
+    },
+    # Newly exposed Groq GPT-OSS models (names tentative — adjust if provider differs)
+    "gpt-oss-20b": {
+        "speed": 2,
+        "quality": 4,
+        "cost_weight": 2,
+        "tier": "smart_primary",
+        "supports_reasoning_effort": True,
+        "supports_reasoning_field": True,
+        "default_temperature": 0.8,
+        "roles": ["chat.primary","summary.standard","insight","facts"]
+    },
+    "gpt-oss-120b": {
+        "speed": 3,  # empirically still fast on Groq infra
+        "quality": 5,
+        "cost_weight": 5,
+        "tier": "heavy_reasoning",
+        "supports_reasoning_effort": True,
+        "supports_reasoning_field": True,
+        "default_temperature": 0.75,
+        "roles": ["chat.heavy","reasoning","insight.high"]
+    },
+}
+
+def model_capability_summary() -> dict:
+    """Return safe subset of capability metadata for external /health display."""
+    out = {}
+    for name, meta in MODEL_CAPABILITIES.items():
+        out[name] = {
+            'tier': meta.get('tier'),
+            'speed': meta.get('speed'),
+            'quality': meta.get('quality'),
+            'supports_reasoning_effort': meta.get('supports_reasoning_effort'),
+        }
+    return out
+
+# ---- Adaptive Routing (aggressive-smart profile) ----
+SMART_PRIMARY_MODEL = "gpt-oss-20b"
+HEAVY_MODEL = "gpt-oss-120b"
+FAST_MODEL = DEFAULT_CONVERSATION_MODEL  # usually llama-3.1-8b-instant
+
+def _resolve(model_name: str, fallback: str) -> str:
+    return model_name if model_name in MODEL_CAPABILITIES else fallback
+
+def choose_model(purpose: str, importance: float = 0.0, complexity: int = 0) -> str:  # override earlier definition
+    """Aggressive smart routing.
+    purpose: 'chat' | 'summary' | 'facts' | 'insight' | 'reasoning'
+    importance: 0..1 (memory importance)
+    complexity: 0..3 heuristic
+    """
+    # Hard override
+    if ALWAYS_HEAVY_CHAT and purpose == 'chat':
+        return _resolve(HEAVY_MODEL, MODEL_ROLES.get('chat.primary', DEFAULT_CONVERSATION_MODEL))
+
+    primary = _resolve(SMART_PRIMARY_MODEL, MODEL_ROLES.get('chat.primary', DEFAULT_CONVERSATION_MODEL))
+    heavy = _resolve(HEAVY_MODEL, MODEL_ROLES.get('reasoning', primary))
+    fast = FAST_MODEL
+
+    if purpose == 'facts':
+        # Keep extraction terse; use fast model first
+        return fast if fast in MODEL_CAPABILITIES else primary
+
+    if purpose == 'summary':
+        if HEAVY_MEMORY and (importance >= 0.7 or (AGGRESSIVE_ESCALATION and importance >= 0.6 and complexity >=1)):
+            legacy_high = MODEL_ROLES.get('memory.summary_high')
+            if legacy_high and legacy_high != heavy:
+                return legacy_high
+            return heavy
+        return primary if importance >= 0.4 else fast
+
+    if purpose == 'insight':
+        if HEAVY_MEMORY and (importance >= 0.55 or complexity >= 2):
+            legacy_high = MODEL_ROLES.get('memory.summary_high')
+            if legacy_high and legacy_high != heavy:
+                return legacy_high
+            return heavy
+        # Low importance -> fast (legacy expectation), else primary
+        return fast if importance < 0.4 else primary
+
+    if purpose == 'reasoning':
+        return heavy
+
+    if purpose == 'chat':
+        # Escalation triggers
+        if complexity >= 2:
+            legacy_reasoning = MODEL_ROLES.get('reasoning')
+            if legacy_reasoning and legacy_reasoning != heavy:
+                return legacy_reasoning
+            return heavy
+        if AGGRESSIVE_ESCALATION and complexity >=1:
+            return primary if primary != heavy else heavy
+        return primary
+
+    # Fallback
+    return primary
 
 # ---- Simple Helpers ----
 def require_auth(token: str | None) -> bool:

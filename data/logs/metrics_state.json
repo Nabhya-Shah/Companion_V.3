@@ -1,1 +1,1 @@
-{"models": {"llama-3.3-70b-versatile": {"count": 1, "latencies": [649.73]}, "dummy": {"count": 1, "latencies": []}}, "total_interactions": 2, "last_update_ts": 1756151476.8293884}
+{"models": {"dummy": {"count": 1, "latencies": []}}, "total_interactions": 1, "last_update_ts": 1756500487.7106931, "tools": {"total_invocations": 0, "by_name": {}, "blocked": 0, "failures": 0, "decision_types": {}}}
