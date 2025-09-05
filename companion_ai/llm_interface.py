@@ -160,7 +160,7 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
         return "I'm offline (LLM client unavailable)."
     try:
         complexity = core_config.classify_complexity(user_message)
-        auto_model = core_config.choose_model('chat', complexity=complexity)
+        auto_model, routing_meta = core_config.choose_model('chat', complexity=complexity, return_reason=True)
         chosen_model = model or auto_model
         logger.info(f"Using model={chosen_model} persona={persona} complexity={complexity}")
         if persona.lower() == 'companion':
@@ -232,6 +232,7 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
                 memory_meta,
                 model=chosen_model,
                 complexity=complexity,
+                routing=routing_meta,
                 latency_ms=round(latency_ms,2),
                 tool_used=tool_used,
                 tool_result_len=len(tool_result) if tool_result else None,

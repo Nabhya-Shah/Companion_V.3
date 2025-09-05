@@ -76,6 +76,42 @@ def get_memory():
         logger.error(f"Memory error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/pending_facts')
+def pending_facts():
+    try:
+        from companion_ai.core import config as core_config
+        if not getattr(core_config, 'ENABLE_FACT_APPROVAL', False):
+            return jsonify({'enabled': False, 'pending': []})
+        pending = db.list_pending_profile_facts()
+        return jsonify({'enabled': True, 'pending': pending})
+    except Exception as e:
+        logger.error(f"Pending facts error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/pending_facts/<int:pid>/approve', methods=['POST'])
+def approve_fact(pid: int):
+    try:
+        token = request.headers.get('X-API-TOKEN')
+        if not core_config.require_auth(token):
+            return jsonify({'error': 'Unauthorized'}), 401
+        ok = db.approve_profile_fact(pid)
+        return jsonify({'approved': ok})
+    except Exception as e:
+        logger.error(f"Approve fact error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/pending_facts/<int:pid>/reject', methods=['POST'])
+def reject_fact(pid: int):
+    try:
+        token = request.headers.get('X-API-TOKEN')
+        if not core_config.require_auth(token):
+            return jsonify({'error': 'Unauthorized'}), 401
+        ok = db.reject_profile_fact(pid)
+        return jsonify({'rejected': ok})
+    except Exception as e:
+        logger.error(f"Reject fact error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/tools')
 def tools():
     return jsonify({'tools': list_tools()})

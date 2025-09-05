@@ -108,10 +108,18 @@ class ConversationSession:
             if summary:
                 db.add_summary(summary, importance)
 
-            # Extract profile facts
+            # Extract profile facts (structured)
             facts = self._extract_facts_with_memory_ai(user_msg, ai_msg)
             for key, data in facts.items():
-                db.upsert_profile_fact(key, data['value'], data['confidence'])
+                db.upsert_profile_fact(
+                    key,
+                    data.get('value',''),
+                    data.get('confidence',0.5),
+                    source='exchange_analysis',
+                    evidence=data.get('evidence'),
+                    model_conf_label=data.get('conf_label'),
+                    justification=data.get('justification')
+                )
 
             # Generate insights
             insight = self._generate_insight_with_memory_ai(user_msg, ai_msg, importance)
@@ -188,35 +196,13 @@ Summary:"""
             return ""
     
     def _extract_facts_with_memory_ai(self, user_msg: str, ai_msg: str) -> Dict:
-        """Extract profile facts using memory AI"""
-        prompt = f"""Extract personal facts about the user. Return as JSON with confidence scores:
-
-User: {user_msg}
-AI: {ai_msg}
-
-Format: {{"fact_name": {{"value": "fact_value", "confidence": 0.8}}}}
-
-JSON:"""
-
+        """Extract profile facts using shared structured extractor."""
         try:
-            response = groq_memory_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=200
-            )
-            
-            import json
-            facts_text = response.choices[0].message.content.strip()
-            # Try to extract JSON
-            json_match = re.search(r'\{.*\}', facts_text, re.DOTALL)
-            if json_match:
-                return json.loads(json_match.group())
-                
+            from companion_ai.memory_ai import extract_smart_profile_facts
+            return extract_smart_profile_facts(user_msg, ai_msg)
         except Exception as e:
             logger.error(f"Memory AI fact extraction failed: {e}")
-        
-        return {}
+            return {}
     
     def _generate_insight_with_memory_ai(self, user_msg: str, ai_msg: str, importance: float) -> str:
         """Generate user insights using memory AI"""

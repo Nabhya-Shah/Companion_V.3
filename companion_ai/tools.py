@@ -94,4 +94,24 @@ def run_tool(name: str, arg: str) -> str:
         return 'unknown tool'
     return fn(arg)
 
+@tool('memory_insight')
+def tool_memory_insight(_: str) -> str:
+    """Generate a quick synthetic insight over last few summaries+insights (read-only)."""
+    try:
+        # dynamic import inside try to avoid circular dependency during module load
+        from companion_ai.llm_interface import generate_groq_response  # type: ignore
+        summaries = mem.get_latest_summary(3)
+        insights = mem.get_latest_insights(3)
+        profile = mem.get_all_profile_facts()
+        prompt = (
+            "You are generating a SINGLE concise actionable observation about the user based on provided data.\n"
+            "Focus on a helpful pattern or preference. Avoid repetition. Max 2 sentences.\n\n"
+            f"Profile facts: {profile}\nRecent summaries: {[s['summary_text'] for s in summaries]}\n"
+            f"Existing insights: {[i['insight_text'] for i in insights]}\n\nObservation:"
+        )
+        text = generate_groq_response(prompt) or '(no insight)'
+        return text.strip()
+    except Exception as e:
+        return f"memory_insight error: {e}"
+
 __all__ = ['list_tools', 'run_tool']

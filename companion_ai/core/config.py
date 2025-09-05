@@ -122,6 +122,9 @@ VERIFY_FACTS_SECOND_PASS = True # Second-pass heavy model verification of extrac
 ALWAYS_HEAVY_CHAT = False       # Force all chat on heavy model (developer showcase)
 AGGRESSIVE_ESCALATION = True    # Lower thresholds for heavy escalation
 HEAVY_MEMORY = True             # Use heavy model for important memory ops (summary/insight)
+ENABLE_FACT_APPROVAL = os.getenv("ENABLE_FACT_APPROVAL", "true").lower() in ("1","true","yes")  # Stage new profile facts for user approval
+FACT_AUTO_APPROVE = os.getenv("FACT_AUTO_APPROVE", "true").lower() in ("1","true","yes")       # Allow model to auto-approve certain facts
+FACT_AUTO_APPROVE_MIN_CONF = float(os.getenv("FACT_AUTO_APPROVE_MIN_CONF", "0.8"))  # Min confidence to auto-commit
 
 # ---- Model Capability Registry ----
 # Light metadata to support smarter routing and future observability. Values are heuristic.
@@ -180,6 +183,20 @@ MODEL_CAPABILITIES: dict[str, dict] = {
     },
 }
 
+# Models that are confirmed available (defensive runtime fallback). Adjust as provider evolves.
+KNOWN_AVAILABLE_MODELS = {
+    "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile",
+    "deepseek-r1-distill-llama-70b",
+}
+
+def safest_fallback() -> str:
+    """Return a model that is almost certainly present."""
+    if DEFAULT_CONVERSATION_MODEL in KNOWN_AVAILABLE_MODELS:
+        return DEFAULT_CONVERSATION_MODEL
+    # pick any known
+    return next(iter(KNOWN_AVAILABLE_MODELS))
+
 def model_capability_summary() -> dict:
     """Return safe subset of capability metadata for external /health display."""
     out = {}
@@ -200,57 +217,74 @@ FAST_MODEL = DEFAULT_CONVERSATION_MODEL  # usually llama-3.1-8b-instant
 def _resolve(model_name: str, fallback: str) -> str:
     return model_name if model_name in MODEL_CAPABILITIES else fallback
 
-def choose_model(purpose: str, importance: float = 0.0, complexity: int = 0) -> str:  # override earlier definition
-    """Aggressive smart routing.
-    purpose: 'chat' | 'summary' | 'facts' | 'insight' | 'reasoning'
-    importance: 0..1 (memory importance)
-    complexity: 0..3 heuristic
+def choose_model(purpose: str, importance: float = 0.0, complexity: int = 0, return_reason: bool = False):  # override earlier definition
+    """Aggressive smart routing with defensive fallback.
+
+    If return_reason True returns (model, reason_dict).
     """
-    # Hard override
+    reasons = {
+        'purpose': purpose,
+        'importance': importance,
+        'complexity': complexity,
+        'escalated': False,
+        'fallback_used': False,
+    }
+
     if ALWAYS_HEAVY_CHAT and purpose == 'chat':
-        return _resolve(HEAVY_MODEL, MODEL_ROLES.get('chat.primary', DEFAULT_CONVERSATION_MODEL))
+        model = _resolve(HEAVY_MODEL, MODEL_ROLES.get('chat.primary', DEFAULT_CONVERSATION_MODEL))
+        reasons['escalated'] = True
+    else:
+        primary = _resolve(SMART_PRIMARY_MODEL, MODEL_ROLES.get('chat.primary', DEFAULT_CONVERSATION_MODEL))
+        heavy = _resolve(HEAVY_MODEL, MODEL_ROLES.get('reasoning', primary))
+        fast = FAST_MODEL
 
-    primary = _resolve(SMART_PRIMARY_MODEL, MODEL_ROLES.get('chat.primary', DEFAULT_CONVERSATION_MODEL))
-    heavy = _resolve(HEAVY_MODEL, MODEL_ROLES.get('reasoning', primary))
-    fast = FAST_MODEL
+        if purpose == 'facts':
+            model = fast if fast in MODEL_CAPABILITIES else primary
+        elif purpose == 'summary':
+            if HEAVY_MEMORY and (importance >= 0.7 or (AGGRESSIVE_ESCALATION and importance >= 0.6 and complexity >=1)):
+                legacy_high = MODEL_ROLES.get('memory.summary_high')
+                if legacy_high and legacy_high != heavy:
+                    model = legacy_high
+                else:
+                    model = heavy
+                reasons['escalated'] = True
+            else:
+                model = primary if importance >= 0.4 else fast
+        elif purpose == 'insight':
+            if HEAVY_MEMORY and (importance >= 0.55 or complexity >= 2):
+                legacy_high = MODEL_ROLES.get('memory.summary_high')
+                if legacy_high and legacy_high != heavy:
+                    model = legacy_high
+                else:
+                    model = heavy
+                reasons['escalated'] = True
+            else:
+                model = fast if importance < 0.4 else primary
+        elif purpose == 'reasoning':
+            model = heavy
+        elif purpose == 'chat':
+            if complexity >= 2:
+                legacy_reasoning = MODEL_ROLES.get('reasoning')
+                if legacy_reasoning and legacy_reasoning != heavy:
+                    model = legacy_reasoning
+                else:
+                    model = heavy
+                reasons['escalated'] = True
+            elif AGGRESSIVE_ESCALATION and complexity >=1:
+                model = primary if primary != heavy else heavy
+            else:
+                model = primary
+        else:
+            model = primary
 
-    if purpose == 'facts':
-        # Keep extraction terse; use fast model first
-        return fast if fast in MODEL_CAPABILITIES else primary
+    # Defensive fallback if model unsupported by provider (e.g., 404 we saw during warmup)
+    if model not in KNOWN_AVAILABLE_MODELS:
+        reasons['fallback_used'] = True
+        model = safest_fallback()
 
-    if purpose == 'summary':
-        if HEAVY_MEMORY and (importance >= 0.7 or (AGGRESSIVE_ESCALATION and importance >= 0.6 and complexity >=1)):
-            legacy_high = MODEL_ROLES.get('memory.summary_high')
-            if legacy_high and legacy_high != heavy:
-                return legacy_high
-            return heavy
-        return primary if importance >= 0.4 else fast
-
-    if purpose == 'insight':
-        if HEAVY_MEMORY and (importance >= 0.55 or complexity >= 2):
-            legacy_high = MODEL_ROLES.get('memory.summary_high')
-            if legacy_high and legacy_high != heavy:
-                return legacy_high
-            return heavy
-        # Low importance -> fast (legacy expectation), else primary
-        return fast if importance < 0.4 else primary
-
-    if purpose == 'reasoning':
-        return heavy
-
-    if purpose == 'chat':
-        # Escalation triggers
-        if complexity >= 2:
-            legacy_reasoning = MODEL_ROLES.get('reasoning')
-            if legacy_reasoning and legacy_reasoning != heavy:
-                return legacy_reasoning
-            return heavy
-        if AGGRESSIVE_ESCALATION and complexity >=1:
-            return primary if primary != heavy else heavy
-        return primary
-
-    # Fallback
-    return primary
+    if return_reason:
+        return model, reasons
+    return model
 
 # ---- Simple Helpers ----
 def require_auth(token: str | None) -> bool:

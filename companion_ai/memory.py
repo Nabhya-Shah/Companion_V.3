@@ -68,6 +68,44 @@ def init_db():
             details TEXT
         )
     ''')
+
+    # Pending profile facts (for approval workflow)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS pending_profile_facts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            confidence REAL DEFAULT 1.0,
+            source TEXT DEFAULT 'conversation',
+            suggested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(key, value)
+        )
+    ''')
+
+    # --- Lightweight schema upgrades (idempotent) ---
+    # user_profile extra columns
+    for alter in [
+        "ALTER TABLE user_profile ADD COLUMN reaffirmations INTEGER DEFAULT 0",
+        "ALTER TABLE user_profile ADD COLUMN first_seen_ts TIMESTAMP",
+        "ALTER TABLE user_profile ADD COLUMN last_seen_ts TIMESTAMP",
+        "ALTER TABLE user_profile ADD COLUMN evidence TEXT"
+    ]:
+        try:
+            cursor.execute(alter)
+        except Exception:
+            pass
+    # pending_profile_facts extra columns
+    for alter in [
+        "ALTER TABLE pending_profile_facts ADD COLUMN model_conf_label TEXT",
+        "ALTER TABLE pending_profile_facts ADD COLUMN justification TEXT",
+        "ALTER TABLE pending_profile_facts ADD COLUMN evidence TEXT",
+        "ALTER TABLE pending_profile_facts ADD COLUMN status TEXT DEFAULT 'pending'",
+        "ALTER TABLE pending_profile_facts ADD COLUMN conflict_with TEXT"
+    ]:
+        try:
+            cursor.execute(alter)
+        except Exception:
+            pass
     
     conn.commit()
     conn.close()
@@ -104,8 +142,52 @@ def calculate_text_similarity(text1: str, text2: str) -> float:
     return len(intersection) / len(union)
 
 # Enhanced Profile functions
-def upsert_profile_fact(key: str, value: str, confidence: float = 1.0, source: str = 'conversation'):
-    """Insert or update profile fact with confidence scoring."""
+def upsert_profile_fact(key: str, value: str, confidence: float = 1.0, source: str = 'conversation', evidence: str | None = None,
+                        model_conf_label: str | None = None, justification: str | None = None):
+    """Insert or update profile fact.
+
+    Extended behaviors:
+      - If approval workflow enabled, optionally stage unless auto-approve threshold met.
+      - If fact exists with SAME value -> reaffirm (boost confidence, increment reaffirmations, update last_seen_ts).
+      - If fact exists with DIFFERENT value -> stage as proposed update (conflict) unless high-confidence override.
+    """
+    from companion_ai.core import config as core_config
+    if getattr(core_config, 'ENABLE_FACT_APPROVAL', False):
+        auto = getattr(core_config, 'FACT_AUTO_APPROVE', False) and confidence >= getattr(core_config, 'FACT_AUTO_APPROVE_MIN_CONF', 0.85)
+        # Check existing current value to detect conflict early
+        conn_chk = get_db_connection(); cur_chk = conn_chk.cursor()
+        try:
+            cur_chk.execute("SELECT value, confidence FROM user_profile WHERE key = ?", (key,))
+            row = cur_chk.fetchone()
+        finally:
+            conn_chk.close()
+        if row and row[0] != value and not auto:
+            # Stage as conflict update proposal
+            conn = get_db_connection(); cursor = conn.cursor()
+            try:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO pending_profile_facts (key, value, confidence, source, model_conf_label, justification, evidence, status, conflict_with)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'proposed_update', ?)
+                ''', (key, value, confidence, source, model_conf_label, justification, evidence, row[0]))
+                conn.commit()
+                print(f"⚠️ Conflict staged: {key} existing={row[0]} new={value} ({confidence:.2f})")
+            finally:
+                conn.close()
+            return
+        if not auto:
+            # Stage into pending table instead of immediate commit
+            conn = get_db_connection(); cursor = conn.cursor()
+            try:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO pending_profile_facts (key, value, confidence, source, model_conf_label, justification, evidence, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+                ''', (key, value, confidence, source, model_conf_label, justification, evidence))
+                conn.commit()
+                print(f"🕒 Staged profile fact for approval: {key}={value} ({confidence:.2f})")
+            finally:
+                conn.close()
+            return
+        print(f"✅ Auto-approved fact (confidence {confidence:.2f}): {key}={value}")
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -115,14 +197,24 @@ def upsert_profile_fact(key: str, value: str, confidence: float = 1.0, source: s
     
     if existing:
         existing_value, existing_confidence = existing
-        # If new confidence is higher or values are different, update
-        if confidence > existing_confidence or existing_value != value:
+        if existing_value == value:
+            # Reaffirmation path
+            new_conf = round(existing_confidence + 0.1 * (1 - existing_confidence), 4)
             cursor.execute('''
-                UPDATE user_profile 
-                SET value = ?, confidence = ?, last_updated = CURRENT_TIMESTAMP, source = ?
+                UPDATE user_profile
+                SET confidence = ?, reaffirmations = COALESCE(reaffirmations,0)+1, last_updated = CURRENT_TIMESTAMP,
+                    last_seen_ts = CURRENT_TIMESTAMP
+                WHERE key = ?
+            ''', (new_conf, key))
+            print(f"🔁 Reaffirmed profile fact: {key}={value} (confidence {existing_confidence:.2f}→{new_conf:.2f})")
+        else:
+            # Different value (should have been staged if approval on); treat as update override.
+            cursor.execute('''
+                UPDATE user_profile
+                SET value = ?, confidence = ?, last_updated = CURRENT_TIMESTAMP, source = ?, last_seen_ts = CURRENT_TIMESTAMP
                 WHERE key = ?
             ''', (value, confidence, source, key))
-            print(f"📝 Updated profile: {key} = {value} (confidence: {confidence:.2f})")
+            print(f"📝 Updated profile (override): {key} = {value} (confidence: {confidence:.2f})")
     else:
         cursor.execute('''
             INSERT INTO user_profile (key, value, confidence, source) 
@@ -148,6 +240,65 @@ def get_all_profile_facts() -> dict:
     results = cursor.fetchall()
     conn.close()
     return {row['key']: row['value'] for row in results}
+
+def list_pending_profile_facts() -> list[dict]:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, key, value, confidence, source, suggested_at FROM pending_profile_facts ORDER BY suggested_at DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+def get_stale_profile_facts(limit: int = 3) -> list[dict]:
+    """Return older facts with low reaffirmations to gently reaffirm in prompts.
+
+    Heuristic: order by (reaffirmations ASC, last_seen_ts/last_updated oldest) and limit.
+    """
+    conn = get_db_connection(); cur = conn.cursor()
+    try:
+        cur.execute('''
+            SELECT key, value, confidence, COALESCE(reaffirmations,0) as reaf,
+                   COALESCE(last_seen_ts,last_updated, first_seen_ts) as last_ts
+            FROM user_profile
+            ORDER BY reaf ASC, last_ts ASC
+            LIMIT ?
+        ''', (limit,))
+        rows = cur.fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+def approve_profile_fact(pending_id: int) -> bool:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT key, value, confidence, source FROM pending_profile_facts WHERE id = ?", (pending_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close(); return False
+    key, value, confidence, source = row
+    conn.close()
+    # Use normal upsert (will bypass staging if feature still enabled because of recursion guard)
+    from companion_ai.core import config as core_config
+    # Temporarily disable staging to commit
+    original = core_config.ENABLE_FACT_APPROVAL
+    setattr(core_config, 'ENABLE_FACT_APPROVAL', False)
+    try:
+        upsert_profile_fact(key, value, confidence, source)
+    finally:
+        setattr(core_config, 'ENABLE_FACT_APPROVAL', original)
+    # Remove pending entry
+    conn2 = get_db_connection(); cur2 = conn2.cursor()
+    cur2.execute("DELETE FROM pending_profile_facts WHERE id = ?", (pending_id,))
+    conn2.commit(); conn2.close()
+    return True
+
+def reject_profile_fact(pending_id: int) -> bool:
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("DELETE FROM pending_profile_facts WHERE id = ?", (pending_id,))
+    changed = cur.rowcount > 0
+    conn.commit(); conn.close(); return changed
 
 # Enhanced Summary functions with deduplication
 def add_summary(summary_text: str, relevance_score: float = 1.0):

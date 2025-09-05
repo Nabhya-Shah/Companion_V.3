@@ -43,12 +43,15 @@ async def update_memory_async(user_msg, ai_msg, context):
             if smart_facts:
                 for key, fact_data in smart_facts.items():
                     db.upsert_profile_fact(
-                        key, 
-                        fact_data['value'], 
-                        confidence=fact_data['confidence'],
-                        source='smart_analysis'
+                        key,
+                        fact_data['value'],
+                        confidence=fact_data.get('confidence', 0.5),
+                        source='smart_analysis',
+                        evidence=fact_data.get('evidence'),
+                        model_conf_label=fact_data.get('conf_label'),
+                        justification=fact_data.get('justification')
                     )
-                print(f"👤 Profile updated: {smart_facts}")
+                print(f"👤 Profile updated ({len(smart_facts)} facts)")
             
             # Generate contextual insight
             insight = memory_ai.generate_contextual_insight(user_msg, ai_msg, context, importance_score)

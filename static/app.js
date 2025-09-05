@@ -96,6 +96,32 @@ async function loadMemory() {
     const insightUl = document.getElementById('insightList');
     insightUl.innerHTML='';
     (data.insights||[]).forEach(s => { const li=document.createElement('li'); li.textContent=s.insight_text; insightUl.appendChild(li); });
+    // Pending facts
+    const pendingUl = document.getElementById('pendingFacts');
+    pendingUl.innerHTML='';
+    try {
+      const pr = await fetch('/api/pending_facts', { headers: authHeaders({}) });
+      const pdata = await pr.json();
+      if (pdata.enabled) {
+        document.getElementById('pendingBadge').textContent = `(${pdata.pending.length})`;
+        pdata.pending.forEach(p => {
+          const li = document.createElement('li');
+          li.innerHTML = `<span>${p.key}: ${p.value} (${p.confidence.toFixed(2)})</span> <button data-act="approve" data-id="${p.id}">✓</button> <button data-act="reject" data-id="${p.id}">✗</button>`;
+          pendingUl.appendChild(li);
+        });
+        pendingUl.querySelectorAll('button').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const id = btn.getAttribute('data-id');
+            const act = btn.getAttribute('data-act');
+            const ep = `/api/pending_facts/${id}/${act==='approve'?'approve':'reject'}`;
+            await fetch(ep, { method:'POST', headers: authHeaders({}) });
+            loadMemory();
+          });
+        });
+      } else {
+        document.getElementById('pendingBadge').textContent = '(disabled)';
+      }
+    } catch {}
   } catch {}
 }
 
@@ -133,6 +159,18 @@ async function loadHealth() {
       lines.push(`- ${m}: count=${info.count} avg=${info.avg_latency_ms}ms p95=${info.p95_latency_ms}ms`);
     });
     lines.push('');
+    if (data.metrics?.tools) {
+      const t = data.metrics.tools;
+      lines.push('Tools:');
+      lines.push(` total_invocations=${t.total_invocations} blocked=${t.blocked} failures=${t.failures}`);
+      if (t.by_name) {
+        Object.entries(t.by_name).forEach(([n,c])=>lines.push(`  - ${n}: ${c}`));
+      }
+      if (t.decision_types) {
+        lines.push(' decision_types: ' + Object.entries(t.decision_types).map(([k,v])=>`${k}=${v}`).join(', '));
+      }
+      lines.push('');
+    }
     lines.push('Memory: facts=' + data.memory.profile_facts + ' summaries=' + data.memory.summaries + ' insights=' + data.memory.insights);
   lines.push('Refreshed: ' + new Date().toLocaleTimeString());
   pre.textContent = lines.join('\n');

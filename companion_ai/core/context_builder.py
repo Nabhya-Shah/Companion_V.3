@@ -44,6 +44,8 @@ def build_system_prompt(user_message: str) -> str:
     mode = classify_mode(user_message)
     kw = extract_keywords(user_message, limit=4)
     profile = db.get_all_profile_facts()
+    # Add a small resurfacing sample of stale facts (not directly shown, but counted)
+    stale = db.get_stale_profile_facts(2)
     summaries = db.get_relevant_summaries(kw, 2) or db.get_latest_summary(1)
     insights = db.get_relevant_insights(kw, 2) or db.get_latest_insights(1)
 
@@ -51,6 +53,8 @@ def build_system_prompt(user_message: str) -> str:
     if profile:
         items = list(profile.items())[:4]
         mem_notes.append('profile: ' + '; '.join(f"{k}={v}" for k,v in items))
+    if stale:
+        mem_notes.append('consider_reaffirm: ' + '; '.join(f"{s['key']}?" for s in stale))
     if summaries:
         mem_notes.append('summaries: ' + ' || '.join(s['summary_text'] for s in summaries[:1]))
     if insights:

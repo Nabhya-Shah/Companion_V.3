@@ -36,7 +36,8 @@ def log_interaction(user_message: str,
                     latency_ms: Optional[float] = None,
                     tool_used: Optional[str] = None,
                     tool_result_len: Optional[int] = None,
-                    tool_blocked: Optional[bool] = None):
+                    tool_blocked: Optional[bool] = None,
+                    routing: Optional[Dict[str, Any]] = None):
     record = {
         'ts': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'user': user_message,
@@ -53,6 +54,8 @@ def log_interaction(user_message: str,
         record['complexity'] = complexity
     if latency_ms is not None:
         record['latency_ms'] = latency_ms
+    if routing:
+        record['routing'] = routing
     if tool_used:
         record['tool_used'] = tool_used
         if tool_result_len is not None:

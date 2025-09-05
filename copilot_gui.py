@@ -1039,10 +1039,13 @@ Try one of the quick actions above, or just start typing below!"""
                 if facts:
                     for key, fact_data in facts.items():
                         db.upsert_profile_fact(
-                            key, 
-                            fact_data['value'], 
-                            confidence=fact_data['confidence'],
-                            source='session_analysis'
+                            key,
+                            fact_data['value'],
+                            confidence=fact_data.get('confidence', 0.5),
+                            source='session_analysis',
+                            evidence=fact_data.get('evidence'),
+                            model_conf_label=fact_data.get('conf_label'),
+                            justification=fact_data.get('justification')
                         )
                     logger.info(f"Profile facts stored: {list(facts.keys())}")
                 

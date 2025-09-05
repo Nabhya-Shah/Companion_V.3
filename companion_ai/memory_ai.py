@@ -106,38 +106,109 @@ Respond with ONLY the importance score as a decimal number (e.g., 0.7):"""
     return 0.4  # Default moderate-low importance
 
 def extract_smart_profile_facts(user_msg: str, ai_msg: str) -> dict:
-    """Extract profile facts with confidence scoring."""
-    prompt = f"""Extract personal facts about the user from this conversation. For each fact, provide a confidence score (0.0-1.0).
+    """Extract structured profile facts with confidence + provenance.
 
-Return ONLY valid JSON in this exact format:
+    Returns dict keyed by fact key for backward compatibility:
+      {
+        "fact_key": {
+           "value": str,
+           "confidence": float,
+           "conf_label": "high|medium|low",
+           "evidence": str | None,
+           "justification": str | None
+        }, ...
+      }
+    """
+    prompt = f"""Extract personal facts explicitly stated or strongly implied by the user.
+
+Return ONLY valid JSON in this EXACT schema (no markdown, no commentary):
 {{
-    "facts": {{
-        "fact_key": {{"value": "fact_value", "confidence": 0.8}}
+  "facts": [
+    {{
+      "key": "kebab_case_fact_name",
+      "value": "fact value as concise phrase",
+      "confidence": 0.0-1.0,
+      "conf_label": "high|medium|low",
+      "evidence": "exact minimal quote or span from User/AI showing source",
+      "justification": "1 short sentence why this is a valid fact"
     }}
+  ]
 }}
 
+Label guidance:
+- high: confidence >= 0.85 and explicitly stated
+- medium: 0.6-0.84 or strong preference pattern
+- low: < 0.6 or weakly implied
+
+Discard trivia/greetings. Merge duplicates; prefer most explicit form.
+
+Conversation:
 User: {user_msg}
 AI: {ai_msg}
-
-Focus on:
-- Definitive personal information (high confidence)
-- Preferences and interests (medium confidence)
-- Implied characteristics (lower confidence)
 
 JSON:"""
 
     try:
-        response = generate_memory_response(prompt, temperature=0.2)
-        # Try to extract JSON from response
+        response = generate_memory_response(prompt, temperature=0.15)
+        if not response:
+            return {}
         import re
-        json_match = re.search(r'\{.*\}', response, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group())
-            return data.get('facts', {})
+        # Strip any <think> blocks if model adds them
+        response_clean = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
+        json_match = re.search(r'\{.*\}', response_clean, re.DOTALL)
+        if not json_match:
+            return {}
+        raw_json = json_match.group()
+        data = json.loads(raw_json)
+        facts_list = data.get('facts', [])
+        structured: dict = {}
+        if isinstance(facts_list, dict):  # backwards fallback if model used old format
+            for k, v in facts_list.items():
+                if not isinstance(v, dict):
+                    continue
+                confidence = float(v.get('confidence', 0.5) or 0.5)
+                label = v.get('conf_label')
+                if not label:
+                    label = 'high' if confidence >= 0.85 else 'medium' if confidence >= 0.6 else 'low'
+                structured[k] = {
+                    'value': v.get('value', ''),
+                    'confidence': confidence,
+                    'conf_label': label,
+                    'evidence': v.get('evidence'),
+                    'justification': v.get('justification')
+                }
+            return structured
+        if not isinstance(facts_list, list):
+            return {}
+        for item in facts_list:
+            if not isinstance(item, dict):
+                continue
+            key = item.get('key')
+            value = item.get('value')
+            if not key or not value:
+                continue
+            confidence = float(item.get('confidence', 0.5) or 0.5)
+            label = item.get('conf_label')
+            if not label:
+                label = 'high' if confidence >= 0.85 else 'medium' if confidence >= 0.6 else 'low'
+            evidence = item.get('evidence')
+            justification = item.get('justification')
+            # Basic sanitization / length caps
+            if evidence and len(evidence) > 180:
+                evidence = evidence[:177] + '...'
+            if justification and len(justification) > 160:
+                justification = justification[:157] + '...'
+            structured[key] = {
+                'value': value,
+                'confidence': confidence,
+                'conf_label': label,
+                'evidence': evidence,
+                'justification': justification
+            }
+        return structured
     except Exception as e:
         logger.error(f"Profile fact extraction failed: {str(e)}")
-    
-    return {}
+        return {}
 
 def generate_smart_summary(user_msg: str, ai_msg: str, importance_score: float) -> str:
     """Generate a contextual summary based on importance."""
