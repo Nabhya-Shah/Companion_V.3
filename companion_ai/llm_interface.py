@@ -177,7 +177,128 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
             mode = 'legacy'
             memory_meta = None
         start_t = time.perf_counter()
-        first_output = generate_model_response(user_message, system_prompt, chosen_model)
+        # Optional ensemble deep reasoning (best-of-two) when complexity high
+        first_output = None
+        ensemble_meta = None
+        if (core_config.ENABLE_ENSEMBLE and complexity >= 2 and persona.lower() == 'companion' and not model):
+            try:
+                # Build candidate model list (three-model trio: smart(120b), heavy(r1), alt(kimi))
+                trio = []
+                base_smart = core_config.SMART_PRIMARY_MODEL
+                heavy_primary = core_config.HEAVY_MODEL
+                # Always include kimi if available
+                kimi = None
+                for m in getattr(core_config, 'HEAVY_ALTERNATES', []):
+                    if 'kimi' in m:
+                        kimi = m
+                        break
+                if core_config.ENSEMBLE_CANDIDATES >= 2:
+                    trio.append(base_smart)
+                    trio.append(heavy_primary if heavy_primary != base_smart else core_config.FAST_MODEL)
+                if core_config.ENSEMBLE_CANDIDATES >= 3 and kimi and kimi not in trio:
+                    trio.append(kimi)
+                # Fallback ensure uniqueness
+                trio = [m for i,m in enumerate(trio) if m and m not in trio[:i]]
+                cand_data = []
+                for mname in trio:
+                    try:
+                        txt = generate_model_response(user_message, system_prompt, mname)
+                    except Exception as ce:
+                        txt = f"(generation failed for {mname}: {ce})"
+                    cand_data.append({'model': mname, 'text': txt, 'chars': len(txt)})
+                judge_model = base_smart  # use strongest generalist as judge
+                # Judge scoring JSON
+                judge_instr = (
+                    "You are an impartial evaluator. Score each candidate answer for the user's message on: correctness, completeness, clarity, fidelity to instructions. "
+                    "Return STRICT JSON: {\"candidates\":[{\"index\":i,\"score\":0-10,\"reasons\":[...] }...], \"best_index\":i, \"confidence\":0.0-1.0 }. No extra text."
+                )
+                # Truncate system prompt for token conservation
+                judge_prompt_lines = [f"User message:\n{user_message}", "System (truncated):", system_prompt[:1000], "Candidates:"]
+                for idx, c in enumerate(cand_data):
+                    judge_prompt_lines.append(f"[Candidate {idx} model={c['model']}]\n{c['text'][:4000]}")
+                judge_prompt_lines.append(judge_instr + "\nJSON:")
+                judge_prompt = "\n\n".join(judge_prompt_lines)
+                judge_raw = generate_model_response(judge_prompt, "You are a strict JSON judge.", judge_model)
+                chosen_index = 0
+                rationale = ""
+                confidence = None
+                import re, json as _json
+                try:
+                    match = re.search(r'\{.*\}', judge_raw, re.DOTALL)
+                    if match:
+                        parsed = _json.loads(match.group())
+                        if isinstance(parsed, dict):
+                            if isinstance(parsed.get('candidates'), list):
+                                # pick highest score if best_index missing
+                                if 'best_index' in parsed:
+                                    chosen_index = int(parsed['best_index']) if parsed['best_index'] in range(len(cand_data)) else 0
+                                else:
+                                    scored = [(c.get('score',0), c.get('index',i)) for i,c in enumerate(parsed['candidates'])]
+                                    scored.sort(reverse=True)
+                                    chosen_index = scored[0][1]
+                                confidence = parsed.get('confidence')
+                            rationale = (parsed.get('candidates',[{}])[chosen_index].get('reasons') or [])
+                            if isinstance(rationale, list):
+                                rationale = '; '.join(rationale)[:220]
+                except Exception:
+                    pass
+                # Strategy handling
+                selected_text = cand_data[chosen_index]['text']
+                performed_refine = False
+                refine_gaps = []
+                refine_added_chars = 0
+                token_budget_meta = {}
+                if 'refine' in core_config.ENSEMBLE_MODE:
+                    base_len = len(selected_text.split())
+                    allowed_extra = int(base_len * core_config.ENSEMBLE_REFINE_EXPANSION)
+                    if allowed_extra < 60:
+                        allowed_extra = 60  # floor
+                    if allowed_extra > core_config.ENSEMBLE_REFINE_HARD_CAP:
+                        allowed_extra = core_config.ENSEMBLE_REFINE_HARD_CAP
+                    token_budget_meta = {'base_words': base_len, 'refine_allowed_words': allowed_extra}
+                    critique_prompt = (
+                        "User question:\n" + user_message + "\n\nCurrent answer:\n" + selected_text + "\n\nCritique the answer. Return JSON only: {\"gaps\":[...],\"needs_revision\":true|false}."
+                    )
+                    critique_raw = generate_model_response(critique_prompt, "You are a terse JSON critic.", judge_model)
+                    needs_revision = False
+                    try:
+                        cmatch = re.search(r'\{.*\}', critique_raw, re.DOTALL)
+                        if cmatch:
+                            cparsed = _json.loads(cmatch.group())
+                            if isinstance(cparsed, dict):
+                                refine_gaps = cparsed.get('gaps', []) if isinstance(cparsed.get('gaps'), list) else []
+                                needs_revision = bool(cparsed.get('needs_revision')) and len(refine_gaps) > 0
+                    except Exception:
+                        pass
+                    if needs_revision:
+                        refine_prompt = (
+                            f"User: {user_message}\nImprove the prior answer by addressing these gaps: {refine_gaps}. "
+                            f"Do NOT hallucinate new unrelated info. Keep style consistent. Revised answer:" )
+                        improved = generate_model_response(refine_prompt, system_prompt, judge_model)
+                        # Basic token expansion guard (approx by words)
+                        if len(improved.split()) - base_len <= allowed_extra:
+                            selected_text = improved
+                            performed_refine = True
+                            refine_added_chars = max(0, len(improved) - len(cand_data[chosen_index]['text']))
+                first_output = selected_text
+                ensemble_meta = {
+                    'ensemble': True,
+                    'mode': core_config.ENSEMBLE_MODE,
+                    'candidates': [ {'model': c['model'], 'chars': c['chars']} for c in cand_data ],
+                    'judge_model': judge_model,
+                    'chosen_index': chosen_index,
+                    'confidence': confidence,
+                    'rationale': rationale,
+                    'refined': performed_refine,
+                    'refine_gap_count': len(refine_gaps),
+                    'refine_added_chars': refine_added_chars,
+                    'token_budget': token_budget_meta
+                }
+                routing_meta.update(ensemble_meta)
+            except Exception as ee:
+                logger.debug(f"Ensemble path failed, falling back single model: {ee}")
+        if first_output is None:
+            first_output = generate_model_response(user_message, system_prompt, chosen_model)
         tool_used = None
         tool_result = None
         final_output = first_output

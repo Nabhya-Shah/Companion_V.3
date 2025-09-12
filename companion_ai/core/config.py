@@ -111,20 +111,31 @@ CONVERSATION_MODEL_CONFIG = ModelConfig(name=DEFAULT_CONVERSATION_MODEL)
 MEMORY_MODEL_CONFIG = ModelConfig(name=MEMORY_FAST_MODEL, temperature=0.3)
 
 # ---- Feature Flags (Phase gating) ----
-ENABLE_TOOL_CALLING = False  # Will turn on in later phases
-ENABLE_STREAMING = False     # Planned Phase 3
-ENABLE_FTS = True            # Phase 0 quick win placeholder
-ENABLE_PROMPT_CACHING = True # Use Groq prompt caching when available
-ENABLE_STRUCTURED_FACTS = True # Use structured outputs for fact extraction if SDK supports
-ENABLE_CAPABILITY_ROUTER = True # Use capability metadata to inform selection (non-breaking initial)
-ENABLE_AUTO_TOOLS = True       # Allow heuristic autonomous tool invocation
-VERIFY_FACTS_SECOND_PASS = True # Second-pass heavy model verification of extracted facts
-ALWAYS_HEAVY_CHAT = False       # Force all chat on heavy model (developer showcase)
-AGGRESSIVE_ESCALATION = True    # Lower thresholds for heavy escalation
-HEAVY_MEMORY = True             # Use heavy model for important memory ops (summary/insight)
-ENABLE_FACT_APPROVAL = os.getenv("ENABLE_FACT_APPROVAL", "true").lower() in ("1","true","yes")  # Stage new profile facts for user approval
-FACT_AUTO_APPROVE = os.getenv("FACT_AUTO_APPROVE", "true").lower() in ("1","true","yes")       # Allow model to auto-approve certain facts
-FACT_AUTO_APPROVE_MIN_CONF = float(os.getenv("FACT_AUTO_APPROVE_MIN_CONF", "0.8"))  # Min confidence to auto-commit
+ENABLE_TOOL_CALLING = False   # Legacy placeholder
+ENABLE_STREAMING = False      # Planned Phase 3 (token streaming UX)
+ENABLE_FTS = True             # Placeholder for future full-text search
+ENABLE_PROMPT_CACHING = True  # Use provider prompt caching
+ENABLE_STRUCTURED_FACTS = True
+ENABLE_CAPABILITY_ROUTER = True
+ENABLE_AUTO_TOOLS = True
+VERIFY_FACTS_SECOND_PASS = True
+ALWAYS_HEAVY_CHAT = False
+AGGRESSIVE_ESCALATION = True
+HEAVY_MEMORY = True
+ENABLE_FACT_APPROVAL = os.getenv("ENABLE_FACT_APPROVAL", "true").lower() in ("1","true","yes")
+FACT_AUTO_APPROVE = os.getenv("FACT_AUTO_APPROVE", "true").lower() in ("1","true","yes")
+FACT_AUTO_APPROVE_MIN_CONF = float(os.getenv("FACT_AUTO_APPROVE_MIN_CONF", "0.8"))
+
+# New flags
+ENABLE_ENSEMBLE = os.getenv("ENABLE_ENSEMBLE", "false").lower() in ("1","true","yes")  # Multi-model ensemble reasoning
+# Strategy options: choose | combine | choose_refine | combine_refine | refine_only
+ENSEMBLE_MODE = os.getenv("ENSEMBLE_MODE", "choose_refine")
+ENSEMBLE_CANDIDATES = int(os.getenv("ENSEMBLE_CANDIDATES", "3"))  # number of candidate model outputs (2 or 3 currently supported)
+ENSEMBLE_REFINE_EXPANSION = float(os.getenv("ENSEMBLE_REFINE_EXPANSION", "0.25"))  # +25% token allowance for refinement
+ENSEMBLE_REFINE_HARD_CAP = int(os.getenv("ENSEMBLE_REFINE_HARD_CAP", "300"))  # absolute cap tokens for refine stage
+ENSEMBLE_MAX_TOTAL_FACTOR = float(os.getenv("ENSEMBLE_MAX_TOTAL_FACTOR", "2.5"))  # total token budget factor (candidates+judge+refine)
+ENABLE_COMPOUND_MODELS = os.getenv("ENABLE_COMPOUND_MODELS", "false").lower() in ("1","true","yes")  # groq/compound models
+ENABLE_EXPERIMENTAL_MODELS = os.getenv("ENABLE_EXPERIMENTAL_MODELS", "false").lower() in ("1","true","yes")  # qwen/moonshot
 
 # ---- Model Capability Registry ----
 # Light metadata to support smarter routing and future observability. Values are heuristic.
@@ -161,7 +172,8 @@ MODEL_CAPABILITIES: dict[str, dict] = {
         "roles": ["reasoning","analysis"]
     },
     # Newly exposed Groq GPT-OSS models (names tentative — adjust if provider differs)
-    "gpt-oss-20b": {
+    # Fully-qualified GPT-OSS IDs (Groq naming uses openai/ prefix)
+    "openai/gpt-oss-20b": {
         "speed": 2,
         "quality": 4,
         "cost_weight": 2,
@@ -171,7 +183,7 @@ MODEL_CAPABILITIES: dict[str, dict] = {
         "default_temperature": 0.8,
         "roles": ["chat.primary","summary.standard","insight","facts"]
     },
-    "gpt-oss-120b": {
+    "openai/gpt-oss-120b": {
         "speed": 3,  # empirically still fast on Groq infra
         "quality": 5,
         "cost_weight": 5,
@@ -181,6 +193,46 @@ MODEL_CAPABILITIES: dict[str, dict] = {
         "default_temperature": 0.75,
         "roles": ["chat.heavy","reasoning","insight.high"]
     },
+    # Experimental (enable via ENABLE_EXPERIMENTAL_MODELS)
+    "qwen/qwen3-32b": {
+        "speed": 3,
+        "quality": 4,
+        "cost_weight": 2,
+        "tier": "experimental_balanced",
+        "experimental": True,
+        "roles": ["chat.primary","summary.standard"],
+        "default_temperature": 0.75,
+        "supports_reasoning_effort": False,
+        "supports_reasoning_field": False
+    },
+    "moonshotai/kimi-k2-0905": {
+        "speed": 4,
+        "quality": 4,
+        "cost_weight": 3,
+        "tier": "experimental_long_context",
+        "experimental": True,
+        "roles": ["summary.high","reasoning"],
+        "default_temperature": 0.7,
+        "supports_reasoning_effort": False,
+        "supports_reasoning_field": False
+    },
+    # Compound (agentic) models (enable via ENABLE_COMPOUND_MODELS)
+    "groq/compound": {
+        "speed": 3,
+        "quality": 5,
+        "cost_weight": 5,
+        "tier": "agentic_full",
+        "agentic": True,
+        "roles": ["agent.compound"]
+    },
+    "groq/compound-mini": {
+        "speed": 2,
+        "quality": 4,
+        "cost_weight": 3,
+        "tier": "agentic_light",
+        "agentic": True,
+        "roles": ["agent.compound"]
+    },
 }
 
 # Models that are confirmed available (defensive runtime fallback). Adjust as provider evolves.
@@ -188,6 +240,9 @@ KNOWN_AVAILABLE_MODELS = {
     "llama-3.1-8b-instant",
     "llama-3.3-70b-versatile",
     "deepseek-r1-distill-llama-70b",
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+    "moonshotai/kimi-k2-0905",  # include kimi in available set for ensemble
 }
 
 def safest_fallback() -> str:
@@ -210,8 +265,12 @@ def model_capability_summary() -> dict:
     return out
 
 # ---- Adaptive Routing (aggressive-smart profile) ----
-SMART_PRIMARY_MODEL = "gpt-oss-20b"
-HEAVY_MODEL = "gpt-oss-120b"
+SMART_PRIMARY_MODEL = "openai/gpt-oss-120b"  # user preference: smartest default generalist
+HEAVY_MODEL = "deepseek-r1-distill-llama-70b"  # distinct heavy reasoner baseline
+HEAVY_ALTERNATES = [
+    "moonshotai/kimi-k2-0905",  # long-context / alternative reasoning perspective
+    "openai/gpt-oss-120b"       # allow smart model to act as heavy fallback if needed
+]
 FAST_MODEL = DEFAULT_CONVERSATION_MODEL  # usually llama-3.1-8b-instant
 
 def _resolve(model_name: str, fallback: str) -> str:

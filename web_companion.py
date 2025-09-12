@@ -202,6 +202,55 @@ def health():
 def config_info():
     return jsonify({'auth_required': bool(core_config.API_AUTH_TOKEN)})
 
+@app.route('/api/models')
+def models_info():
+    """Return structured model + routing + ensemble configuration metadata.
+
+    This endpoint is read-only and exposes only non-sensitive configuration
+    needed by the UI for transparency / debugging. If an auth token is
+    configured, it can be optionally supplied but isn't required (similar to
+    /api/health). Adjust to enforce auth if later desired.
+    """
+    try:
+        capability_summary = core_config.model_capability_summary()
+        data = {
+            'roles': {
+                'SMART_PRIMARY_MODEL': getattr(core_config, 'SMART_PRIMARY_MODEL', None),
+                'HEAVY_MODEL': getattr(core_config, 'HEAVY_MODEL', None),
+                'HEAVY_ALTERNATES': getattr(core_config, 'HEAVY_ALTERNATES', []),
+                'FAST_MODEL': getattr(core_config, 'FAST_MODEL', core_config.DEFAULT_CONVERSATION_MODEL),
+            },
+            'routing': {
+                'aggressive_escalation': getattr(core_config, 'AGGRESSIVE_ESCALATION', False),
+                'always_heavy_chat': getattr(core_config, 'ALWAYS_HEAVY_CHAT', False),
+                'heavy_memory': getattr(core_config, 'HEAVY_MEMORY', False),
+            },
+            'ensemble': {
+                'enabled': getattr(core_config, 'ENABLE_ENSEMBLE', False),
+                'mode': getattr(core_config, 'ENSEMBLE_MODE', None),
+                'candidates': getattr(core_config, 'ENSEMBLE_CANDIDATES', None),
+                'refine': {
+                    'expansion': getattr(core_config, 'ENSEMBLE_REFINE_EXPANSION', None),
+                    'hard_cap': getattr(core_config, 'ENSEMBLE_REFINE_HARD_CAP', None),
+                    'max_total_factor': getattr(core_config, 'ENSEMBLE_MAX_TOTAL_FACTOR', None)
+                }
+            },
+            'capabilities': capability_summary,
+            'available': sorted(list(getattr(core_config, 'KNOWN_AVAILABLE_MODELS', []))),
+            'flags': {
+                'experimental_models': getattr(core_config, 'ENABLE_EXPERIMENTAL_MODELS', False),
+                'compound_models': getattr(core_config, 'ENABLE_COMPOUND_MODELS', False),
+                'auto_tools': getattr(core_config, 'ENABLE_AUTO_TOOLS', False),
+                'prompt_caching': getattr(core_config, 'ENABLE_PROMPT_CACHING', False),
+                'fact_approval': getattr(core_config, 'ENABLE_FACT_APPROVAL', False),
+                'verify_facts_second_pass': getattr(core_config, 'VERIFY_FACTS_SECOND_PASS', False),
+            }
+        }
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"Models info error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 def open_browser():
     time.sleep(1.5)
     webbrowser.open('http://localhost:5000')
