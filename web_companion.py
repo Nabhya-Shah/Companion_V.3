@@ -16,6 +16,7 @@ from companion_ai import memory as db
 from companion_ai.tts_manager import tts_manager
 from companion_ai.tools import run_tool, list_tools
 from companion_ai.core import metrics
+from companion_ai import memory as mem
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -207,6 +208,16 @@ def open_browser():
 
 def run_web(host: str = 'localhost', port: int = 5000, open_browser_flag: bool = True):
     print(f"Starting Companion AI Web Portal on http://{host}:{port}")
+    # Start background scheduler (decay + resurfacing)
+    def _bg_scheduler():
+        while True:
+            try:
+                mem.decay_profile_confidence()
+                mem.touch_stale_facts(limit=2)
+            except Exception as e:
+                logger.debug(f"BG scheduler error: {e}")
+            time.sleep(300)  # every 5 minutes
+    threading.Thread(target=_bg_scheduler, daemon=True).start()
     if open_browser_flag:
         threading.Thread(target=open_browser, daemon=True).start()
     app.run(debug=False, host=host, port=port)

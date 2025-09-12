@@ -19,7 +19,10 @@ _state: Dict[str, Any] = {
         'by_name': {},        # name -> count
         'blocked': 0,         # cooldown or rejection
         'failures': 0,
-        'decision_types': {}  # e.g. model_directive, heuristic_override
+        'decision_types': {},  # e.g. model_directive, heuristic_override
+        'skill': {            # basic EMA skill scoring per tool
+            'by_name': {}     # name -> {'score': float, 'uses': int, 'successes': int}
+        }
     }
 }
 _LATENCY_CAP = 200  # keep last 200 latencies per model
@@ -71,6 +74,15 @@ def record_tool(name: str, success: bool = True, blocked: bool = False, decision
             if not success:
                 t['failures'] += 1
         t['decision_types'][decision_type] = t['decision_types'].get(decision_type, 0) + 1
+        # Update skill EMA (only when not blocked)
+        if not blocked:
+            s = t['skill']['by_name'].setdefault(name, {'score': 0.5, 'uses': 0, 'successes': 0})
+            s['uses'] += 1
+            if success:
+                s['successes'] += 1
+            obs = 1.0 if success else 0.0
+            # EMA smoothing
+            s['score'] = round(0.7 * s['score'] + 0.3 * obs, 4)
         _ensure_dir()
         try:
             with open(_STATE_FILE, 'w', encoding='utf-8') as f:
@@ -78,7 +90,21 @@ def record_tool(name: str, success: bool = True, blocked: bool = False, decision
         except Exception:
             pass
 
-__all__ = ['update', 'snapshot', 'record_tool']
+def get_tool_skill(name: str) -> float:
+    with _lock:
+        return _state['tools']['skill']['by_name'].get(name, {}).get('score', 0.5)
+
+def should_allow_tool(name: str, min_uses: int = 5, threshold: float = 0.3) -> bool:
+    with _lock:
+        entry = _state['tools']['skill']['by_name'].get(name)
+        if not entry:
+            return True  # no history -> allow
+        # gate only after some observations
+        if entry.get('uses', 0) < min_uses:
+            return True
+        return entry.get('score', 0.5) >= threshold
+
+__all__ = ['update', 'snapshot', 'record_tool', 'get_tool_skill', 'should_allow_tool']
 
 def _pct(values: list[float], p: float) -> float:
     if not values:

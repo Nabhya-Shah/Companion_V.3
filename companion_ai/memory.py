@@ -638,6 +638,38 @@ def smart_memory_cleanup():
     print(f"🧠 Cleanup complete. Stats: {stats['summaries']} summaries, {stats['insights']} insights, {stats['profile_facts']} profile facts")
     return stats
 
+# --- Confidence Decay & Reaffirmation Scheduler Helpers ---
+def decay_profile_confidence(rate: float = 0.005, floor: float = 0.2):
+    """Apply a tiny decay to confidence for facts not seen recently.
+
+    This motivates reaffirmation; core facts are protected by smart_management.
+    """
+    conn = get_db_connection(); cur = conn.cursor()
+    try:
+        cur.execute('''
+            UPDATE user_profile
+            SET confidence = MAX(?, confidence - ?)
+            WHERE (last_seen_ts IS NULL OR last_seen_ts < datetime('now','-7 days'))
+        ''', (floor, rate))
+        conn.commit()
+    finally:
+        conn.close()
+
+def touch_stale_facts(limit: int = 3):
+    """Mark a few stale facts as recently considered to surface in prompts."""
+    stale = get_stale_profile_facts(limit)
+    if not stale:
+        return 0
+    conn = get_db_connection(); cur = conn.cursor(); n=0
+    try:
+        for row in stale:
+            cur.execute('UPDATE user_profile SET last_seen_ts = CURRENT_TIMESTAMP WHERE key = ?', (row['key'],))
+            n += 1
+        conn.commit()
+        return n
+    finally:
+        conn.close()
+
 def clear_all_memory():
     """Clear all memory data from the database."""
     conn = get_db_connection()

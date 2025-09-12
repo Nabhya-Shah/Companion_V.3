@@ -191,6 +191,31 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
                     name = name.strip().lower()
                     arg = arg.strip()
                     if name in list_tools():
+                        # Skill gating (allow learning period, then gate low-skill tools)
+                        if not core_metrics.should_allow_tool(name):
+                            core_metrics.record_tool(name, success=True, blocked=True, decision_type='skill_gate')
+                            final_output = f"(Skipped low-skill {name}) " + first_output
+                            output = final_output
+                            latency_ms = (time.perf_counter() - start_t) * 1000.0
+                            # log and return
+                            try:
+                                log_interaction(
+                                    user_message,
+                                    output,
+                                    mode,
+                                    system_prompt,
+                                    memory_meta,
+                                    model=chosen_model,
+                                    complexity=complexity,
+                                    routing=routing_meta,
+                                    latency_ms=round(latency_ms,2),
+                                    tool_used=name,
+                                    tool_result_len=None,
+                                    tool_blocked=True
+                                )
+                            except Exception as log_err:
+                                logger.debug(f"Logging failed: {log_err}")
+                            return output
                         # Cooldown suppression (simple in-memory cache)
                         _tool_cache = getattr(generate_response, '_recent_tools', {})
                         now = _time.time()
@@ -210,7 +235,7 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
                             tool_result = run_tool(name, arg)
                             _tool_cache[key] = {'ts': now}
                             setattr(generate_response, '_recent_tools', _tool_cache)
-                            core_metrics.record_tool(name, success=True, blocked=False)
+                            core_metrics.record_tool(name, success=True, blocked=False, decision_type='model_directive')
                             follow_sys = system_prompt + f"\n\nTool {name} result (read-only):\n{tool_result}\nNow provide the final answer to the user (no TOOL: prefix)."
                             final_output = generate_model_response(user_message, follow_sys, chosen_model)
                     else:

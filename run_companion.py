@@ -104,6 +104,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None):
     ns = parse_args(argv or sys.argv[1:])
     ensure_env()
+    # Start background scheduler for decay/resurfacing (daemon)
+    try:
+        import threading, time as _t
+        def _bg():
+            while True:
+                try:
+                    mem.decay_profile_confidence()
+                    mem.touch_stale_facts(limit=2)
+                except Exception:
+                    pass
+                _t.sleep(300)
+        threading.Thread(target=_bg, daemon=True).start()
+    except Exception:
+        pass
 
     if getattr(ns, 'debug', False):
         print('[DEBUG] Python:', sys.version)
