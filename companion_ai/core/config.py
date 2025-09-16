@@ -289,7 +289,15 @@ def choose_model(purpose: str, importance: float = 0.0, complexity: int = 0, ret
         'fallback_used': False,
     }
 
-    if ALWAYS_HEAVY_CHAT and purpose == 'chat':
+    # Experimental compound agent path (placeholder). If user explicitly requests 'compound'
+    # or purpose flagged and compound models enabled, route to compound model.
+    if ENABLE_COMPOUND_MODELS and purpose in ('compound','agentic'):
+        compound_pref = 'groq/compound'
+        if compound_pref not in MODEL_CAPABILITIES and 'groq/compound-mini' in MODEL_CAPABILITIES:
+            compound_pref = 'groq/compound-mini'
+        model = _resolve(compound_pref, MODEL_ROLES.get('chat.primary', DEFAULT_CONVERSATION_MODEL))
+        reasons['escalated'] = True
+    elif ALWAYS_HEAVY_CHAT and purpose == 'chat':
         model = _resolve(HEAVY_MODEL, MODEL_ROLES.get('chat.primary', DEFAULT_CONVERSATION_MODEL))
         reasons['escalated'] = True
     else:

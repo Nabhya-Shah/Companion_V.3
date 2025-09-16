@@ -9,20 +9,9 @@
 <body>
   <div id="app-root">
     <header class="topbar">
-      <div class="brand">Companion<span class="accent">AI</span></div>
+      <div class="brand">Companion<span class="accent">AI</span><span class="tag">personal</span></div>
       <div class="controls">
-        <input id="tokenInput" placeholder="API Token" style="width:120px;display:none;" />
-        <select id="personaSelect">
-          <option value="Companion" selected>Companion</option>
-          <option value="Aether">Aether</option>
-          <option value="Lilith">Lilith</option>
-        </select>
-        <select id="modelSelect">
-          <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
-          <option value="llama-3.3-70b-versatile" selected>llama-3.3-70b-versatile</option>
-          <option value="deepseek-r1-distill-llama-70b">deepseek-r1-distill-llama-70b</option>
-        </select>
-  <button id="healthBtn" title="Refresh Health">Health</button>
+        <button id="healthBtn" title="Refresh Metrics">Refresh</button>
       </div>
     </header>
     <main class="layout">
@@ -30,19 +19,27 @@
       <aside class="side">
         <nav class="tabs">
           <button class="tab active" data-tab="memory">Memory</button>
+          <button class="tab" data-tab="models">Models</button>
           <button class="tab" data-tab="search">Search</button>
           <button class="tab" data-tab="metrics">Metrics</button>
         </nav>
         <div class="tabpanes">
           <div class="pane active" id="pane-memory">
             <h3>Profile Facts</h3>
-            <ul id="profileList" class="kv"></ul>
+            <ul id="profileList" class="kv facts"></ul>
+            <div class="legend" style="font-size:11px;color:#768390;margin:4px 0 10px;">Confidence: <span class="badge conf-high">high</span> <span class="badge conf-med">medium</span> <span class="badge conf-low">low</span> &nbsp;• click fact to expand provenance</div>
             <h3 style="margin-top:1em;">Pending Facts <span id="pendingBadge" style="font-size:0.7em;color:#888;"></span></h3>
             <ul id="pendingFacts" class="kv"></ul>
             <h3>Summaries</h3>
             <ul id="summaryList" class="bullets"></ul>
             <h3>Insights</h3>
             <ul id="insightList" class="bullets"></ul>
+          </div>
+          <div class="pane" id="pane-models">
+            <h3>Routing & Ensemble</h3>
+            <div id="modelsPanel" class="models-panel"></div>
+            <h3 style="margin-top:1em;">Recent Routing</h3>
+            <div id="recentRouting" class="recent"></div>
           </div>
           <div class="pane" id="pane-search">
             <div class="searchBox">
@@ -59,7 +56,7 @@
     </main>
     <footer class="composer">
       <div class="composer-col">
-        <textarea id="userInput" rows="1" placeholder="Type your message... /help for commands" spellcheck="false"></textarea>
+        <textarea id="userInput" rows="1" placeholder="Type your message... /help for commands" spellcheck="false" autofocus></textarea>
         <div id="cmdHints" class="cmd-hints" style="display:none;"></div>
       </div>
       <div class="composer-actions">

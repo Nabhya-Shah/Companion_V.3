@@ -9,7 +9,8 @@ An adaptive AI companion focused on high‑quality reasoning, authentic personal
 - **Confidence Lifecycle**: Confidence decay + resurfacing prompts to reaffirm facts
 - **Structured Facts**: Each fact stores value, confidence, evidence, justification, reaffirmations
 - **Pending Fact Approval** (flagged): Optional human approval queue before commit
-- **Second-Pass Verification (Planned)**: Heavy model validation for low-confidence or conflicting facts
+- **Second-Pass Verification (Active)**: Heavy model validates low-confidence facts before staging/commit
+- **Provenance UI**: Web memory panel shows confidence tier, reaffirmations, timestamps, evidence (expandable)
 - **Session Logging**: JSONL conversation log with routing + ensemble metadata
 
 ### 💬 **Adaptive Persona Core**
@@ -48,6 +49,7 @@ An adaptive AI companion focused on high‑quality reasoning, authentic personal
 
 ### 📊 **Observability & Transparency**
 - `/api/models` exposes roles, capabilities, flags, ensemble configuration
+- `/api/routing/recent` streams recent routing & ensemble decisions
 - `/api/health` returns memory stats, metrics snapshot
 - JSONL logs in `data/logs/` with hash of system prompt & latency
 - Tool usage metrics (success, gating decisions)
@@ -211,7 +213,7 @@ ENSEMBLE_REFINE_HARD_CAP=300
 | ENABLE_ENSEMBLE | Activate multi-model candidate generation + judge selection |
 | ENABLE_FACT_APPROVAL | Manual approval queue for new profile facts |
 | FACT_AUTO_APPROVE | Auto-approve high-confidence facts (>= threshold) |
-| VERIFY_FACTS_SECOND_PASS | Plan: heavy model verification stage |
+| VERIFY_FACTS_SECOND_PASS | Heavy model verification for low-confidence facts |
 | ENABLE_AUTO_TOOLS | Allow TOOL: directives from model |
 | ENABLE_PROMPT_CACHING | Provider prompt caching hints |
 | ENABLE_EXPERIMENTAL_MODELS | Include experimental registry entries (qwen, kimi) |
@@ -221,7 +223,8 @@ ENSEMBLE_REFINE_HARD_CAP=300
 | Endpoint | Description |
 |----------|-------------|
 | `POST /api/chat` | Chat interaction (optional `X-API-TOKEN`) |
-| `GET /api/memory` | Dump recent stored memory artifacts |
+| `GET /api/memory` | Dump recent stored memory artifacts (`?detailed=1` for provenance) |
+| `GET /api/routing/recent` | Recent routing & ensemble decisions tail |
 | `GET /api/pending_facts` | List pending facts (if approval enabled) |
 | `POST /api/pending_facts/<id>/approve|reject` | Fact moderation |
 | `GET /api/models` | Model roles, flags, ensemble config, availability |
@@ -232,22 +235,24 @@ ENSEMBLE_REFINE_HARD_CAP=300
 Security note: Set `API_AUTH_TOKEN` to require token for mutating endpoints.
 
 ## 🚧 Roadmap (Rolling)
-Delivered (Phase 0.2):
+Delivered (Phase 0.3):
 - Multi-model routing (fast / smart / heavy / alternates)
 - Trio ensemble reasoning (choose_refine)
 - Tool skill scoring + gating
 - Confidence decay & resurfacing
 - Structured fact storage (evidence, justification)
+- Second-pass heavy fact verifier (low-confidence pre-commit)
+- Provenance memory UI (confidence tiers, reaffirmations, timestamps, evidence)
 - `/api/models` transparency endpoint
+- `/api/routing/recent` routing history endpoint
+- Compound agentic model routing stub (feature flag)
 - Logging with routing + ensemble metadata
 
-In Progress / Planned:
-- Second-pass fact verifier (heavy validation)
-- Provenance UI (show evidence & confidence visually)
-- Compound / agentic model stubs
+Planned:
 - Embedding + hybrid retrieval layer
 - Streaming responses & partial TTS
 - Cost / latency dashboards
+- Advanced compound agent behaviors
 - Docker packaging & deployment guides
 
 ## 🤝 Contributing

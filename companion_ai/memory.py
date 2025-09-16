@@ -152,6 +152,39 @@ def upsert_profile_fact(key: str, value: str, confidence: float = 1.0, source: s
       - If fact exists with DIFFERENT value -> stage as proposed update (conflict) unless high-confidence override.
     """
     from companion_ai.core import config as core_config
+    # Optional second-pass verification (pre-staging) for low-confidence facts
+    try:
+        if getattr(core_config, 'VERIFY_FACTS_SECOND_PASS', False) and confidence < 0.75:
+            # Lightweight guard to avoid repeated verification loops
+            from companion_ai.llm_interface import generate_model_response
+            verifier_model = getattr(core_config, 'HEAVY_MODEL', core_config.DEFAULT_CONVERSATION_MODEL)
+            prompt = (
+                f"Evaluate the truthfulness and specificity of this proposed user fact.\n"
+                f"Fact: {key} = {value}\n"
+                "Return STRICT JSON: {\"verdict\": \"accept\"|\"uncertain\"|\"reject\", \"reason\": str, \"suggest_confidence\": 0.0-1.0}." )
+            try:
+                raw = generate_model_response(prompt, "You are a JSON fact verifier.", verifier_model)
+                import re, json as _json
+                m = re.search(r'\{.*\}', raw, re.DOTALL)
+                if m:
+                    parsed = _json.loads(m.group())
+                    verdict = parsed.get('verdict','uncertain')
+                    suggest_conf = float(parsed.get('suggest_confidence', confidence)) if isinstance(parsed.get('suggest_confidence'), (int,float,str)) else confidence
+                    suggest_conf = max(0.0, min(1.0, suggest_conf))
+                    if verdict == 'reject':
+                        print(f"❌ Fact rejected by verifier: {key}={value} reason={parsed.get('reason')}")
+                        return  # drop silently
+                    if verdict == 'uncertain':
+                        # keep but cap confidence
+                        confidence = min(confidence, suggest_conf, 0.55)
+                    elif verdict == 'accept':
+                        confidence = max(confidence, suggest_conf)
+                    justification = (justification or '') + f" [verifier: {verdict} {parsed.get('reason','')[:120]}]"
+            except Exception as ve:
+                print(f"Verifier error (continuing): {ve}")
+    except Exception:
+        pass
+
     if getattr(core_config, 'ENABLE_FACT_APPROVAL', False):
         auto = getattr(core_config, 'FACT_AUTO_APPROVE', False) and confidence >= getattr(core_config, 'FACT_AUTO_APPROVE_MIN_CONF', 0.85)
         # Check existing current value to detect conflict early
@@ -240,6 +273,53 @@ def get_all_profile_facts() -> dict:
     results = cursor.fetchall()
     conn.close()
     return {row['key']: row['value'] for row in results}
+
+def list_profile_facts_detailed(limit: int | None = None) -> list[dict]:
+    """Return full provenance metadata for profile facts.
+
+    Fields returned:
+      key, value, confidence, reaffirmations, source, last_updated,
+      first_seen_ts, last_seen_ts, evidence, confidence_label
+
+    confidence_label derived:
+      >=0.80 -> high
+      >=0.50 -> medium
+      else  -> low
+    """
+    conn = get_db_connection(); cur = conn.cursor()
+    try:
+        q = ("SELECT key, value, confidence, COALESCE(reaffirmations,0) AS reaffirmations, "
+             "source, last_updated, first_seen_ts, last_seen_ts, evidence FROM user_profile "
+             "ORDER BY last_updated DESC")
+        if limit:
+            q += " LIMIT ?"; cur.execute(q, (limit,))
+        else:
+            cur.execute(q)
+        rows = cur.fetchall()
+        out: list[dict] = []
+        for r in rows:
+            conf = r['confidence'] if isinstance(r['confidence'], (int,float)) else 0.0
+            if conf >= 0.80:
+                label = 'high'
+            elif conf >= 0.50:
+                label = 'medium'
+            else:
+                label = 'low'
+            out.append({
+                'key': r['key'],
+                'value': r['value'],
+                'confidence': round(conf,4),
+                'confidence_label': label,
+                'reaffirmations': r['reaffirmations'],
+                'source': r['source'],
+                'last_updated': r['last_updated'],
+                'first_seen_ts': r['first_seen_ts'],
+                'last_seen_ts': r['last_seen_ts'],
+                'evidence': r['evidence']
+            })
+        return out
+    finally:
+        conn.close()
 
 def list_pending_profile_facts() -> list[dict]:
     conn = get_db_connection()

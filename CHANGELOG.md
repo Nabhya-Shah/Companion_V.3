@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2025-09-16
+### Added
+- Provenance memory UI (expandable fact metadata: confidence tier, reaffirmations, timestamps, evidence).
+- `/api/memory?detailed=1` extended endpoint returning `profile_detailed` array.
+- `/api/routing/recent` endpoint exposing tail of routing & ensemble decisions.
+- Second-pass heavy fact verifier active (low-confidence gating) prior to staging/commit.
+- Compound / agentic model routing stub (purpose `compound` / `agentic`) behind `ENABLE_COMPOUND_MODELS`.
+
+### Changed
+- README updated to reflect active verifier and provenance/routing features.
+- Config `choose_model` now handles compound path when enabled.
+
+### Fixed
+- Removed stray debug artifact in model endpoint test.
+
+### Notes
+- Ensemble path unchanged (trio choose_refine); future work: embedding retrieval, streaming, cost dashboards.
+
 ## [0.2.0] - 2025-09-13
 ### Added
 - Trio ensemble reasoning (smart + heavy + alt) with judge + refine (`choose_refine`).

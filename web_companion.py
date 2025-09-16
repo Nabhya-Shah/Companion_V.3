@@ -3,7 +3,7 @@
 Web-based Companion AI Interface
 """
 
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, make_response
 import threading
 import webbrowser
 import time
@@ -17,6 +17,7 @@ from companion_ai.tts_manager import tts_manager
 from companion_ai.tools import run_tool, list_tools
 from companion_ai.core import metrics
 from companion_ai import memory as mem
+import os, json, glob
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,13 +28,20 @@ conversation_history = []
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    resp = make_response(render_template('index.html'))
+    # If auth token configured, set it as httpOnly cookie for transparent reuse.
+    if core_config.API_AUTH_TOKEN:
+        # Only set if not already present to avoid rewriting each request
+        if not request.cookies.get('api_token'):
+            resp.set_cookie('api_token', core_config.API_AUTH_TOKEN, httponly=True, samesite='Lax')
+    return resp
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
     try:
         data = request.json or {}
-        token = request.headers.get('X-API-TOKEN') or data.get('token')
+        token = (request.headers.get('X-API-TOKEN') or data.get('token')
+                 or request.cookies.get('api_token'))
         if not core_config.require_auth(token):
             return jsonify({'error': 'Unauthorized'}), 401
         user_message = data.get('message', '').strip()
@@ -69,10 +77,17 @@ def chat():
 @app.route('/api/memory')
 def get_memory():
     try:
+        detailed = request.args.get('detailed', 'false').lower() in ('1','true','yes')
         profile = db.get_all_profile_facts()
         summaries = db.get_latest_summary(10)
         insights = db.get_latest_insights(10)
-        return jsonify({'profile': profile, 'summaries': summaries, 'insights': insights})
+        resp = {'profile': profile, 'summaries': summaries, 'insights': insights}
+        if detailed:
+            try:
+                resp['profile_detailed'] = db.list_profile_facts_detailed()
+            except Exception as inner:
+                logger.warning(f"Detailed profile retrieval failed: {inner}")
+        return jsonify(resp)
     except Exception as e:
         logger.error(f"Memory error: {e}")
         return jsonify({'error': str(e)}), 500
@@ -92,7 +107,7 @@ def pending_facts():
 @app.route('/api/pending_facts/<int:pid>/approve', methods=['POST'])
 def approve_fact(pid: int):
     try:
-        token = request.headers.get('X-API-TOKEN')
+        token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
         if not core_config.require_auth(token):
             return jsonify({'error': 'Unauthorized'}), 401
         ok = db.approve_profile_fact(pid)
@@ -104,7 +119,7 @@ def approve_fact(pid: int):
 @app.route('/api/pending_facts/<int:pid>/reject', methods=['POST'])
 def reject_fact(pid: int):
     try:
-        token = request.headers.get('X-API-TOKEN')
+        token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
         if not core_config.require_auth(token):
             return jsonify({'error': 'Unauthorized'}), 401
         ok = db.reject_profile_fact(pid)
@@ -120,7 +135,7 @@ def tools():
 @app.route('/api/memory/clear', methods=['POST'])
 def clear_memory():
     try:
-        token = request.headers.get('X-API-TOKEN')
+        token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
         if not core_config.require_auth(token):
             return jsonify({'error': 'Unauthorized'}), 401
         db.clear_all_memory()
@@ -145,7 +160,7 @@ def toggle_tts():
 def change_voice():
     try:
         data = request.json or {}
-        token = request.headers.get('X-API-TOKEN') or data.get('token')
+        token = request.headers.get('X-API-TOKEN') or data.get('token') or request.cookies.get('api_token')
         if not core_config.require_auth(token):
             return jsonify({'error': 'Unauthorized'}), 401
         voice_name = data.get('voice')
@@ -249,6 +264,51 @@ def models_info():
         return jsonify(data)
     except Exception as e:
         logger.error(f"Models info error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/routing/recent')
+def routing_recent():
+    """Return recent routing / ensemble decisions (last N records with routing info).
+
+    Query params:
+      n: max records (default 15, cap 100)
+    """
+    try:
+        n = request.args.get('n', '15')
+        try:
+            n_int = max(1, min(int(n), 100))
+        except Exception:
+            n_int = 15
+        # Collect today's and yesterday's log for tail safety
+        log_dir = core_config.LOG_DIR
+        patterns = sorted(glob.glob(os.path.join(log_dir, 'conv_*.jsonl')))[-2:]
+        records: list[dict] = []
+        for path in reversed(patterns):  # newest first
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    for line in reversed(f.readlines()[-500:]):  # tail safety
+                        try:
+                            obj = json.loads(line)
+                            if 'routing' in obj:
+                                rec = {
+                                    'ts': obj.get('ts'),
+                                    'model': obj.get('model'),
+                                    'complexity': obj.get('complexity'),
+                                    'latency_ms': obj.get('latency_ms'),
+                                    'routing': obj.get('routing')
+                                }
+                                records.append(rec)
+                                if len(records) >= n_int:
+                                    raise StopIteration
+                        except json.JSONDecodeError:
+                            continue
+            except StopIteration:
+                break
+            except Exception as inner:
+                logger.warning(f"Routing recent read error {path}: {inner}")
+        return jsonify({'count': len(records), 'items': records[:n_int]})
+    except Exception as e:
+        logger.error(f"Routing recent error: {e}")
         return jsonify({'error': str(e)}), 500
 
 def open_browser():

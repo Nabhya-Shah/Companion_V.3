@@ -4,7 +4,6 @@ import os
 import json
 import hashlib
 import traceback
-from dotenv import load_dotenv
 import time
 import requests
 import logging
@@ -35,7 +34,6 @@ try:
 except ImportError:
     logger.warning("Groq module not installed")
     
-load_dotenv()
 
 # --- Configuration ---
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")

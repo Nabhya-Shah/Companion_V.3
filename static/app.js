@@ -3,10 +3,7 @@ const chatPane = document.getElementById('chatPane');
 const userInput = document.getElementById('userInput');
 const sendBtn = document.getElementById('sendBtn');
 const statusEl = document.getElementById('status');
-const personaSel = document.getElementById('personaSelect');
-const modelSel = document.getElementById('modelSelect');
 const healthBtn = document.getElementById('healthBtn');
-const tokenInput = document.getElementById('tokenInput');
 const cmdHints = document.getElementById('cmdHints');
 const SLASH_COMMANDS = [
   '/help - list commands',
@@ -17,12 +14,9 @@ const SLASH_COMMANDS = [
   '!calc 2+2*5 - calculator (tool)'
 ];
 
-function authHeaders(extra={}) {
-  const h = { ...extra };
-  if (!h['Content-Type']) h['Content-Type'] = 'application/json';
-  if (tokenInput.value.trim()) h['X-API-TOKEN'] = tokenInput.value.trim();
-  return h;
-}
+let API_TOKEN = localStorage.getItem('companion_api_token') || '';
+function setApiToken(tok){ API_TOKEN = tok || ''; if(tok) localStorage.setItem('companion_api_token', tok); }
+function authHeaders(extra={}) { return { 'Content-Type':'application/json', ...(API_TOKEN? {'X-API-TOKEN':API_TOKEN}:{}), ...extra }; }
 
 function addMessage(role, text) {
   const div = document.createElement('div');
@@ -36,7 +30,7 @@ function addMessage(role, text) {
   chatPane.scrollTop = chatPane.scrollHeight;
 }
 
-async function sendMessage() {
+async function sendMessage(retry=false) {
   const message = userInput.value.trim();
   if (!message) return;
   addMessage('user', message);
@@ -47,9 +41,14 @@ async function sendMessage() {
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ message, persona: personaSel.value, model: modelSel.value })
+      body: JSON.stringify({ message })
     });
     const data = await resp.json();
+    if (resp.status === 401 && !retry) {
+      // Prompt for token once
+      const tok = prompt('API token required. Enter token:');
+      if (tok) { setApiToken(tok); return sendMessage(true); }
+    }
     if (!resp.ok) throw new Error(data.error || 'Error');
     addMessage('ai', data.response);
   } catch (e) {
@@ -80,15 +79,34 @@ tabs.forEach(btn => btn.addEventListener('click', () => {
   document.getElementById('pane-' + btn.dataset.tab).classList.add('active');
 }));
 
-async function loadMemory() {
+async function loadMemory(retry=false) {
   try {
-  const r = await fetch('/api/memory', { headers: authHeaders({}) });
+    const r = await fetch('/api/memory?detailed=1', { headers: authHeaders({}) });
+    if (r.status === 401 && !retry) {
+      const tok = prompt('API token required. Enter token:'); if(tok){ setApiToken(tok); return loadMemory(true);} else return;
+    }
     const data = await r.json();
     if (data.error) return;
     const profileUl = document.getElementById('profileList');
     profileUl.innerHTML = '';
-    Object.entries(data.profile || {}).forEach(([k,v]) => {
-      const li = document.createElement('li'); li.textContent = `${k}: ${v}`; profileUl.appendChild(li);
+    const detailed = data.profile_detailed || [];
+    detailed.forEach(row => {
+      const li = document.createElement('li');
+      li.classList.add('pfact');
+      li.innerHTML = `<span class="pf-main"><strong>${row.key}</strong>: ${row.value}</span>`;
+      const meta = document.createElement('span'); meta.className = 'meta';
+      const badge = document.createElement('span'); badge.className = 'badge conf-' + row.confidence_label; badge.textContent = row.confidence_label;
+      meta.appendChild(badge);
+      const reaf = document.createElement('span'); reaf.className='badge'; reaf.textContent = `${row.reaffirmations}×`; meta.appendChild(reaf);
+      li.appendChild(meta);
+      const expand = document.createElement('div'); expand.className='pf-details';
+      expand.style.display='none';
+      expand.innerHTML = `<div><span class="sub">confidence:</span> ${row.confidence.toFixed(2)} | <span class="sub">updated:</span> ${row.last_updated || ''}</div>` +
+        `<div><span class="sub">first seen:</span> ${row.first_seen_ts || '—'} | <span class=\"sub\">last seen:</span> ${row.last_seen_ts || '—'}</div>` +
+        (row.evidence ? `<div class="pf-evidence">evidence: ${row.evidence}</div>`: '') ;
+      li.appendChild(expand);
+      li.addEventListener('click', () => { expand.style.display = expand.style.display==='none' ? 'block':'none'; });
+      profileUl.appendChild(li);
     });
     const summaryUl = document.getElementById('summaryList');
     summaryUl.innerHTML='';
@@ -147,9 +165,10 @@ document.getElementById('searchInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); doSearch(); }
 });
 
-async function loadHealth() {
+async function loadHealth(retry=false) {
   try {
-  const r = await fetch('/api/health', { headers: authHeaders({}) });
+    const r = await fetch('/api/health', { headers: authHeaders({}) });
+    if (r.status === 401 && !retry) { const tok = prompt('API token required. Enter token:'); if(tok){ setApiToken(tok); return loadHealth(true);} else return; }
     const data = await r.json();
     if (data.error) return;
     const pre = document.getElementById('metricsOut');
@@ -203,16 +222,82 @@ userInput.addEventListener('input', () => {
 });
 document.addEventListener('click', e => { if(!cmdHints.contains(e.target) && e.target!==userInput) cmdHints.style.display='none'; });
 
-async function initConfig() {
+async function loadModelsPanel(retry=false) {
+  const panel = document.getElementById('modelsPanel');
+  if (!panel) return;
+  panel.textContent = 'Loading...';
   try {
-    const r = await fetch('/api/config');
-    const data = await r.json();
-    if (data.auth_required) tokenInput.style.display='inline-block';
-  } catch {}
+    const r = await fetch('/api/models', { headers: authHeaders({}) });
+    if (r.status === 401 && !retry) { const tok = prompt('API token required. Enter token:'); if(tok){ setApiToken(tok); return loadModelsPanel(true);} else { panel.textContent='Auth required'; return; } }
+    const d = await r.json();
+    if (d.error) { panel.textContent = 'Error loading models'; return; }
+    const lines = [];
+    lines.push(`<div><strong>Smart</strong>: ${d.roles.SMART_PRIMARY_MODEL}</div>`);
+    lines.push(`<div><strong>Heavy</strong>: ${d.roles.HEAVY_MODEL}</div>`);
+    if (d.roles.HEAVY_ALTERNATES?.length) lines.push(`<div><strong>Alternates</strong>: ${d.roles.HEAVY_ALTERNATES.join(', ')}</div>`);
+    lines.push(`<div><strong>Fast</strong>: ${d.roles.FAST_MODEL}</div>`);
+    lines.push('<h4>Ensemble</h4>');
+    lines.push(`<div>${d.ensemble.enabled ? 'ENABLED' : 'disabled'} mode=${d.ensemble.mode} candidates=${d.ensemble.candidates}</div>`);
+    lines.push('<h4>Flags</h4>');
+    const flagKeys = Object.entries(d.flags).map(([k,v])=>`<span class="badge" style="margin:2px 4px 2px 0;">${k}:${v? 'on':'off'}</span>`).join('');
+    lines.push(`<div>${flagKeys}</div>`);
+    panel.innerHTML = lines.join('');
+  } catch (e) {
+    panel.textContent = 'Failed to load';
+  }
 }
 
+async function loadRecentRouting() {
+  const tgt = document.getElementById('recentRouting');
+  if (!tgt) return;
+  try {
+    const r = await fetch('/api/routing/recent?n=20');
+    const d = await r.json();
+    if (d.error) { tgt.textContent = 'Error'; return; }
+    const lines = [];
+    (d.items||[]).forEach(item => {
+      const rt = item.routing || {};
+      let base = `${(item.ts||'').slice(11,19)}  c${item.complexity??'-'}  ${item.model}`;
+      if (rt.ensemble) {
+        base += `  ENS ${rt.mode} idx=${rt.chosen_index} conf=${rt.confidence??''}`;
+      } else if (rt.escalated) {
+        base += '  escalated';
+      }
+      lines.push(base);
+    });
+    tgt.textContent = lines.join('\n') || 'No routing records yet.';
+  } catch (e) { tgt.textContent = 'Error loading'; }
+}
+
+// Keyboard shortcuts overlay
+const overlayHtml = `<div id="kbOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:500;">
+  <div style="max-width:640px;margin:60px auto;background:#1e242c;border:1px solid #30363d;padding:22px 26px;border-radius:12px;font-size:14px;line-height:1.5;">
+    <h2 style="margin-top:0;font-size:18px;">Keyboard Shortcuts</h2>
+    <ul style="list-style:none;padding:0;margin:0 0 14px;">
+      <li><code>Enter</code> send message</li>
+      <li><code>Shift+Enter</code> newline</li>
+      <li><code>Ctrl+1..4</code> switch tabs</li>
+      <li><code>Ctrl+R</code> refresh metrics & routing</li>
+      <li><code>?</code> toggle this help</li>
+    </ul>
+    <div style="text-align:right;"><button id="kbClose" style="padding:6px 14px;">Close</button></div>
+  </div></div>`;
+document.body.insertAdjacentHTML('beforeend', overlayHtml);
+const kbOverlay = document.getElementById('kbOverlay');
+document.addEventListener('keydown', e => {
+  if (e.key === '?' || (e.shiftKey && e.key === '/')) { e.preventDefault(); kbOverlay.style.display = kbOverlay.style.display==='none'?'block':'none'; }
+  if (e.ctrlKey) {
+    if (e.key === 'r') { e.preventDefault(); healthBtn.click(); }
+    if (/^[1-4]$/.test(e.key)) { const idx = parseInt(e.key)-1; if (tabs[idx]) tabs[idx].click(); }
+  }
+});
+document.getElementById('kbClose').addEventListener('click', ()=> kbOverlay.style.display='none');
+
 // Initial load
-initConfig();
 loadMemory();
 loadHealth();
+loadModelsPanel();
+loadRecentRouting();
+// Auto-refresh routing panel on health refresh
+healthBtn.addEventListener('click', ()=>{ loadModelsPanel(); loadRecentRouting(); });
 
