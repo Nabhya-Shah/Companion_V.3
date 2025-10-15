@@ -161,8 +161,12 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
         auto_model, routing_meta = core_config.choose_model('chat', complexity=complexity, return_reason=True)
         chosen_model = model or auto_model
         logger.info(f"Using model={chosen_model} persona={persona} complexity={complexity}")
+        
+        # Extract recent conversation from memory context if provided
+        recent_conv = memory_context.get('recent_conversation', '')
+        
         if persona.lower() == 'companion':
-            meta = build_system_prompt_with_meta(user_message)
+            meta = build_system_prompt_with_meta(user_message, recent_conv)
             system_prompt = meta['system_prompt']
             if core_config.ENABLE_AUTO_TOOLS:
                 system_prompt = _augment_system_with_tools(system_prompt)
@@ -574,28 +578,61 @@ def extract_profile_facts(user_msg: str, ai_msg: str) -> dict:
         except Exception:
             pass
 
-    # Legacy fallback path
+    # Legacy fallback path with improved prompt
     prompt = (
-        "You extract ONLY explicit self-descriptive facts the USER stated in their own message.\n"
-        f'User message: "{user_msg}"\n'
-        f'Assistant reply (context only – ignore for extraction): "{ai_msg}"\n\n'
-        "Return JSON object ONLY. Rules:\n"
-        "1. Only include facts the user explicitly stated THIS TURN.\n"
-        "2. No personality inference, no emotions, no speculation.\n"
-        "3. If nothing explicit: return {}.\n"
-        "4. Keep values as short literal phrases from the user message.\n"
-        "5. Allowed: name, age (explicit), location (explicit), explicit likes/dislikes.\n"
-        "6. Forbidden: guesses, advice, rephrasings, unstated traits.\n\n"
-        "JSON:"
+        "Extract explicit user facts from the message below and return ONLY valid JSON.\n\n"
+        f'USER MESSAGE: "{user_msg}"\n\n'
+        "INSTRUCTIONS:\n"
+        "- Extract ONLY facts the user explicitly stated about themselves\n"
+        "- Return a valid JSON object, nothing else\n"
+        "- If no facts found, return: {}\n"
+        "- Valid facts: name, age, location, hobbies, preferences, occupation, skills, interests\n"
+        "- Include ALL facts mentioned, even if there are multiple\n"
+        "- Do NOT infer, guess, or add information not stated\n\n"
+        "Examples:\n"
+        '- Input: "My name is John" → Output: {"name": "John"}\n'
+        '- Input: "I love Python" → Output: {"favorite_language": "Python"}\n'
+        '- Input: "I\'m 25 years old" → Output: {"age": "25"}\n'
+        '- Input: "I\'m learning Japanese and enjoy hiking" → Output: {"learning": "Japanese", "hobby": "hiking"}\n'
+        '- Input: "Hello there" → Output: {}\n\n'
+        "RESPOND WITH ONLY THE JSON OBJECT:"
     )
     try:
         response = generate_groq_response(prompt, model=model)
         if not response:
             return {}
-        parsed = json.loads(response.strip())
+        
+        # Clean up response - strip markdown code blocks if present
+        response = response.strip()
+        if response.startswith("```"):
+            # Remove markdown code block
+            lines = response.split('\n')
+            response = '\n'.join(lines[1:-1]) if len(lines) > 2 else response
+            response = response.replace("```json", "").replace("```", "").strip()
+        
+        # Try to extract JSON if there's extra text
+        if not response.startswith('{'):
+            # Look for JSON object in the response
+            import re
+            json_match = re.search(r'\{[^}]*\}', response)
+            if json_match:
+                response = json_match.group(0)
+            else:
+                logger.warning(f"No JSON found in fact extraction response: {response[:100]}")
+                return {}
+        
+        parsed = json.loads(response)
         if not isinstance(parsed, dict):
             return {}
-        return _filter_fact_dict(parsed, user_msg)
+        
+        filtered = _filter_fact_dict(parsed, user_msg)
+        if filtered:
+            logger.info(f"Successfully extracted {len(filtered)} facts: {list(filtered.keys())}")
+        return filtered
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error in fact extraction: {e}. Response was: {response[:200] if response else 'empty'}")
+        return {}
     except Exception as e:
         logger.error(f"Profile fact extraction failed: {e}")
         return {}
@@ -609,6 +646,7 @@ def _filter_fact_dict(parsed: dict, user_msg: str) -> dict:
         k2 = re.sub(r'[^a-zA-Z0-9]+', '_', k.lower()).strip('_')
         k2 = re.sub(r'_+', '_', k2)
         return k2[:60]
+    
     for k, v in parsed.items():
         if not isinstance(k, str) or not isinstance(v, (str, int, float)):
             continue
@@ -616,8 +654,27 @@ def _filter_fact_dict(parsed: dict, user_msg: str) -> dict:
         k_str = k.strip()
         if not k_str or not v_str:
             continue
-        if (k_str.lower() in user_lower) or (v_str.lower() in user_lower):
+        
+        # More lenient check - allow if key OR value appears, or if it's semantic
+        key_lower = k_str.lower()
+        value_lower = v_str.lower()
+        
+        # Direct match in user message
+        if (key_lower in user_lower) or (value_lower in user_lower):
             filtered[norm_key(k_str)] = v_str[:160]
+        # Allow semantic matches for common fact types even if wording differs
+        elif any(semantic_key in key_lower for semantic_key in [
+            'name', 'age', 'location', 'city', 'country', 'job', 'occupation',
+            'favorite', 'like', 'love', 'enjoy', 'prefer', 'hobby', 'interest',
+            'language', 'skill', 'project', 'working_on'
+        ]):
+            # For semantic keys, verify the value has some relation to user message
+            # Check if at least some words from value appear in message
+            value_words = set(value_lower.split())
+            user_words = set(user_lower.split())
+            if value_words & user_words or len(value_words) == 1:  # Overlap or single word (like name)
+                filtered[norm_key(k_str)] = v_str[:160]
+    
     return filtered
 
 def generate_insight(user_msg: str, ai_msg: str, context: dict) -> str:

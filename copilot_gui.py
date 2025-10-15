@@ -8,6 +8,8 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 import threading
 import re
+from datetime import datetime
+from pathlib import Path
 from companion_ai.llm_interface import generate_response
 from companion_ai import memory as db
 from companion_ai.tts_manager import tts_manager
@@ -50,11 +52,18 @@ class CopilotCompanionGUI:
         self.show_thinking = tk.BooleanVar(value=False)
         self.tts_enabled = tk.BooleanVar(value=tts_manager.is_enabled)
         
-        # Model selection
-    self.current_model = "llama-3.1-8b-instant"  # Default Groq model
+        # Chat log file setup
+        self.chat_log_dir = Path("data/chat_logs")
+        self.chat_log_dir.mkdir(parents=True, exist_ok=True)
+        self.session_start = datetime.now()
+        self.chat_log_file = self.chat_log_dir / f"chat_{self.session_start.strftime('%Y%m%d_%H%M%S')}.txt"
+        self.initialize_chat_log()
+        
+        # Model selection - Using smartest model for natural conversation
+        self.current_model = "openai/gpt-oss-120b"  # 120B parameter model for better conversation quality
         
         # Persona selection
-    self.current_persona = "Companion"  # Adaptive persona
+        self.current_persona = "Companion"  # Adaptive persona
         
         self.setup_ui()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -448,15 +457,39 @@ class CopilotCompanionGUI:
             self.message_entry.insert("1.0", self.placeholder_text)
             self.message_entry.configure(fg=self.colors['text_muted'])
     
+    def initialize_chat_log(self):
+        """Initialize the chat log file with session info"""
+        try:
+            with open(self.chat_log_file, 'w', encoding='utf-8') as f:
+                f.write("=" * 80 + "\n")
+                f.write(f"COMPANION AI CHAT LOG\n")
+                f.write(f"Session Started: {self.session_start.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write("=" * 80 + "\n\n")
+            logger.info(f"Chat log initialized at: {self.chat_log_file}")
+        except Exception as e:
+            logger.error(f"Failed to initialize chat log: {e}")
+    
+    def append_to_chat_log(self, sender, message):
+        """Append a message to the chat log file in real-time"""
+        try:
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            with open(self.chat_log_file, 'a', encoding='utf-8') as f:
+                f.write(f"[{timestamp}] {sender}:\n")
+                f.write(f"{message}\n\n")
+        except Exception as e:
+            logger.error(f"Failed to append to chat log: {e}")
+    
     def show_welcome_message(self):
         """Show welcome message in chat"""
-        welcome_text = """Welcome to Companion AI!
+        welcome_text = f"""Welcome to Companion AI!
 
 I'm here to help you with anything you need. You can:
 • Have natural conversations with me
 • Ask questions about any topic
 • Get help with coding, writing, or problem-solving
 • Use the quick action buttons above for common tasks
+
+📝 Chat log: {self.chat_log_file.name}
 
 Try one of the quick actions above, or just start typing below!"""
         
@@ -511,16 +544,32 @@ Try one of the quick actions above, or just start typing below!"""
         # Add user message to chat
         self.add_message("You", message, "user")
         
+        # Log user message to file
+        self.append_to_chat_log("You", message)
+        
         # Disable send button and show thinking
         self.send_btn.config(state=tk.DISABLED, text="...")
         
         def process_response():
             try:
-                # Get memory context (minimal for clean conversation)
+                # Get actual memory context from database
+                from companion_ai import memory as db
+                
+                # Build recent conversation context from GUI history
+                recent_turns = []
+                for turn in self.conversation_log[-3:]:  # Last 3 turns
+                    recent_turns.append(f"User: {turn['user']}")
+                    recent_turns.append(f"AI: {turn['ai']}")
+                
+                # Add current message as context
+                recent_context = "\n".join(recent_turns) if recent_turns else ""
+                
+                # Build full context including recent conversation
                 memory_context = {
-                    "profile": {},
-                    "summaries": [],
-                    "insights": []
+                    "profile": db.get_all_profile_facts(),
+                    "summaries": db.get_latest_summary(3),
+                    "insights": db.get_latest_insights(3),
+                    "recent_conversation": recent_context
                 }
                 
                 # Generate response with selected model and persona
@@ -552,6 +601,9 @@ Try one of the quick actions above, or just start typing below!"""
             ai_response = ai_response.strip()
         
         self.add_message("AI", ai_response, "ai")
+        
+        # Log AI response to file
+        self.append_to_chat_log("Companion AI", ai_response)
         
         # Speak if TTS enabled
         if self.tts_enabled.get():
@@ -970,6 +1022,20 @@ Try one of the quick actions above, or just start typing below!"""
             self._process_session_memory()
             # Create session log file for review
             self._create_session_log()
+        
+        # Finalize chat log
+        try:
+            session_end = datetime.now()
+            duration = session_end - self.session_start
+            with open(self.chat_log_file, 'a', encoding='utf-8') as f:
+                f.write("\n" + "=" * 80 + "\n")
+                f.write(f"Session Ended: {session_end.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Duration: {duration}\n")
+                f.write(f"Total Exchanges: {len(self.conversation_log)}\n")
+                f.write("=" * 80 + "\n")
+            logger.info(f"Chat log finalized: {self.chat_log_file}")
+        except Exception as e:
+            logger.error(f"Failed to finalize chat log: {e}")
         
         logger.info("Companion AI session ended")
         self.root.destroy()

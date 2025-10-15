@@ -21,8 +21,8 @@ API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN")  # For web write endpoints
 # ---- Models (central names) ----
 # Conversation default model (balanced speed/quality)
 DEFAULT_CONVERSATION_MODEL = "llama-3.1-8b-instant"
-# Reasoning / larger context (optional future)
-REASONING_MODEL = "deepseek-r1-distill-llama-70b"
+# Reasoning / larger context - UPDATED: deepseek-r1 was decommissioned
+REASONING_MODEL = "llama-3.3-70b-versatile"  # Using 70B as reasoning fallback
 # Memory / fast analytic model
 MEMORY_FAST_MODEL = "llama-3.1-8b-instant"
 # (Reserved) higher quality memory analysis model
@@ -161,16 +161,8 @@ MODEL_CAPABILITIES: dict[str, dict] = {
         "default_temperature": 0.8,
         "roles": ["chat.primary","summary.high","insight"]
     },
-    "deepseek-r1-distill-llama-70b": {
-        "speed": 4,
-        "quality": 5,
-        "cost_weight": 4,
-        "tier": "reasoning",
-        "supports_reasoning_effort": False,  # placeholder until verified
-        "supports_reasoning_field": False,
-        "default_temperature": 0.7,
-        "roles": ["reasoning","analysis"]
-    },
+    # Note: deepseek-r1-distill-llama-70b was decommissioned by Groq
+    # Removed from registry - using llama-3.3-70b-versatile as heavy model instead
     # Newly exposed Groq GPT-OSS models (names tentative — adjust if provider differs)
     # Fully-qualified GPT-OSS IDs (Groq naming uses openai/ prefix)
     "openai/gpt-oss-20b": {
@@ -239,7 +231,7 @@ MODEL_CAPABILITIES: dict[str, dict] = {
 KNOWN_AVAILABLE_MODELS = {
     "llama-3.1-8b-instant",
     "llama-3.3-70b-versatile",
-    "deepseek-r1-distill-llama-70b",
+    # "deepseek-r1-distill-llama-70b",  # Decommissioned by Groq
     "openai/gpt-oss-20b",
     "openai/gpt-oss-120b",
     "moonshotai/kimi-k2-0905",  # include kimi in available set for ensemble
@@ -266,7 +258,7 @@ def model_capability_summary() -> dict:
 
 # ---- Adaptive Routing (aggressive-smart profile) ----
 SMART_PRIMARY_MODEL = "openai/gpt-oss-120b"  # user preference: smartest default generalist
-HEAVY_MODEL = "deepseek-r1-distill-llama-70b"  # distinct heavy reasoner baseline
+HEAVY_MODEL = "llama-3.3-70b-versatile"  # UPDATED: deepseek-r1 decommissioned, using versatile 70B
 HEAVY_ALTERNATES = [
     "moonshotai/kimi-k2-0905",  # long-context / alternative reasoning perspective
     "openai/gpt-oss-120b"       # allow smart model to act as heavy fallback if needed

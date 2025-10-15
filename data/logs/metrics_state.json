@@ -1,1 +1,1 @@
-{"models": {"llama-3.1-8b-instant": {"count": 1, "latencies": [469.94]}}, "total_interactions": 1, "last_update_ts": 1758051665.690999, "tools": {"total_invocations": 0, "by_name": {}, "blocked": 0, "failures": 0, "decision_types": {}, "skill": {"by_name": {}}}}
+{"models": {"openai/gpt-oss-120b": {"count": 7, "latencies": [2724.08, 1061.74, 1158.78, 1613.6, 1265.94, 1266.36, 916.57]}}, "total_interactions": 7, "last_update_ts": 1760563210.9881365, "tools": {"total_invocations": 0, "by_name": {}, "blocked": 0, "failures": 0, "decision_types": {}, "skill": {"by_name": {}}}}
