@@ -26,23 +26,30 @@ class CopilotCompanionGUI:
         self.root.geometry("900x750")  # Increased height to ensure input area is visible
         self.root.minsize(700, 600)  # Increased minimum size to prevent UI elements from being hidden
         
-        # Modern dark theme colors (Copilot-inspired)
+        # Modern sleek theme colors (Gemini/Microsoft AI inspired)
         self.colors = {
-            'bg_primary': '#0d1117',      # GitHub dark background
-            'bg_secondary': '#161b22',     # Slightly lighter
-            'bg_tertiary': '#21262d',      # Card/panel background
-            'bg_input': '#0d1117',         # Input background
-            'border': '#30363d',           # Border color
-            'text_primary': '#f0f6fc',     # Primary text
-            'text_secondary': '#8b949e',   # Secondary text
-            'text_muted': '#6e7681',       # Muted text
-            'accent_blue': '#58a6ff',      # GitHub blue
-            'accent_purple': '#a5a5ff',    # Purple accent
-            'accent_green': '#3fb950',     # Success green
-            'accent_orange': '#f85149',    # Warning/error
-            'user_bubble': '#58a6ff',      # User messages
-            'ai_bubble': '#a5a5ff',        # AI messages
-            'button_hover': '#1f6feb'      # Button hover
+            'bg_primary': '#1a1a1a',       # Deeper black for modern look
+            'bg_secondary': '#242424',     # Slightly lighter panels
+            'bg_tertiary': '#2d2d2d',      # Card/panel background
+            'bg_input': '#2d2d2d',         # Input background
+            'bg_input_focus': '#353535',   # Input when focused
+            'border': '#404040',           # Softer border
+            'border_subtle': '#333333',    # Very subtle border
+            'text_primary': '#ffffff',     # Pure white text
+            'text_secondary': '#b4b4b4',   # Medium gray
+            'text_muted': '#808080',       # Muted text
+            'accent_blue': '#4a9eff',      # Softer blue
+            'accent_purple': '#9d7ff5',    # Softer purple
+            'accent_gradient_start': '#4a9eff',  # Gradient start
+            'accent_gradient_end': '#9d7ff5',    # Gradient end
+            'accent_green': '#4ade80',     # Modern green
+            'accent_orange': '#fb923c',    # Warning/error
+            'user_bubble_bg': '#2e3f5f',   # User message background
+            'ai_bubble_bg': '#2d2d2d',     # AI message background
+            'user_bubble_text': '#ffffff', # User text
+            'ai_bubble_text': '#e5e5e5',   # AI text
+            'button_hover': '#3d3d3d',     # Button hover
+            'shadow': '#00000040'          # Subtle shadow
         }
         
         self.root.configure(bg=self.colors['bg_primary'])
@@ -109,25 +116,25 @@ class CopilotCompanionGUI:
         title_frame = tk.Frame(header_content, bg=self.colors['bg_primary'])
         title_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Title (responsive font size)
+        # Title (responsive font size) - More modern styling
         self.title_label = tk.Label(
             title_frame,
             text="Hi there. What should we dive into today?",
-            font=('Segoe UI', 24, 'normal'),
+            font=('Segoe UI', 26, 'normal'),  # Slightly larger
             bg=self.colors['bg_primary'],
             fg=self.colors['text_primary']
         )
         self.title_label.pack(anchor='w')
         
-        # Subtitle
+        # Subtitle - softer color
         self.subtitle_label = tk.Label(
             title_frame,
             text="Your AI companion is ready to help with anything you need.",
-            font=('Segoe UI', 12),
+            font=('Segoe UI', 13),  # Slightly larger
             bg=self.colors['bg_primary'],
             fg=self.colors['text_secondary']
         )
-        self.subtitle_label.pack(anchor='w', pady=(5, 0))
+        self.subtitle_label.pack(anchor='w', pady=(8, 0))  # More spacing
         
         # Right side - Settings
         settings_frame = tk.Frame(header_content, bg=self.colors['bg_primary'])
@@ -245,48 +252,48 @@ class CopilotCompanionGUI:
         self.persona_dropdown.pack(anchor='w', pady=(2, 0))
         
     def create_chat_area(self, parent):
-        """Create the main chat display area"""
-        # Chat container with border
+        """Create the main chat display area with modern styling"""
+        # Chat container with subtle border and better spacing
         chat_container = tk.Frame(
             parent, 
-            bg=self.colors['bg_tertiary'],
-            relief='solid',
-            bd=1,
-            highlightbackground=self.colors['border'],
+            bg=self.colors['bg_secondary'],
+            relief='flat',
+            bd=0,
+            highlightbackground=self.colors['border_subtle'],
             highlightthickness=1
         )
-        chat_container.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        chat_container.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
         
-        # Chat display
+        # Chat display with improved styling
         self.chat_display = scrolledtext.ScrolledText(
             chat_container,
             wrap=tk.WORD,
-            font=('Segoe UI', 11),
-            bg=self.colors['bg_tertiary'],
+            font=('Segoe UI', 12),  # Slightly larger font
+            bg=self.colors['bg_secondary'],
             fg=self.colors['text_primary'],
             insertbackground=self.colors['accent_blue'],
             state=tk.DISABLED,
             relief='flat',
             bd=0,
-            padx=20,
-            pady=20,
-            selectbackground=self.colors['bg_secondary'],
-            height=12  # Reduced height to ensure input area is always visible
+            padx=25,  # More padding
+            pady=25,
+            selectbackground=self.colors['bg_tertiary'],
+            height=12
         )
         self.chat_display.pack(fill=tk.BOTH, expand=True)
         
-        # Configure text tags for modern styling
+        # Configure text tags for sleek modern styling
         self.chat_display.tag_configure("user", 
-                                       foreground=self.colors['user_bubble'], 
-                                       font=('Segoe UI', 11, 'bold'))
+                                       foreground=self.colors['user_bubble_text'], 
+                                       font=('Segoe UI', 12, 'bold'))
         self.chat_display.tag_configure("ai", 
-                                       foreground=self.colors['ai_bubble'], 
-                                       font=('Segoe UI', 11))
+                                       foreground=self.colors['accent_gradient_end'], 
+                                       font=('Segoe UI', 12, 'bold'))
         self.chat_display.tag_configure("thinking", 
                                        foreground=self.colors['text_muted'], 
                                        font=('Segoe UI', 10, 'italic'))
         self.chat_display.tag_configure("system", 
-                                       foreground=self.colors['accent_green'], 
+                                       foreground=self.colors['text_muted'], 
                                        font=('Segoe UI', 10))
         
     def create_quick_actions(self, parent):
@@ -326,25 +333,31 @@ class CopilotCompanionGUI:
                     text=action_text,
                     command=action_cmd,
                     font=('Segoe UI', 10),
-                    bg=self.colors['bg_secondary'],
+                    bg=self.colors['bg_tertiary'],
                     fg=self.colors['text_secondary'],
                     activebackground=self.colors['button_hover'],
                     activeforeground=self.colors['text_primary'],
                     relief='flat',
                     bd=0,
-                    padx=15,
-                    pady=8,
+                    padx=18,  # More padding
+                    pady=10,  # More vertical padding
                     cursor='hand2',
-                    wraplength=120  # Allow text wrapping for smaller buttons
+                    wraplength=120
                 )
                 btn.pack(side=tk.LEFT, padx=(0, 10))
                 row_buttons.append(btn)
                 
-                # Hover effects
+                # Smooth hover effects
                 def on_enter(e, button=btn):
-                    button.configure(bg=self.colors['button_hover'], fg=self.colors['text_primary'])
+                    button.configure(
+                        bg=self.colors['button_hover'], 
+                        fg=self.colors['text_primary']
+                    )
                 def on_leave(e, button=btn):
-                    button.configure(bg=self.colors['bg_secondary'], fg=self.colors['text_secondary'])
+                    button.configure(
+                        bg=self.colors['bg_tertiary'], 
+                        fg=self.colors['text_secondary']
+                    )
                     
                 btn.bind("<Enter>", on_enter)
                 btn.bind("<Leave>", on_leave)
@@ -352,52 +365,61 @@ class CopilotCompanionGUI:
             self.action_buttons.append(row_buttons)
     
     def create_input_area(self, parent):
-        """Create the input area with Copilot-style design"""
-        # Input container
+        """Create the input area with sleek modern design"""
+        # Input container with subtle styling
         input_container = tk.Frame(
             parent,
-            bg=self.colors['bg_tertiary'],
-            relief='solid',
-            bd=1,
-            highlightbackground=self.colors['border'],
+            bg=self.colors['bg_input'],
+            relief='flat',
+            bd=0,
+            highlightbackground=self.colors['border_subtle'],
             highlightthickness=1
         )
         input_container.pack(fill=tk.X)
         
         # Input frame
-        input_frame = tk.Frame(input_container, bg=self.colors['bg_tertiary'])
-        input_frame.pack(fill=tk.X, padx=15, pady=15)
+        input_frame = tk.Frame(input_container, bg=self.colors['bg_input'])
+        input_frame.pack(fill=tk.X, padx=20, pady=18)
         
-        # Message input (Copilot-style)
+        # Message input with modern styling
         self.message_entry = tk.Text(
             input_frame,
             height=3,
-            font=('Segoe UI', 11),
+            font=('Segoe UI', 12),
             bg=self.colors['bg_input'],
             fg=self.colors['text_primary'],
             insertbackground=self.colors['accent_blue'],
             wrap=tk.WORD,
             relief='flat',
             bd=0,
-            padx=15,
-            pady=10
+            padx=18,
+            pady=12
         )
         self.message_entry.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Focus effects for input
+        def on_focus_in(event):
+            self.message_entry.configure(bg=self.colors['bg_input_focus'])
+        def on_focus_out(event):
+            self.message_entry.configure(bg=self.colors['bg_input'])
+        
+        self.message_entry.bind('<FocusIn>', on_focus_in)
+        self.message_entry.bind('<FocusOut>', on_focus_out)
         
         # Placeholder text
         self.add_placeholder()
         
         # Button container
-        button_frame = tk.Frame(input_frame, bg=self.colors['bg_tertiary'])
-        button_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(15, 0))
+        button_frame = tk.Frame(input_frame, bg=self.colors['bg_input'])
+        button_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(18, 0))
         
-        # Voice button (rounded style)
+        # Voice button (modern rounded style)
         self.voice_btn = tk.Button(
             button_frame,
-            text="♪",
+            text="🎤",
             command=self.toggle_voice,
             font=('Segoe UI', 14),
-            bg=self.colors['bg_secondary'],
+            bg=self.colors['bg_tertiary'],
             fg=self.colors['text_secondary'],
             activebackground=self.colors['button_hover'],
             activeforeground=self.colors['text_primary'],
@@ -407,25 +429,41 @@ class CopilotCompanionGUI:
             height=2,
             cursor='hand2'
         )
-        self.voice_btn.pack(pady=(5, 10))
+        self.voice_btn.pack(pady=(5, 12))
         
-        # Send button (larger, rounded style)
+        # Voice button hover effect
+        def voice_hover_in(e):
+            self.voice_btn.configure(bg=self.colors['button_hover'], fg=self.colors['text_primary'])
+        def voice_hover_out(e):
+            self.voice_btn.configure(bg=self.colors['bg_tertiary'], fg=self.colors['text_secondary'])
+        self.voice_btn.bind("<Enter>", voice_hover_in)
+        self.voice_btn.bind("<Leave>", voice_hover_out)
+        
+        # Send button (gradient-style with modern look)
         self.send_btn = tk.Button(
             button_frame,
             text="Send",
             command=self.send_message,
             font=('Segoe UI', 11, 'bold'),
-            bg=self.colors['accent_blue'],
+            bg=self.colors['accent_gradient_start'],
             fg='white',
-            activebackground=self.colors['button_hover'],
+            activebackground=self.colors['accent_gradient_end'],
             activeforeground='white',
             relief='flat',
             bd=0,
-            width=6,
+            width=7,
             height=2,
             cursor='hand2'
         )
         self.send_btn.pack()
+        
+        # Send button hover effect
+        def send_hover_in(e):
+            self.send_btn.configure(bg=self.colors['accent_gradient_end'])
+        def send_hover_out(e):
+            self.send_btn.configure(bg=self.colors['accent_gradient_start'])
+        self.send_btn.bind("<Enter>", send_hover_in)
+        self.send_btn.bind("<Leave>", send_hover_out)
         
         # Bind events
         self.message_entry.bind('<Control-Return>', lambda e: self.send_message())

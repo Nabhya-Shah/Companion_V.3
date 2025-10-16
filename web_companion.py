@@ -46,13 +46,24 @@ def chat():
             return jsonify({'error': 'Unauthorized'}), 401
         user_message = data.get('message', '').strip()
         persona = data.get('persona', 'Companion')
-        model = data.get('model', core_config.DEFAULT_CONVERSATION_MODEL)
+        # Allow automatic model selection (ensemble will trigger for complex queries)
+        # Only use explicit model if provided by user
+        model = data.get('model') if 'model' in data else None
         if not user_message:
             return jsonify({'error': 'Empty message'}), 400
+        
+        # Build recent conversation context from last 3 exchanges
+        recent_turns = []
+        for entry in conversation_history[-3:]:
+            recent_turns.append(f"User: {entry['user']}")
+            recent_turns.append(f"AI: {entry['ai']}")
+        recent_context = "\n".join(recent_turns) if recent_turns else ""
+        
         memory_context = {
             'profile': db.get_all_profile_facts(),
             'summaries': db.get_latest_summary(3),
-            'insights': db.get_latest_insights(3)
+            'insights': db.get_latest_insights(3),
+            'recent_conversation': recent_context
         }
         if user_message.startswith('!') and ' ' in user_message:
             first, rest = user_message[1:].split(' ', 1)
@@ -67,8 +78,9 @@ def chat():
             'persona': persona
         }
         conversation_history.append(entry)
-        if tts_manager.is_enabled:
-            tts_manager.speak_text(ai_response, blocking=False)
+        # Disable TTS for web (voice name outdated, causing errors)
+        # if tts_manager.is_enabled:
+        #     tts_manager.speak_text(ai_response, blocking=False)
         return jsonify({'response': ai_response, 'timestamp': entry['timestamp']})
     except Exception as e:
         logger.error(f"Chat error: {e}")

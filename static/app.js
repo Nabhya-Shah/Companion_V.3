@@ -2,23 +2,28 @@
 const chatPane = document.getElementById('chatPane');
 const userInput = document.getElementById('userInput');
 const sendBtn = document.getElementById('sendBtn');
-const statusEl = document.getElementById('status');
 const healthBtn = document.getElementById('healthBtn');
-const cmdHints = document.getElementById('cmdHints');
-const SLASH_COMMANDS = [
-  '/help - list commands',
-  '/memstats - memory counts',
-  '/health - health metrics',
-  '!search <query> - memory/web search (tool)',
-  '!time now - show current time (tool)',
-  '!calc 2+2*5 - calculator (tool)'
-];
+const toggleSidebarBtn = document.getElementById('toggleSidebar');
+const sidebar = document.getElementById('sidebar');
 
 let API_TOKEN = localStorage.getItem('companion_api_token') || '';
 function setApiToken(tok){ API_TOKEN = tok || ''; if(tok) localStorage.setItem('companion_api_token', tok); }
 function authHeaders(extra={}) { return { 'Content-Type':'application/json', ...(API_TOKEN? {'X-API-TOKEN':API_TOKEN}:{}), ...extra }; }
 
+// Sidebar toggle
+if (toggleSidebarBtn) {
+  toggleSidebarBtn.addEventListener('click', () => {
+    sidebar.classList.toggle('visible');
+    // Add class to body to shift layout
+    document.body.classList.toggle('sidebar-open');
+  });
+}
+
 function addMessage(role, text) {
+  // Remove welcome message on first interaction
+  const welcome = chatPane.querySelector('.msg.system');
+  if (welcome) welcome.remove();
+  
   const div = document.createElement('div');
   div.className = `msg ${role}`;
   div.textContent = text;
@@ -27,7 +32,11 @@ function addMessage(role, text) {
   ts.textContent = new Date().toLocaleTimeString();
   div.appendChild(ts);
   chatPane.appendChild(div);
-  chatPane.scrollTop = chatPane.scrollHeight;
+  
+  // Smooth scroll to bottom - scroll the container, not the element
+  setTimeout(() => {
+    chatPane.scrollTop = chatPane.scrollHeight;
+  }, 50);
 }
 
 async function sendMessage(retry=false) {
@@ -36,7 +45,14 @@ async function sendMessage(retry=false) {
   addMessage('user', message);
   userInput.value = '';
   resizeTextarea();
-  statusEl.textContent = '...';
+  
+  // Show loading indicator
+  const loadingDiv = document.createElement('div');
+  loadingDiv.className = 'msg ai loading';
+  loadingDiv.textContent = '...';
+  chatPane.appendChild(loadingDiv);
+  chatPane.scrollTop = chatPane.scrollHeight;
+  
   try {
     const resp = await fetch('/api/chat', {
       method: 'POST',
@@ -50,11 +66,13 @@ async function sendMessage(retry=false) {
       if (tok) { setApiToken(tok); return sendMessage(true); }
     }
     if (!resp.ok) throw new Error(data.error || 'Error');
+    
+    // Remove loading indicator
+    loadingDiv.remove();
     addMessage('ai', data.response);
   } catch (e) {
+    loadingDiv.remove();
     addMessage('ai', 'Error: ' + e.message);
-  } finally {
-    statusEl.textContent = '';
   }
 }
 
@@ -198,30 +216,6 @@ async function loadHealth(retry=false) {
 
 healthBtn.addEventListener('click', () => { loadHealth(); loadMemory(); });
 
-// Slash command hints
-userInput.addEventListener('input', () => {
-  const v = userInput.value;
-  if (v.startsWith('/') || v.startsWith('!')) {
-    const q = v.toLowerCase();
-    const matches = SLASH_COMMANDS.filter(c => c.startsWith(q) || c.includes(q.split(' ')[0]));
-    if (matches.length) {
-      cmdHints.style.display = 'block';
-      cmdHints.innerHTML = matches.slice(0,6).map(m => `<div data-cmd="${m.split(' ')[0]}">${m}</div>`).join('');
-      [...cmdHints.children].forEach(div => div.addEventListener('click', () => {
-        userInput.value = div.dataset.cmd + ' ';
-        resizeTextarea();
-        cmdHints.style.display='none';
-        userInput.focus();
-      }));
-    } else {
-      cmdHints.style.display='none';
-    }
-  } else {
-    cmdHints.style.display='none';
-  }
-});
-document.addEventListener('click', e => { if(!cmdHints.contains(e.target) && e.target!==userInput) cmdHints.style.display='none'; });
-
 async function loadModelsPanel(retry=false) {
   const panel = document.getElementById('modelsPanel');
   if (!panel) return;
@@ -269,29 +263,13 @@ async function loadRecentRouting() {
   } catch (e) { tgt.textContent = 'Error loading'; }
 }
 
-// Keyboard shortcuts overlay
-const overlayHtml = `<div id="kbOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:500;">
-  <div style="max-width:640px;margin:60px auto;background:#1e242c;border:1px solid #30363d;padding:22px 26px;border-radius:12px;font-size:14px;line-height:1.5;">
-    <h2 style="margin-top:0;font-size:18px;">Keyboard Shortcuts</h2>
-    <ul style="list-style:none;padding:0;margin:0 0 14px;">
-      <li><code>Enter</code> send message</li>
-      <li><code>Shift+Enter</code> newline</li>
-      <li><code>Ctrl+1..4</code> switch tabs</li>
-      <li><code>Ctrl+R</code> refresh metrics & routing</li>
-      <li><code>?</code> toggle this help</li>
-    </ul>
-    <div style="text-align:right;"><button id="kbClose" style="padding:6px 14px;">Close</button></div>
-  </div></div>`;
-document.body.insertAdjacentHTML('beforeend', overlayHtml);
-const kbOverlay = document.getElementById('kbOverlay');
+// Keyboard shortcuts (Ctrl+R for refresh, Ctrl+1-4 for tabs)
 document.addEventListener('keydown', e => {
-  if (e.key === '?' || (e.shiftKey && e.key === '/')) { e.preventDefault(); kbOverlay.style.display = kbOverlay.style.display==='none'?'block':'none'; }
   if (e.ctrlKey) {
     if (e.key === 'r') { e.preventDefault(); healthBtn.click(); }
     if (/^[1-4]$/.test(e.key)) { const idx = parseInt(e.key)-1; if (tabs[idx]) tabs[idx].click(); }
   }
 });
-document.getElementById('kbClose').addEventListener('click', ()=> kbOverlay.style.display='none');
 
 // Initial load
 loadMemory();

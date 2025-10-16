@@ -8,63 +8,82 @@
 </head>
 <body>
   <div id="app-root">
+    <!-- Sidebar (hidden by default) -->
+    <aside class="side" id="sidebar">
+      <nav class="tabs">
+        <button class="tab active" data-tab="memory">Memory</button>
+        <button class="tab" data-tab="models">Models</button>
+        <button class="tab" data-tab="search">Search</button>
+        <button class="tab" data-tab="metrics">Metrics</button>
+      </nav>
+      <div class="tabpanes">
+        <div class="pane active" id="pane-memory">
+          <h3>Profile Facts</h3>
+          <ul id="profileList" class="kv facts"></ul>
+          <div class="legend" style="font-size:11px;color:#808080;margin:8px 0 16px;">
+            Confidence: 
+            <span class="badge conf-high">high</span> 
+            <span class="badge conf-med">medium</span> 
+            <span class="badge conf-low">low</span>
+          </div>
+          <h3>Pending Facts <span id="pendingBadge" style="font-size:0.7em;color:#888;"></span></h3>
+          <ul id="pendingFacts" class="kv"></ul>
+          <h3>Summaries</h3>
+          <ul id="summaryList" class="bullets"></ul>
+          <h3>Insights</h3>
+          <ul id="insightList" class="bullets"></ul>
+        </div>
+        <div class="pane" id="pane-models">
+          <h3>Routing & Ensemble</h3>
+          <div id="modelsPanel" class="models-panel"></div>
+          <h3>Recent Routing</h3>
+          <div id="recentRouting" class="recent"></div>
+        </div>
+        <div class="pane" id="pane-search">
+          <div class="searchBox">
+            <input id="searchInput" placeholder="Search memory..." />
+            <button id="searchBtn">Search</button>
+          </div>
+          <div id="searchResults" class="results"></div>
+        </div>
+        <div class="pane" id="pane-metrics">
+          <pre id="metricsOut" class="metrics"></pre>
+        </div>
+      </div>
+    </aside>
+
     <header class="topbar">
-      <div class="brand">Companion<span class="accent">AI</span><span class="tag">personal</span></div>
+      <div class="brand">Companion AI<span class="tag">personal</span></div>
       <div class="controls">
-        <button id="healthBtn" title="Refresh Metrics">Refresh</button>
+        <button id="toggleSidebar" title="Toggle Sidebar">☰ Menu</button>
+        <button id="healthBtn" title="Refresh Metrics">⟳ Refresh</button>
       </div>
     </header>
+    
     <main class="layout">
-      <section class="chat" id="chatPane"></section>
-      <aside class="side">
-        <nav class="tabs">
-          <button class="tab active" data-tab="memory">Memory</button>
-          <button class="tab" data-tab="models">Models</button>
-          <button class="tab" data-tab="search">Search</button>
-          <button class="tab" data-tab="metrics">Metrics</button>
-        </nav>
-        <div class="tabpanes">
-          <div class="pane active" id="pane-memory">
-            <h3>Profile Facts</h3>
-            <ul id="profileList" class="kv facts"></ul>
-            <div class="legend" style="font-size:11px;color:#768390;margin:4px 0 10px;">Confidence: <span class="badge conf-high">high</span> <span class="badge conf-med">medium</span> <span class="badge conf-low">low</span> &nbsp;• click fact to expand provenance</div>
-            <h3 style="margin-top:1em;">Pending Facts <span id="pendingBadge" style="font-size:0.7em;color:#888;"></span></h3>
-            <ul id="pendingFacts" class="kv"></ul>
-            <h3>Summaries</h3>
-            <ul id="summaryList" class="bullets"></ul>
-            <h3>Insights</h3>
-            <ul id="insightList" class="bullets"></ul>
-          </div>
-          <div class="pane" id="pane-models">
-            <h3>Routing & Ensemble</h3>
-            <div id="modelsPanel" class="models-panel"></div>
-            <h3 style="margin-top:1em;">Recent Routing</h3>
-            <div id="recentRouting" class="recent"></div>
-          </div>
-          <div class="pane" id="pane-search">
-            <div class="searchBox">
-              <input id="searchInput" placeholder="Search memory or web..." />
-              <button id="searchBtn">Go</button>
-            </div>
-            <div id="searchResults" class="results"></div>
-          </div>
-          <div class="pane" id="pane-metrics">
-            <pre id="metricsOut" class="metrics"></pre>
-          </div>
+      <section class="chat" id="chatPane">
+        <!-- Welcome message will be inserted here -->
+        <div class="msg system" style="text-align: center; border: none; background: transparent;">
+          <h1 style="font-size: 2.5rem; margin-bottom: 1rem; background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-weight: 600;">
+            Hello, what can I help with?
+          </h1>
+          <p style="color: var(--text-secondary); font-size: 1.1rem;">
+            Your AI companion is ready to chat
+          </p>
         </div>
-      </aside>
+      </section>
     </main>
+    
     <footer class="composer">
       <div class="composer-col">
-        <textarea id="userInput" rows="1" placeholder="Type your message... /help for commands" spellcheck="false" autofocus></textarea>
-        <div id="cmdHints" class="cmd-hints" style="display:none;"></div>
-      </div>
-      <div class="composer-actions">
-        <button id="sendBtn">Send</button>
-        <span id="status" class="status"></span>
+        <textarea id="userInput" rows="1" placeholder="Message Companion AI..." spellcheck="false" autofocus></textarea>
+        <div class="composer-actions">
+          <button id="sendBtn">Send</button>
+        </div>
       </div>
     </footer>
   </div>
+  
   <script src="/static/app.js"></script>
 </body>
 </html>

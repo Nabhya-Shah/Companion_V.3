@@ -20,7 +20,7 @@ API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN")  # For web write endpoints
 
 # ---- Models (central names) ----
 # Conversation default model (balanced speed/quality)
-DEFAULT_CONVERSATION_MODEL = "llama-3.1-8b-instant"
+DEFAULT_CONVERSATION_MODEL = "openai/gpt-oss-120b"  # Using 120B for quality
 # Reasoning / larger context - UPDATED: deepseek-r1 was decommissioned
 REASONING_MODEL = "llama-3.3-70b-versatile"  # Using 70B as reasoning fallback
 # Memory / fast analytic model
