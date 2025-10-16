@@ -580,22 +580,27 @@ def extract_profile_facts(user_msg: str, ai_msg: str) -> dict:
 
     # Legacy fallback path with improved prompt
     prompt = (
-        "Extract explicit user facts from the message below and return ONLY valid JSON.\n\n"
+        "Extract ONLY explicit facts the user DIRECTLY STATED about themselves.\n\n"
         f'USER MESSAGE: "{user_msg}"\n\n'
-        "INSTRUCTIONS:\n"
-        "- Extract ONLY facts the user explicitly stated about themselves\n"
-        "- Return a valid JSON object, nothing else\n"
-        "- If no facts found, return: {}\n"
-        "- Valid facts: name, age, location, hobbies, preferences, occupation, skills, interests\n"
-        "- Include ALL facts mentioned, even if there are multiple\n"
-        "- Do NOT infer, guess, or add information not stated\n\n"
-        "Examples:\n"
-        '- Input: "My name is John" → Output: {"name": "John"}\n'
-        '- Input: "I love Python" → Output: {"favorite_language": "Python"}\n'
-        '- Input: "I\'m 25 years old" → Output: {"age": "25"}\n'
-        '- Input: "I\'m learning Japanese and enjoy hiking" → Output: {"learning": "Japanese", "hobby": "hiking"}\n'
-        '- Input: "Hello there" → Output: {}\n\n'
-        "RESPOND WITH ONLY THE JSON OBJECT:"
+        "CRITICAL RULES:\n"
+        "1. ONLY extract facts the user explicitly said with their own words\n"
+        "2. Do NOT infer mood, behavior, or personality (no 'user is chill', 'user is quiet', etc.)\n"
+        "3. Do NOT extract conversation meta-facts (no 'user is talking to AI', 'AI is repeating', etc.)\n"
+        "4. Do NOT make assumptions or interpretations\n"
+        "5. If no explicit facts, return empty: {}\n\n"
+        "ALLOWED fact types: name, age, location, occupation, hobbies, preferences, skills, interests, family, pets, projects, education\n\n"
+        "CORRECT Examples:\n"
+        '- "My name is John" → {"name": "John"}\n'
+        '- "I love Python" → {"favorite_language": "Python"}\n'
+        '- "I\'m 25 years old" → {"age": "25"}\n'
+        '- "I work as a teacher" → {"occupation": "teacher"}\n'
+        '- "I\'m learning Japanese and enjoy hiking" → {"learning": "Japanese", "hobby": "hiking"}\n\n'
+        "WRONG Examples (DO NOT extract these):\n"
+        '- "Yeah I\'m chill" → {} (mood/behavior, not a fact)\n'
+        '- "Nothing much" → {} (no facts stated)\n'
+        '- "Lol yeah" → {} (no facts stated)\n'
+        '- User seems quiet → NEVER extract inferences!\n\n'
+        "Return ONLY a valid JSON object:"
     )
     try:
         response = generate_groq_response(prompt, model=model)
@@ -638,14 +643,46 @@ def extract_profile_facts(user_msg: str, ai_msg: str) -> dict:
         return {}
 
 def _filter_fact_dict(parsed: dict, user_msg: str) -> dict:
-    """Apply literal presence + key normalization filtering to parsed fact dict."""
+    """Apply STRICT filtering - ONLY allow facts explicitly stated by user.
+    
+    Rejects:
+    - Inferences about mood/behavior (user_is_chill, user_is_quiet, etc.)
+    - AI self-references (ai_is_repeating_itself, ai_is_here_to_help)
+    - Conversation meta-facts (user_is_talking_to_ai, previous_conversations)
+    """
     user_lower = user_msg.lower()
     filtered: dict[str,str] = {}
     import re
+    
     def norm_key(k: str) -> str:
         k2 = re.sub(r'[^a-zA-Z0-9]+', '_', k.lower()).strip('_')
         k2 = re.sub(r'_+', '_', k2)
         return k2[:60]
+    
+    # Blacklist patterns - reject ANY key matching these
+    blacklist_patterns = [
+        r'^user_is_',      # user_is_chill, user_is_quiet, etc.
+        r'^user_.*ing$',   # user_chilling, user_testing, etc.
+        r'^ai_',           # ai_is_repeating_itself, etc.
+        r'conversation',   # previous_conversations, etc.
+        r'aware',          # user_is_aware_of_ai, etc.
+        r'testing',        # user_is_testing_ai
+        r'explicit',       # user_explicit_interest
+        r'confusion',      # user_confusion
+    ]
+    
+    # Whitelist - ONLY these fact types allowed
+    allowed_fact_types = [
+        'name', 'age', 'location', 'city', 'country', 'hometown', 
+        'occupation', 'job', 'work', 'company',
+        'hobby', 'hobbies', 'interest', 'interests',
+        'favorite_game', 'favorite_movie', 'favorite_food', 'favorite_drink', 'favorite_snack',
+        'favorite_color', 'favorite_book', 'favorite_music', 'favorite_band',
+        'skill', 'skills', 'language', 'languages',
+        'pet', 'pets', 'project', 'projects',
+        'learning', 'studying', 'education',
+        'family', 'relationship',
+    ]
     
     for k, v in parsed.items():
         if not isinstance(k, str) or not isinstance(v, (str, int, float)):
@@ -655,25 +692,29 @@ def _filter_fact_dict(parsed: dict, user_msg: str) -> dict:
         if not k_str or not v_str:
             continue
         
-        # More lenient check - allow if key OR value appears, or if it's semantic
+        key_normalized = norm_key(k_str)
+        
+        # REJECT if matches blacklist
+        if any(re.search(pattern, key_normalized) for pattern in blacklist_patterns):
+            logger.debug(f"Rejected blacklisted fact: {key_normalized}")
+            continue
+        
+        # REQUIRE that key is in whitelist OR value appears in user message
         key_lower = k_str.lower()
         value_lower = v_str.lower()
         
-        # Direct match in user message
-        if (key_lower in user_lower) or (value_lower in user_lower):
-            filtered[norm_key(k_str)] = v_str[:160]
-        # Allow semantic matches for common fact types even if wording differs
-        elif any(semantic_key in key_lower for semantic_key in [
-            'name', 'age', 'location', 'city', 'country', 'job', 'occupation',
-            'favorite', 'like', 'love', 'enjoy', 'prefer', 'hobby', 'interest',
-            'language', 'skill', 'project', 'working_on'
-        ]):
-            # For semantic keys, verify the value has some relation to user message
-            # Check if at least some words from value appear in message
-            value_words = set(value_lower.split())
-            user_words = set(user_lower.split())
-            if value_words & user_words or len(value_words) == 1:  # Overlap or single word (like name)
-                filtered[norm_key(k_str)] = v_str[:160]
+        # Check if key type is whitelisted
+        is_whitelisted = any(allowed in key_lower for allowed in allowed_fact_types)
+        
+        # Check if value literally appears in user message
+        value_in_message = value_lower in user_lower
+        
+        # ONLY accept if whitelisted AND value is in message
+        if is_whitelisted and value_in_message:
+            filtered[key_normalized] = v_str[:160]
+            logger.debug(f"Accepted fact: {key_normalized} = {v_str}")
+        else:
+            logger.debug(f"Rejected fact: {key_normalized} (whitelisted:{is_whitelisted}, in_msg:{value_in_message})")
     
     return filtered
 

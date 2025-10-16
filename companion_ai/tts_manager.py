@@ -25,8 +25,8 @@ class AzureTTSManager:
         self.is_enabled = False
         self.current_synthesis = None  # Track current synthesis for interruption
         
-        # Voice settings - Phoebe Dragon with natural pace
-        self.current_voice = "en-US-Phoebe:DragonHDLatestNeural"  # Phoebe Dragon HD Latest
+        # Voice settings - Jenny Neural (warm and friendly, perfect for Aether)
+        self.current_voice = "en-US-JennyNeural"  # Warm, friendly, natural
         self.speech_rate = "+5%"   # Just slightly faster, not rushed
         self.speech_pitch = "+0%"  # No pitch changes - keep natural
         self.speech_volume = "+0%" # Normal volume

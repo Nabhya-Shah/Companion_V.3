@@ -1,1 +1,1 @@
-{"models": {"openai/gpt-oss-120b": {"count": 4, "latencies": [1052.24, 932.8, 689.84, 1183.49]}}, "total_interactions": 4, "last_update_ts": 1760642992.6506166, "tools": {"total_invocations": 0, "by_name": {}, "blocked": 0, "failures": 0, "decision_types": {}, "skill": {"by_name": {}}}}
+{"models": {"openai/gpt-oss-120b": {"count": 3, "latencies": [669.62, 628.6, 722.43]}}, "total_interactions": 3, "last_update_ts": 1760645847.3513417, "tools": {"total_invocations": 0, "by_name": {}, "blocked": 0, "failures": 0, "decision_types": {}, "skill": {"by_name": {}}}}
