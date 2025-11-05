@@ -42,21 +42,34 @@ class ConversationSession:
             })
             logger.info(f"Updated memory context with keywords: {keywords}")
     
-    def process_message(self, user_message: str) -> str:
+    def process_message(self, user_message: str, full_conversation_history: List[Dict] = None) -> str:
         """
         New conversation flow:
         1. Update memory context with relevant information
-        2. Generate AI response with full context
+        2. Generate response with full context including ALL conversation history
         3. Store conversation for later memory processing
+        
+        Args:
+            user_message: Current user message
+            full_conversation_history: Complete conversation history from web session
         """
         
         # Step 1: Update memory context based on current message
         self._update_memory_context_with_keywords(user_message)
         
-        # Step 2: Generate response with enhanced context
+        # Step 2: Build recent conversation context from ALL history
+        if full_conversation_history:
+            recent_turns = []
+            for entry in full_conversation_history:
+                recent_turns.append(f"User: {entry.get('user', '')}")
+                recent_turns.append(f"AI: {entry.get('ai', '')}")
+            self.memory_context['recent_conversation'] = "\n".join(recent_turns)
+            logger.info(f"Using full conversation history: {len(full_conversation_history)} exchanges")
+        
+        # Step 3: Generate response with enhanced context
         ai_response = generate_response(user_message, self.memory_context)
         
-        # Step 3: Store conversation exchange for later processing
+        # Step 4: Store conversation exchange for later processing
         self.conversation_history.append({
             "user": user_message,
             "ai": ai_response,

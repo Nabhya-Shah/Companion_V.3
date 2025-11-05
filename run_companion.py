@@ -97,6 +97,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     g.add_argument('--cleanup', action='store_true', help='Run smart memory cleanup and exit')
     g.add_argument('--reset-memory', action='store_true', help='WIPE all memory tables (danger)')
     g.add_argument('--web', action='store_true', help='Launch web UI instead of terminal chat')
+    g.add_argument('--web-interactive', action='store_true', help='Launch web UI + terminal chat (hybrid mode)')
     p.add_argument('--debug', action='store_true', help='Print debug environment info then continue')
     return p.parse_args(argv)
 
@@ -138,6 +139,9 @@ def main(argv: list[str] | None = None):
     if ns.web:
         from web_companion import run_web
         run_web()
+    elif ns.web_interactive:
+        from web_interactive import main as web_interactive_main
+        web_interactive_main()
     else:
         chat_cli.main()
 

@@ -125,6 +125,7 @@ body.sidebar-open .composer {
   max-width: 800px;
   margin: 0 auto;
   padding: 20px;
+  padding-bottom: 120px; /* Extra space so last message isn't hidden behind composer */
   width: 100%;
 }
 

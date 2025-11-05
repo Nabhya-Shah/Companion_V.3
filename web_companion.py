@@ -11,6 +11,7 @@ import logging
 from datetime import datetime
 
 from companion_ai.llm_interface import generate_response
+from companion_ai.conversation_manager import ConversationSession
 from companion_ai.core import config as core_config
 from companion_ai import memory as db
 from companion_ai.tts_manager import tts_manager
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 conversation_history = []
+conversation_session = ConversationSession()
 
 @app.route('/')
 def index():
@@ -46,31 +48,32 @@ def chat():
             return jsonify({'error': 'Unauthorized'}), 401
         user_message = data.get('message', '').strip()
         persona = data.get('persona', 'Companion')
+        tts_enabled = data.get('tts_enabled', False)  # Get TTS preference from client
         # Allow automatic model selection (ensemble will trigger for complex queries)
         # Only use explicit model if provided by user
         model = data.get('model') if 'model' in data else None
         if not user_message:
             return jsonify({'error': 'Empty message'}), 400
         
-        # Build recent conversation context from last 3 exchanges
-        recent_turns = []
-        for entry in conversation_history[-3:]:
-            recent_turns.append(f"User: {entry['user']}")
-            recent_turns.append(f"AI: {entry['ai']}")
-        recent_context = "\n".join(recent_turns) if recent_turns else ""
-        
-        memory_context = {
-            'profile': db.get_all_profile_facts(),
-            'summaries': db.get_latest_summary(3),
-            'insights': db.get_latest_insights(3),
-            'recent_conversation': recent_context
-        }
+        # Pass ALL conversation history to session (no limits!)
+        # The AI has access to complete conversation + database memories
         if user_message.startswith('!') and ' ' in user_message:
             first, rest = user_message[1:].split(' ', 1)
             tool_result = run_tool(first, rest)
             ai_response = f"[tool:{first}]\n{tool_result}"
         else:
-            ai_response = generate_response(user_message, memory_context, model, persona)
+            # Use conversation session with FULL conversation history
+            ai_response = conversation_session.process_message(user_message, conversation_history)
+        
+        # Guard against empty responses
+        if not ai_response or not ai_response.strip():
+            logger.warning("Empty AI response received, using fallback")
+            ai_response = "I'm here! Sorry, I got a bit stuck there. What were you saying?"
+        
+        # Remove "Chat:" prefix if present (formatting artifact)
+        if ai_response.startswith("Chat:") or ai_response.startswith("CHAT:"):
+            ai_response = ai_response[5:].strip()
+        
         entry = {
             'user': user_message,
             'ai': ai_response,
@@ -78,12 +81,92 @@ def chat():
             'persona': persona
         }
         conversation_history.append(entry)
-        # Disable TTS for web (voice name outdated, causing errors)
-        # if tts_manager.is_enabled:
-        #     tts_manager.speak_text(ai_response, blocking=False)
+        
+        # Auto-process memory every 5 messages to store facts in database
+        if len(conversation_history) % 5 == 0:
+            try:
+                logger.info(f"Auto-processing memory at {len(conversation_history)} messages")
+                conversation_session.process_session_memory()
+            except Exception as mem_err:
+                logger.warning(f"Memory processing error: {mem_err}")
+        
+        # TTS: Speak response if enabled by user
+        if tts_enabled and tts_manager.is_enabled:
+            try:
+                tts_manager.speak_text(ai_response, blocking=False)
+            except Exception as tts_error:
+                logger.warning(f"TTS error: {tts_error}")
         return jsonify({'response': ai_response, 'timestamp': entry['timestamp']})
     except Exception as e:
         logger.error(f"Chat error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/debug/chat', methods=['POST'])
+def debug_chat():
+    """
+    Debug endpoint for AI agent testing.
+    No auth required, returns both user message and AI response.
+    Shares conversation_history with main chat endpoint.
+    """
+    try:
+        data = request.json or {}
+        user_message = data.get('message', '').strip()
+        persona = data.get('persona', 'Companion')
+        
+        if not user_message:
+            return jsonify({'error': 'Empty message'}), 400
+        
+        # Use conversation session with FULL conversation history
+        ai_response = conversation_session.process_message(user_message, conversation_history)
+        
+        # Guard against empty responses
+        if not ai_response or not ai_response.strip():
+            logger.warning("Empty AI response in debug endpoint, using fallback")
+            ai_response = "I'm here! Sorry, I got a bit stuck there. What were you saying?"
+        
+        # Remove "Chat:" prefix if present (formatting artifact)
+        if ai_response.startswith("Chat:") or ai_response.startswith("CHAT:"):
+            ai_response = ai_response[5:].strip()
+        
+        # Add to shared conversation history
+        entry = {
+            'user': user_message,
+            'ai': ai_response,
+            'timestamp': datetime.now().isoformat(),
+            'persona': persona,
+            'source': 'debug_api'
+        }
+        conversation_history.append(entry)
+        
+        # Auto-process memory every 5 messages to store facts in database
+        if len(conversation_history) % 5 == 0:
+            try:
+                logger.info(f"Auto-processing memory at {len(conversation_history)} messages")
+                conversation_session.process_session_memory()
+            except Exception as mem_err:
+                logger.warning(f"Memory processing error: {mem_err}")
+        
+        return jsonify({
+            'user': user_message,
+            'ai': ai_response,
+            'timestamp': entry['timestamp'],
+            'history_length': len(conversation_history)
+        })
+        
+    except Exception as e:
+        logger.error(f"Debug chat error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/chat/history')
+def get_chat_history():
+    """Get conversation history for live updates."""
+    try:
+        return jsonify({
+            'history': conversation_history,
+            'count': len(conversation_history)
+        })
+    except Exception as e:
+        logger.error(f"Get history error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/memory')

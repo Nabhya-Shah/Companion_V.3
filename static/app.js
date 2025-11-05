@@ -10,6 +10,18 @@ let API_TOKEN = localStorage.getItem('companion_api_token') || '';
 function setApiToken(tok){ API_TOKEN = tok || ''; if(tok) localStorage.setItem('companion_api_token', tok); }
 function authHeaders(extra={}) { return { 'Content-Type':'application/json', ...(API_TOKEN? {'X-API-TOKEN':API_TOKEN}:{}), ...extra }; }
 
+// TTS Toggle
+let ttsEnabled = localStorage.getItem('companion_tts_enabled') === 'true';
+const ttsToggle = document.getElementById('ttsToggle');
+if (ttsToggle) {
+  ttsToggle.checked = ttsEnabled;
+  ttsToggle.addEventListener('change', () => {
+    ttsEnabled = ttsToggle.checked;
+    localStorage.setItem('companion_tts_enabled', ttsEnabled);
+    console.log('TTS ' + (ttsEnabled ? 'enabled' : 'disabled'));
+  });
+}
+
 // Sidebar toggle
 if (toggleSidebarBtn) {
   toggleSidebarBtn.addEventListener('click', () => {
@@ -57,7 +69,7 @@ async function sendMessage(retry=false) {
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ message })
+      body: JSON.stringify({ message, tts_enabled: ttsEnabled })
     });
     const data = await resp.json();
     if (resp.status === 401 && !retry) {
@@ -270,6 +282,42 @@ document.addEventListener('keydown', e => {
     if (/^[1-4]$/.test(e.key)) { const idx = parseInt(e.key)-1; if (tabs[idx]) tabs[idx].click(); }
   }
 });
+
+// Live message polling
+let lastMessageCount = 0;
+async function pollForNewMessages() {
+  try {
+    const resp = await fetch('/api/chat/history');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    
+    // If there are new messages, add them to the chat
+    if (data.count > lastMessageCount) {
+      const newMessages = data.history.slice(lastMessageCount);
+      newMessages.forEach(entry => {
+        // Check if message already exists to avoid duplicates
+        const existingMessages = Array.from(chatPane.querySelectorAll('.msg')).map(m => m.textContent);
+        const userExists = existingMessages.some(text => text.includes(entry.user));
+        const aiExists = existingMessages.some(text => text.includes(entry.ai));
+        
+        if (!userExists) {
+          addMessage('user', entry.user);
+        }
+        if (!aiExists) {
+          addMessage('ai', entry.ai);
+        }
+      });
+      lastMessageCount = data.count;
+    }
+  } catch (e) {
+    console.error('Poll error:', e);
+  }
+}
+
+// Start polling every 2 seconds
+setInterval(pollForNewMessages, 2000);
+// Initial poll to catch up
+pollForNewMessages();
 
 // Initial load
 loadMemory();
