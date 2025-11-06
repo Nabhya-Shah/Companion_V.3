@@ -5,6 +5,12 @@ requests>=2.31.0
 flask>=2.3.0
 PyYAML>=6.0
 
+# File Processing
+PyPDF2>=3.0.0           # PDF text extraction
+Pillow>=10.0.0          # Image processing
+pytesseract>=0.3.10     # OCR for images (requires Tesseract binary)
+python-docx>=0.8.11     # Word document reading
+
 # GUI Dependencies (tkinter is part of the standard library on most Python distributions; do not list as pip dep)
 # tkinter
 

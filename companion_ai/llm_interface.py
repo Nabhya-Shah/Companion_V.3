@@ -11,7 +11,7 @@ from typing import Dict, Any
 
 from companion_ai.core import config as core_config
 from companion_ai.core.context_builder import build_system_prompt_with_meta
-from companion_ai.tools import run_tool, list_tools
+from companion_ai.tools import get_function_schemas, execute_function_call
 from companion_ai.core import metrics as core_metrics
 import time as _time
 from companion_ai.core.conversation_logger import log_interaction
@@ -130,24 +130,6 @@ def build_system_prompt(memory_context: dict, persona: str = "Aether") -> str:
     else:  # Default to Aether
         return build_aether_prompt(profile_str)
 
-def _augment_system_with_tools(base_prompt: str) -> str:
-    """Append tool instruction block for autonomous tool invocation."""
-    tool_list = list_tools()
-    if not tool_list:
-        return base_prompt
-    tools_desc = '\n'.join(f"- {t}" for t in tool_list)
-    guidance = (
-        "\nTOOL USE INSTRUCTIONS:\n"
-        "You may decide to use ONE tool proactively when it clearly helps the user.\n"
-        "Respond in one of two formats ONLY for your first reply: \n"
-        "1) TOOL:<name>|<input>  (no other text)\n"
-        "2) CHAT: <your natural reply>\n"
-        "After a TOOL call is executed your final answer will be generated with the results appended.\n"
-        "Strictly use tool names from the list; if no tool is useful choose CHAT.\n"
-        f"Available tools:\n{tools_desc}\n"
-    )
-    return base_prompt + guidance
-
 def generate_response(user_message: str, memory_context: dict, model: str | None = None, persona: str = "Companion") -> str:
     """Generate response using specified model.
 
@@ -168,14 +150,10 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
         if persona.lower() == 'companion':
             meta = build_system_prompt_with_meta(user_message, recent_conv)
             system_prompt = meta['system_prompt']
-            if core_config.ENABLE_AUTO_TOOLS:
-                system_prompt = _augment_system_with_tools(system_prompt)
             mode = meta['mode']
             memory_meta = meta['memory_meta']
         else:
             system_prompt = build_system_prompt(memory_context, persona)
-            if core_config.ENABLE_AUTO_TOOLS:
-                system_prompt = _augment_system_with_tools(system_prompt)
             mode = 'legacy'
             memory_meta = None
         start_t = time.perf_counter()
@@ -299,76 +277,43 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
                 routing_meta.update(ensemble_meta)
             except Exception as ee:
                 logger.debug(f"Ensemble path failed, falling back single model: {ee}")
+        
+        # Generate response with native function calling
         if first_output is None:
-            first_output = generate_model_response(user_message, system_prompt, chosen_model)
-        tool_used = None
-        tool_result = None
-        final_output = first_output
-        if core_config.ENABLE_AUTO_TOOLS:
-            stripped = first_output.strip()
-            if stripped.startswith('TOOL:'):
-                # Parse TOOL:name|input
-                spec = stripped[5:].strip()
-                if '|' in spec:
-                    name, arg = spec.split('|', 1)
-                    name = name.strip().lower()
-                    arg = arg.strip()
-                    if name in list_tools():
-                        # Skill gating (allow learning period, then gate low-skill tools)
-                        if not core_metrics.should_allow_tool(name):
-                            core_metrics.record_tool(name, success=True, blocked=True, decision_type='skill_gate')
-                            final_output = f"(Skipped low-skill {name}) " + first_output
-                            output = final_output
-                            latency_ms = (time.perf_counter() - start_t) * 1000.0
-                            # log and return
-                            try:
-                                log_interaction(
-                                    user_message,
-                                    output,
-                                    mode,
-                                    system_prompt,
-                                    memory_meta,
-                                    model=chosen_model,
-                                    complexity=complexity,
-                                    routing=routing_meta,
-                                    latency_ms=round(latency_ms,2),
-                                    tool_used=name,
-                                    tool_result_len=None,
-                                    tool_blocked=True
-                                )
-                            except Exception as log_err:
-                                logger.debug(f"Logging failed: {log_err}")
-                            return output
-                        # Cooldown suppression (simple in-memory cache)
-                        _tool_cache = getattr(generate_response, '_recent_tools', {})
-                        now = _time.time()
-                        # prune old
-                        for k,v in list(_tool_cache.items()):
-                            if now - v['ts'] > 120:  # 2 min TTL
-                                del _tool_cache[k]
-                        repeated = False
-                        key = f"{name}:{arg.lower()[:80]}"
-                        if key in _tool_cache:
-                            repeated = True
-                        if repeated:
-                            core_metrics.record_tool(name, success=True, blocked=True, decision_type='cooldown')
-                            final_output = f"(Suppressed repeat {name} call) " + first_output
-                        else:
-                            tool_used = name
-                            tool_result = run_tool(name, arg)
-                            _tool_cache[key] = {'ts': now}
-                            setattr(generate_response, '_recent_tools', _tool_cache)
-                            core_metrics.record_tool(name, success=True, blocked=False, decision_type='model_directive')
-                            follow_sys = system_prompt + f"\n\nTool {name} result (read-only):\n{tool_result}\nNow provide the final answer to the user (no TOOL: prefix)."
-                            final_output = generate_model_response(user_message, follow_sys, chosen_model)
-                    else:
-                        core_metrics.record_tool(name or 'invalid', success=False, blocked=False, decision_type='invalid')
-                        final_output = 'Tool request invalid (unknown tool). ' + first_output
-                else:
-                    core_metrics.record_tool('malformed', success=False, blocked=False, decision_type='malformed')
-                    final_output = 'Malformed tool directive. ' + first_output
-            elif stripped.startswith('CHAT:'):
-                final_output = stripped[5:].strip() or first_output
+            # Check if query should use Groq Compound system (web/weather/calc)
+            if core_config.should_use_compound(user_message):
+                try:
+                    logger.info("Routing to Compound system (built-in tools)")
+                    first_output, executed_tools = generate_compound_response(user_message, system_prompt)
+                    # Log Compound tool usage
+                    if executed_tools:
+                        for tool_info in executed_tools:
+                            if isinstance(tool_info, dict):
+                                tool_name = tool_info.get('name', 'unknown')
+                                core_metrics.record_tool(tool_name, success=True, blocked=False, decision_type='compound_builtin')
+                    final_output = first_output
+                except Exception as e:
+                    logger.error(f"Compound system failed, falling back to custom tools: {e}")
+                    # Fall through to custom tools
+                    first_output = None
+            
+            # Use custom tools if Compound not used or failed
+            if first_output is None and core_config.ENABLE_AUTO_TOOLS:
+                # Use dedicated tool model with parallel tool support
+                tool_model = core_config.MODEL_ROLES.get('tools', chosen_model)
+                first_output, tool_used, tool_result = generate_model_response_with_tools(
+                    user_message, system_prompt, tool_model, conversation_model=chosen_model
+                )
+                if tool_used:
+                    core_metrics.record_tool(tool_used, success=True, blocked=False, decision_type='native_function_call')
+                final_output = first_output
+            elif first_output is None:
+                # Tools disabled - just generate normally
+                first_output = generate_model_response(user_message, system_prompt, chosen_model)
+                final_output = first_output
+        else:
+            final_output = first_output
+        
         output = final_output
         latency_ms = (time.perf_counter() - start_t) * 1000.0
         try:
@@ -401,6 +346,229 @@ def _maybe_cache_opts(system_prompt: str) -> dict:
     key = hashlib.sha256(system_prompt.encode('utf-8')).hexdigest()[:40]
     # Groq prompt caching (if supported by SDK) typically via `cache_key` or `cache` param
     return {"cache_key": f"sys:{key}"}
+
+def generate_model_response_with_tools(user_message: str, system_prompt: str, model: str, conversation_model: str = None) -> tuple[str, str | None, str | None]:
+    """Generate response using Groq native function calling.
+    
+    Args:
+        user_message: The user's question
+        system_prompt: Full system prompt with personality (used for final response)
+        model: Tool model to use for deciding which tools to call
+        conversation_model: Model to use for final response with personality (defaults to tool model)
+    
+    Returns:
+        tuple: (response_text, tool_name_used, tool_result)
+    """
+    if not groq_client:
+        raise Exception("Groq client not available")
+    
+    if conversation_model is None:
+        conversation_model = model
+    
+    # Use a simple tool-focused system prompt for tool decision
+    tool_system_prompt = (
+        "You are a helpful assistant with access to tools. "
+        "When the user asks for information that requires real-time data (weather, time, calculations, web search, etc.), "
+        "YOU MUST use the appropriate tool. Do not say you don't have access - you DO have tools available. "
+        "Use them proactively whenever they can help answer the question accurately.\n\n"
+        "For file-related requests:\n"
+        "- If user gives a general file description (e.g., 'the PDF about X'), use find_file to search for it\n"
+        "- Once you have the file path, use read_pdf, read_document, or read_image_text to read it\n"
+        "- You can use multiple tools in sequence if needed\n"
+        "Be smart about combining tools to fully answer the user's question."
+    )
+    
+    messages = [
+        {"role": "system", "content": tool_system_prompt},
+        {"role": "user", "content": user_message}
+    ]
+    
+    # Get function schemas
+    function_schemas = get_function_schemas()
+    
+    logger.info(f"Tool model: {model}, Conversation model: {conversation_model}")
+    logger.info(f"Function schemas available: {len(function_schemas)}")
+    
+    if not function_schemas:
+        # No tools available, fall back to regular generation
+        return generate_model_response(user_message, system_prompt, model), None, None
+    
+    # Don't use cache opts for tool calls - not supported by Groq function calling
+    
+    try:
+        # First API call with function calling enabled
+        logger.info(f"Calling {model} with {len(function_schemas)} tools available for: {user_message[:50]}")
+        response = groq_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            tools=function_schemas,
+            tool_choice="auto",  # Let model decide
+            temperature=0.1,  # Low temperature for precise tool calling
+            max_tokens=1024,
+            top_p=0.95,
+            stream=False
+        )
+    except (TypeError, Exception) as e:
+        # SDK might not support function calling or cache params; fall back
+        logger.error(f"Function calling failed: {e}")
+        return generate_model_response(user_message, system_prompt, model), None, None
+    
+    # AGENTIC LOOP: Keep calling tools until model returns final text response
+    # This enables sequential tool use (find → read, search → summarize, etc.)
+    all_tool_results = []  # Track all tools used across all iterations
+    max_iterations = 5  # Prevent infinite loops
+    iteration = 0
+    
+    while iteration < max_iterations:
+        iteration += 1
+        message = response.choices[0].message
+        logger.info(f"[Iteration {iteration}] finish_reason: {response.choices[0].finish_reason}, has tool_calls: {bool(message.tool_calls)}")
+        
+        # Check if model wants to call functions
+        if not message.tool_calls:
+            # No more tool calls - model has final response
+            if message.content and message.content.strip():
+                logger.info(f"Agentic loop complete after {iteration} iteration(s)")
+                final_text = message.content.strip()
+                
+                # Return summary of ALL tools used
+                if all_tool_results:
+                    tool_name = all_tool_results[0][0]
+                    combined_results = "; ".join([f"{name}: {res[:100]}" for name, res in all_tool_results])
+                    return sanitize_output(final_text), tool_name, combined_results
+                else:
+                    return sanitize_output(final_text), None, None
+            else:
+                # No content and no tool calls - use tool results as fallback
+                logger.warning(f"No content in final response after {iteration} iterations")
+                if all_tool_results:
+                    tool_name, tool_result = all_tool_results[-1]  # Use most recent tool
+                    final_text = f"Here's what I found:\n\n{tool_result}"
+                    combined_results = "; ".join([f"{name}: {res[:100]}" for name, res in all_tool_results])
+                    return sanitize_output(final_text), tool_name, combined_results
+                else:
+                    return "I couldn't generate a response.", None, None
+        
+        # Model wants to call tools - execute them
+        tool_results = []
+        
+        # Add assistant's response with all tool calls
+        messages.append({
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments
+                }
+            } for tc in message.tool_calls]
+        })
+        
+        # Execute each tool call (parallel tool use)
+        for tool_call in message.tool_calls:
+            function_name = tool_call.function.name
+            function_args = json.loads(tool_call.function.arguments)
+            
+            logger.info(f"[Iteration {iteration}] Function call: {function_name} with args: {function_args}")
+            
+            # Execute the function
+            try:
+                function_result = execute_function_call(function_name, function_args)
+                tool_results.append((function_name, function_result))
+                all_tool_results.append((function_name, function_result))
+            except Exception as e:
+                function_result = f"Error executing {function_name}: {str(e)}"
+                tool_results.append((function_name, function_result))
+                all_tool_results.append((function_name, function_result))
+                logger.error(f"Tool execution error: {e}")
+            
+            # Add tool result to messages
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "name": function_name,
+                "content": function_result
+            })
+        
+        # Make another API call with updated conversation
+        # Model will either use more tools or return final response
+        tool_names = ", ".join([name for name, _ in tool_results])
+        logger.info(f"[Iteration {iteration}] Calling model again after tools: {tool_names}")
+        
+        try:
+            response = groq_client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=function_schemas,  # Keep tools available
+                tool_choice="auto",
+                temperature=0.1,  # Low temperature for precise tool calling
+                max_tokens=1024,
+                top_p=0.95,
+                stream=False
+            )
+        except TypeError:
+            response = groq_client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.8,
+                max_tokens=1024,
+                top_p=0.9,
+                stream=False
+            )
+        # Loop continues - check if model wants more tools or has final response
+    
+    # Max iterations reached - return what we have
+    logger.warning(f"Max iterations ({max_iterations}) reached in agentic loop")
+    if all_tool_results:
+        tool_name, tool_result = all_tool_results[-1]
+        final_text = f"I completed several tasks but reached my iteration limit:\n\n{tool_result}"
+        combined_results = "; ".join([f"{name}: {res[:100]}" for name, res in all_tool_results])
+        return sanitize_output(final_text), tool_name, combined_results
+    
+    return "I reached my iteration limit without completing the task.", None, None
+
+def generate_compound_response(user_message: str, system_prompt: str) -> tuple[str, list]:
+    """Generate response using Groq Compound system with built-in tools.
+    
+    Compound handles web search, weather, calculations, Wolfram Alpha server-side.
+    Returns: (response_text, executed_tools_list)
+    """
+    if not groq_client:
+        raise Exception("Groq client not available")
+    
+    compound_model = core_config.get_compound_model()
+    logger.info(f"Using Compound system: {compound_model} for query: {user_message[:50]}")
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message}
+    ]
+    
+    try:
+        response = groq_client.chat.completions.create(
+            model=compound_model,
+            messages=messages,
+            temperature=0.8,
+            max_tokens=1024,
+            stream=False
+        )
+        
+        # Extract response and executed tools
+        message = response.choices[0].message
+        response_text = message.content.strip() if message.content else "No response generated"
+        
+        # Log executed tools if available
+        executed_tools = getattr(message, 'executed_tools', [])
+        if executed_tools:
+            logger.info(f"Compound executed tools: {[t.get('name') for t in executed_tools if isinstance(t, dict)]}")
+        
+        return sanitize_output(response_text), executed_tools
+        
+    except Exception as e:
+        logger.error(f"Compound system error: {e}")
+        raise
 
 def generate_model_response(user_message: str, system_prompt: str, model: str) -> str:
     """Generate response using specified model through Groq with optional prompt caching."""

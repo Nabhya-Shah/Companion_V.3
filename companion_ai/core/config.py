@@ -21,19 +21,26 @@ API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN")  # For web write endpoints
 # ---- Models (central names) ----
 # Conversation default model (balanced speed/quality)
 DEFAULT_CONVERSATION_MODEL = "openai/gpt-oss-120b"  # Using 120B for quality
-# Reasoning / larger context - UPDATED: deepseek-r1 was decommissioned
-REASONING_MODEL = "llama-3.3-70b-versatile"  # Using 70B as reasoning fallback
+# Reasoning / larger context
+REASONING_MODEL = "llama-3.3-70b-versatile"
 # Memory / fast analytic model
 MEMORY_FAST_MODEL = "llama-3.1-8b-instant"
 # (Reserved) higher quality memory analysis model
 MEMORY_DEEP_MODEL = "llama-3.3-70b-versatile"
+# Tool calling model (supports parallel tool use)
+TOOL_MODEL = "llama-3.3-70b-versatile"  # Best quality for tool decisions (100k TPD limit)
+# TOOL_MODEL = "llama-3.1-8b-instant"  # Faster but poor quality, duplicate calls, wrong paths
+# Compound system (built-in tools: web search, code execution, wolfram)
+COMPOUND_MODEL = "groq/compound-mini"  # 3x faster than groq/compound, single tool call
+COMPOUND_FULL = "groq/compound"  # Supports multiple tool calls per request
 
 # ---- Model Role Mapping (Phase 1) ----
 # Central place to modify which model handles which purpose. Adjust freely.
 MODEL_ROLES = {
-    "chat.primary": "llama-3.3-70b-versatile",     # Highest quality default chat
+    "chat.primary": DEFAULT_CONVERSATION_MODEL,  # Best quality for conversation
     "chat.fast_fallback": DEFAULT_CONVERSATION_MODEL,
     "reasoning": REASONING_MODEL,
+    "tools": TOOL_MODEL,  # Dedicated model for tool calling
     "memory.summary_high": "llama-3.3-70b-versatile",
     "memory.summary_standard": MEMORY_FAST_MODEL,
     "memory.fact_extract": MEMORY_FAST_MODEL,
@@ -117,7 +124,9 @@ ENABLE_FTS = True             # Placeholder for future full-text search
 ENABLE_PROMPT_CACHING = True  # Use provider prompt caching
 ENABLE_STRUCTURED_FACTS = True
 ENABLE_CAPABILITY_ROUTER = True
-ENABLE_AUTO_TOOLS = True
+ENABLE_COMPOUND_SYSTEM = True  # Re-enable after rate limit reset (midnight UTC)
+COMPOUND_USE_FULL = False     # If True, use groq/compound; if False, use groq/compound-mini (faster)
+ENABLE_AUTO_TOOLS = True      # Native Groq function calling for all tools
 VERIFY_FACTS_SECOND_PASS = True
 ALWAYS_HEAVY_CHAT = False
 AGGRESSIVE_ESCALATION = True
@@ -351,3 +360,55 @@ def require_auth(token: str | None) -> bool:
     if not API_AUTH_TOKEN:
         return True  # Auth not configured -> open (user private deployment)
     return token == API_AUTH_TOKEN
+
+def should_use_compound(user_message: str) -> bool:
+    """Detect if query should use Groq Compound system instead of custom tools.
+    
+    Compound is best for:
+    - Web search, news, current events
+    - Weather queries (uses web search)
+    - Math/calculations (has code execution)
+    - Wolfram Alpha queries
+    - Browser automation needs
+    
+    NOT for:
+    - File operations (read PDF, find files, list directories)
+    - Memory/profile queries
+    - Anything requiring custom tools
+    """
+    if not ENABLE_COMPOUND_SYSTEM:
+        return False
+    
+    message_lower = user_message.lower()
+    
+    # Compound-friendly keywords (web, search, weather, calculate)
+    compound_keywords = [
+        'search', 'look up', 'find out', 'google', 'web',
+        'weather', 'temperature', 'forecast',
+        'calculate', 'compute', 'math', 'equation',
+        'news', 'current events', 'latest', 'recent',
+        'wolfram', 'solve', 'evaluate'
+    ]
+    
+    # Custom tool keywords (file ops, memory)
+    custom_keywords = [
+        'file', 'pdf', 'document', 'folder', 'directory',
+        'read', 'open', 'list files', 'downloads',
+        'memory', 'remember', 'profile', 'insight',
+        'image', 'picture', 'screenshot'
+    ]
+    
+    # Check if message needs custom tools (priority)
+    if any(kw in message_lower for kw in custom_keywords):
+        return False
+    
+    # Check if message can use Compound
+    if any(kw in message_lower for kw in compound_keywords):
+        return True
+    
+    # Default: use custom tools (more control)
+    return False
+
+def get_compound_model() -> str:
+    """Get appropriate Compound model based on configuration."""
+    return COMPOUND_FULL if COMPOUND_USE_FULL else COMPOUND_MODEL

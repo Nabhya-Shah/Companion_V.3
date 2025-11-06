@@ -811,6 +811,9 @@ def search_memory(query: str, limit: int = 10) -> list[dict]:
             # recency boost (within ~7 days decays)
             try:
                 dt = datetime.fromisoformat(ts) if isinstance(ts, str) else now
+                # Ensure timezone awareness
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
             except Exception:
                 dt = now
             age_days = max((now - dt).total_seconds() / 86400.0, 0.0)
@@ -826,6 +829,9 @@ def search_memory(query: str, limit: int = 10) -> list[dict]:
         if matches:
             try:
                 dt = datetime.fromisoformat(ts) if isinstance(ts, str) else now
+                # Ensure timezone awareness
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
             except Exception:
                 dt = now
             age_days = max((now - dt).total_seconds() / 86400.0, 0.0)

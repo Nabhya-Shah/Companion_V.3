@@ -285,6 +285,8 @@ document.addEventListener('keydown', e => {
 
 // Live message polling
 let lastMessageCount = 0;
+let displayedMessageIds = new Set();
+
 async function pollForNewMessages() {
   try {
     const resp = await fetch('/api/chat/history');
@@ -294,17 +296,15 @@ async function pollForNewMessages() {
     // If there are new messages, add them to the chat
     if (data.count > lastMessageCount) {
       const newMessages = data.history.slice(lastMessageCount);
-      newMessages.forEach(entry => {
-        // Check if message already exists to avoid duplicates
-        const existingMessages = Array.from(chatPane.querySelectorAll('.msg')).map(m => m.textContent);
-        const userExists = existingMessages.some(text => text.includes(entry.user));
-        const aiExists = existingMessages.some(text => text.includes(entry.ai));
+      newMessages.forEach((entry, index) => {
+        // Create unique ID based on timestamp and content
+        const msgId = `${entry.timestamp || ''}_${(entry.user || '').substring(0, 20)}`;
         
-        if (!userExists) {
+        // Only add if we haven't displayed this message yet
+        if (!displayedMessageIds.has(msgId)) {
           addMessage('user', entry.user);
-        }
-        if (!aiExists) {
           addMessage('ai', entry.ai);
+          displayedMessageIds.add(msgId);
         }
       });
       lastMessageCount = data.count;
