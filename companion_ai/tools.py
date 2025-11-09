@@ -276,30 +276,109 @@ def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
     "type": "function",
     "function": {
         "name": "memory_insight",
-        "description": "Generate a synthetic insight about the user based on conversation history and stored memories. Use sparingly - only when explicitly asked to reflect or analyze patterns.",
+        "description": "Search and analyze user memories using knowledge graph. Can find entities, relationships, patterns, and temporal information. Use when user asks 'what do you know about X' or 'how are X and Y related' or 'what have we discussed about Z'.",
         "parameters": {
             "type": "object",
-            "properties": {},
-            "required": []
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What to search for in memory (entity name, topic, relationship, etc.)"
+                },
+                "mode": {
+                    "type": "string",
+                    "description": "Search mode: GRAPH_COMPLETION (entity+neighbors), KEYWORD (simple search), RELATIONSHIPS (connections), TEMPORAL (recent), IMPORTANT (most significant)",
+                    "enum": ["GRAPH_COMPLETION", "KEYWORD", "RELATIONSHIPS", "TEMPORAL", "IMPORTANT"]
+                }
+            },
+            "required": ["query"]
         }
     }
 })
-def tool_memory_insight(_: str = "") -> str:
-    """Generate a quick synthetic insight over last few summaries+insights (read-only)."""
+def tool_memory_insight(query: str = "", mode: str = "GRAPH_COMPLETION") -> str:
+    """
+    Search memory using knowledge graph with multiple retrieval modes.
+    
+    Falls back to legacy search if knowledge graph not available.
+    """
     try:
-        # dynamic import inside try to avoid circular dependency during module load
-        from companion_ai.llm_interface import generate_groq_response  # type: ignore
-        summaries = mem.get_latest_summary(3)
-        insights = mem.get_latest_insights(3)
-        profile = mem.get_all_profile_facts()
-        prompt = (
-            "You are generating a SINGLE concise actionable observation about the user based on provided data.\n"
-            "Focus on a helpful pattern or preference. Avoid repetition. Max 2 sentences.\n\n"
-            f"Profile facts: {profile}\nRecent summaries: {[s['summary_text'] for s in summaries]}\n"
-            f"Existing insights: {[i['insight_text'] for i in insights]}\n\nObservation:"
-        )
-        text = generate_groq_response(prompt) or '(no insight)'
-        return text.strip()
+        # Try knowledge graph first
+        try:
+            from companion_ai.memory_graph import search_graph, get_graph_stats
+            
+            # Search using knowledge graph
+            results = search_graph(query, mode=mode, limit=10)
+            
+            if not results:
+                return f"No memories found for '{query}' in knowledge graph. Try a different query or mode."
+            
+            # Format results nicely
+            output = [f"🧠 Memory Search (mode: {mode}): '{query}'", ""]
+            
+            for i, result in enumerate(results[:8], 1):
+                result_type = result.get('type', 'unknown')
+                
+                if result_type == 'entity':
+                    name = result.get('name')
+                    entity_type = result.get('entity_type', 'unknown')
+                    mentions = result.get('mention_count', 0)
+                    attrs = result.get('attributes', {})
+                    
+                    output.append(f"{i}. 🏷️ {name} ({entity_type})")
+                    if attrs:
+                        output.append(f"   Attributes: {', '.join(f'{k}={v}' for k, v in list(attrs.items())[:3])}")
+                    output.append(f"   Mentioned {mentions} time(s)")
+                    
+                elif result_type == 'relationship':
+                    source = result.get('source')
+                    target = result.get('target')
+                    rel_type = result.get('relation_type', 'related_to')
+                    context = result.get('context', '')
+                    
+                    output.append(f"{i}. 🔗 {source} -{rel_type}→ {target}")
+                    if context:
+                        output.append(f"   Context: {context[:100]}")
+                    
+                elif result_type == 'related_entity':
+                    name = result.get('name')
+                    entity_type = result.get('entity_type', 'unknown')
+                    output.append(f"{i}. 📍 Related: {name} ({entity_type})")
+                
+                output.append("")
+            
+            # Add graph stats
+            stats = get_graph_stats()
+            output.append(f"📊 Graph: {stats.get('total_entities', 0)} entities, {stats.get('total_relationships', 0)} relationships")
+            
+            return "\n".join(output)
+            
+        except ImportError:
+            # Fall back to legacy memory search
+            mem_results = mem.search_memory(query, limit=10)
+            
+            if not mem_results:
+                # Fall back to insight generation
+                from companion_ai.llm_interface import generate_groq_response
+                summaries = mem.get_latest_summary(3)
+                insights = mem.get_latest_insights(3)
+                profile = mem.get_all_profile_facts()
+                prompt = (
+                    f"Generate a concise observation about the user based on: {query}\n"
+                    f"Profile: {profile}\nRecent summaries: {[s['summary_text'] for s in summaries]}\n"
+                    f"Insights: {[i['insight_text'] for i in insights]}\n\nObservation:"
+                )
+                text = generate_groq_response(prompt) or '(no insight)'
+                return text.strip()
+            
+            # Format legacy results
+            output = [f"📚 Memory Search: '{query}'", ""]
+            for i, result in enumerate(mem_results, 1):
+                result_type = result.get('type', 'unknown')
+                text = result.get('text', '')
+                score = result.get('score', 0)
+                output.append(f"{i}. [{result_type}] {text[:150]} (relevance: {score:.2f})")
+            
+            return "\n".join(output)
+            
     except Exception as e:
         return f"memory_insight error: {e}"
 

@@ -29,14 +29,35 @@
 			"label": "run-web",
 			"type": "shell",
 			"command": "python run_companion.py --web",
-			"group": { "kind": "none" }
+			"group": { "kind": "none" },
+			"isBackground": true,
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"focus": false,
+				"clear": false
+			}
 		},
 		{
-			"label": "run-web-warm",
+			"label": "watch-logs",
 			"type": "shell",
-			"command": "python run_web_with_warmup.py",
-			"group": { "kind": "none" },
-			"detail": "Warm up model (prompt cache) then start web UI"
+			"command": "python tools/watch_logs.py",
+			"isBackground": true,
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"focus": false,
+				"clear": false
+			},
+			"detail": "Watch web server logs in real-time"
+		},
+		{
+			"label": "start-web-with-logs",
+			"dependsOn": ["run-web", "watch-logs"],
+			"problemMatcher": [],
+			"detail": "Start web server AND watch logs (recommended)"
 		}
 	]
 }

@@ -9,6 +9,7 @@ import webbrowser
 import time
 import logging
 from datetime import datetime
+import os
 
 from companion_ai.llm_interface import generate_response
 from companion_ai.conversation_manager import ConversationSession
@@ -18,10 +19,35 @@ from companion_ai.tts_manager import tts_manager
 from companion_ai.tools import run_tool, list_tools
 from companion_ai.core import metrics
 from companion_ai import memory as mem
-import os, json, glob
+import json, glob
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging with both console and file output
+DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
+LOG_FILE = os.path.join(DATA_DIR, 'web_server.log')
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# Create formatters and handlers
+console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
+file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# Console handler (for terminal output)
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(console_formatter)
+
+# File handler (for persistent logs)
+file_handler = logging.FileHandler(LOG_FILE)
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(file_formatter)
+
+# Configure root logger
+logging.basicConfig(level=logging.INFO, handlers=[console_handler, file_handler])
 logger = logging.getLogger(__name__)
+
+logger.info("=" * 70)
+logger.info("🚀 COMPANION AI WEB SERVER STARTING")
+logger.info(f"📝 Logs: {LOG_FILE}")
+logger.info("=" * 70)
 
 app = Flask(__name__)
 
@@ -37,6 +63,11 @@ def index():
         if not request.cookies.get('api_token'):
             resp.set_cookie('api_token', core_config.API_AUTH_TOKEN, httponly=True, samesite='Lax')
     return resp
+
+@app.route('/graph')
+def graph():
+    """Interactive knowledge graph visualization"""
+    return render_template('graph.html')
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
@@ -404,6 +435,65 @@ def routing_recent():
         return jsonify({'count': len(records), 'items': records[:n_int]})
     except Exception as e:
         logger.error(f"Routing recent error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/graph')
+def get_graph():
+    """
+    Return knowledge graph data as JSON for visualization.
+    
+    Returns nodes and edges in a format suitable for D3.js or other graph libs.
+    """
+    try:
+        from companion_ai.memory_graph import export_graph
+        graph_json = export_graph()
+        return graph_json, 200, {'Content-Type': 'application/json'}
+    except ImportError:
+        return jsonify({'error': 'Knowledge graph not available. Install networkx.'}), 503
+    except Exception as e:
+        logger.error(f"Graph export error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/graph/stats')
+def get_graph_stats():
+    """
+    Return knowledge graph statistics.
+    
+    Returns entity counts, relationship counts, most connected nodes, etc.
+    """
+    try:
+        from companion_ai.memory_graph import get_graph_stats
+        stats = get_graph_stats()
+        return jsonify(stats)
+    except ImportError:
+        return jsonify({'error': 'Knowledge graph not available. Install networkx.'}), 503
+    except Exception as e:
+        logger.error(f"Graph stats error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/graph/search')
+def search_graph_api():
+    """
+    Search the knowledge graph.
+    
+    Query params:
+      q: search query
+      mode: search mode (GRAPH_COMPLETION, KEYWORD, RELATIONSHIPS, TEMPORAL, IMPORTANT)
+      limit: max results (default 10)
+    """
+    try:
+        from companion_ai.memory_graph import search_graph
+        
+        query = request.args.get('q', '')
+        mode = request.args.get('mode', 'GRAPH_COMPLETION')
+        limit = int(request.args.get('limit', '10'))
+        
+        results = search_graph(query, mode=mode, limit=limit)
+        return jsonify({'query': query, 'mode': mode, 'count': len(results), 'results': results})
+    except ImportError:
+        return jsonify({'error': 'Knowledge graph not available. Install networkx.'}), 503
+    except Exception as e:
+        logger.error(f"Graph search error: {e}")
         return jsonify({'error': str(e)}), 500
 
 def open_browser():

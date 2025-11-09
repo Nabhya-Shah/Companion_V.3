@@ -14,6 +14,15 @@ from companion_ai.core import config as core_config
 
 logger = logging.getLogger(__name__)
 
+# Import knowledge graph (optional - graceful degradation if not available)
+try:
+    from companion_ai.memory_graph import add_conversation_to_graph, get_graph_stats
+    KNOWLEDGE_GRAPH_AVAILABLE = True
+    logger.info("✅ Knowledge Graph enabled")
+except ImportError:
+    KNOWLEDGE_GRAPH_AVAILABLE = False
+    logger.warning("⚠️ Knowledge Graph not available - install networkx to enable")
+
 class ConversationSession:
     """Manages a conversation session with separated memory and conversation processing"""
     
@@ -111,6 +120,14 @@ class ConversationSession:
         if not groq_memory_client:
             logger.warning("Memory client not available, skipping memory processing")
             return
+        
+        # Add to knowledge graph if available
+        if KNOWLEDGE_GRAPH_AVAILABLE:
+            try:
+                add_conversation_to_graph(user_msg, ai_msg)
+                logger.info("📊 Added to knowledge graph")
+            except Exception as e:
+                logger.error(f"Knowledge graph processing failed: {e}")
         
         # Analyze importance using memory AI
         importance = self._analyze_importance_with_memory_ai(user_msg, ai_msg)

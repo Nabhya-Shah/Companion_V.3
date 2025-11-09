@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Knowledge Graph - Companion AI</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            overflow: hidden;
+        }
+
+        #graph-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+
+        svg {
+            width: 100%;
+            height: 100%;
+            cursor: grab;
+        }
+
+        svg:active {
+            cursor: grabbing;
+        }
+
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            max-width: 300px;
+            z-index: 1000;
+        }
+
+        .controls h2 {
+            font-size: 1.5rem;
+            margin-bottom: 15px;
+            color: #a78bfa;
+        }
+
+        .search-box {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 2px solid #a78bfa;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            font-size: 14px;
+        }
+
+        .search-box:focus {
+            outline: none;
+            border-color: #c4b5fd;
+        }
+
+        .stats {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        .stats p {
+            margin: 5px 0;
+            font-size: 0.9rem;
+        }
+
+        .legend {
+            margin-top: 15px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 8px 0;
+            font-size: 0.85rem;
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.9);
+            color: #fff;
+            padding: 12px;
+            border-radius: 8px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+            max-width: 300px;
+            font-size: 0.85rem;
+            z-index: 1001;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+        }
+
+        .tooltip.active {
+            opacity: 1;
+        }
+
+        .tooltip h3 {
+            margin-bottom: 8px;
+            color: #a78bfa;
+        }
+
+        .tooltip p {
+            margin: 4px 0;
+        }
+
+        /* Node and link styles */
+        .link {
+            stroke: rgba(255, 255, 255, 0.3);
+            stroke-width: 1.5px;
+            fill: none;
+        }
+
+        .link.highlighted {
+            stroke: #fbbf24;
+            stroke-width: 3px;
+        }
+
+        .node circle {
+            stroke: #fff;
+            stroke-width: 2px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .node:hover circle {
+            stroke-width: 4px;
+            filter: brightness(1.2);
+        }
+
+        .node.highlighted circle {
+            stroke: #fbbf24;
+            stroke-width: 4px;
+        }
+
+        .node text {
+            font-size: 11px;
+            fill: #fff;
+            text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+            pointer-events: none;
+            user-select: none;
+        }
+
+        .link-label {
+            font-size: 9px;
+            fill: rgba(255, 255, 255, 0.6);
+            text-anchor: middle;
+            pointer-events: none;
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+        }
+
+        /* Reset button */
+        .reset-btn {
+            width: 100%;
+            padding: 10px;
+            background: #a78bfa;
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .reset-btn:hover {
+            background: #c4b5fd;
+        }
+    </style>
+</head>
+<body>
+    <div id="graph-container">
+        <div class="controls">
+            <h2>🧠 Knowledge Graph</h2>
+            
+            <input type="text" class="search-box" placeholder="Search entities..." id="searchBox">
+            
+            <div class="stats">
+                <p><strong id="entityCount">0</strong> Entities</p>
+                <p><strong id="relationshipCount">0</strong> Relationships</p>
+                <p><strong id="selectedEntity">None</strong></p>
+            </div>
+
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #ef4444;"></div>
+                    <span>Person</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #3b82f6;"></div>
+                    <span>Place</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #10b981;"></div>
+                    <span>Concept</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #f59e0b;"></div>
+                    <span>Thing</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #8b5cf6;"></div>
+                    <span>Organization</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #ec4899;"></div>
+                    <span>Event</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #6b7280;"></div>
+                    <span>Other</span>
+                </div>
+            </div>
+
+            <button class="reset-btn" onclick="resetGraph()">Reset View</button>
+        </div>
+
+        <svg id="graph"></svg>
+        <div class="tooltip" id="tooltip"></div>
+    </div>
+
+    <script>
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        const svg = d3.select("#graph")
+            .attr("viewBox", [0, 0, width, height]);
+
+        // Color mapping for entity types
+        const colorMap = {
+            'person': '#ef4444',
+            'place': '#3b82f6',
+            'concept': '#10b981',
+            'thing': '#f59e0b',
+            'organization': '#8b5cf6',
+            'event': '#ec4899',
+            'project': '#06b6d4',
+            'temperature': '#f97316',
+            'weather condition': '#0ea5e9',
+            'weather prediction': '#6366f1',
+            'document': '#a855f7',
+            'unknown': '#6b7280'
+        };
+
+        let simulation, nodes, links, nodeElements, linkElements, linkLabels;
+        let selectedNode = null;
+
+        // Fetch graph data
+        fetch('/api/graph')
+            .then(response => response.json())
+            .then(data => {
+                initializeGraph(data);
+            })
+            .catch(error => console.error('Error loading graph:', error));
+
+        function initializeGraph(graphData) {
+            // Update stats
+            document.getElementById('entityCount').textContent = graphData.nodes.length;
+            document.getElementById('relationshipCount').textContent = graphData.edges.length;
+
+            // Prepare data
+            nodes = graphData.nodes.map(n => ({
+                id: n.id,
+                label: n.label,
+                type: n.entity_type || 'unknown',
+                attributes: n.attributes || {},
+                mentions: n.mentions || 1,
+                importance: n.importance || 0.5
+            }));
+
+            links = graphData.edges.map(e => ({
+                source: e.source,
+                target: e.target,
+                type: e.relation_type,
+                strength: e.strength || 0.5,
+                context: e.context || ''
+            }));
+
+            // Create force simulation
+            simulation = d3.forceSimulation(nodes)
+                .force("link", d3.forceLink(links).id(d => d.id).distance(100))
+                .force("charge", d3.forceManyBody().strength(-300))
+                .force("center", d3.forceCenter(width / 2, height / 2))
+                .force("collision", d3.forceCollide().radius(d => getNodeRadius(d) + 10));
+
+            // Create links
+            linkElements = svg.append("g")
+                .selectAll("path")
+                .data(links)
+                .enter().append("path")
+                .attr("class", "link")
+                .attr("marker-end", "url(#arrowhead)");
+
+            // Create link labels
+            linkLabels = svg.append("g")
+                .selectAll("text")
+                .data(links)
+                .enter().append("text")
+                .attr("class", "link-label")
+                .text(d => d.type);
+
+            // Create arrow marker
+            svg.append("defs").append("marker")
+                .attr("id", "arrowhead")
+                .attr("viewBox", "0 -5 10 10")
+                .attr("refX", 20)
+                .attr("refY", 0)
+                .attr("markerWidth", 6)
+                .attr("markerHeight", 6)
+                .attr("orient", "auto")
+                .append("path")
+                .attr("d", "M0,-5L10,0L0,5")
+                .attr("fill", "rgba(255, 255, 255, 0.3)");
+
+            // Create nodes
+            const nodeGroups = svg.append("g")
+                .selectAll("g")
+                .data(nodes)
+                .enter().append("g")
+                .attr("class", "node")
+                .call(d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended));
+
+            nodeGroups.append("circle")
+                .attr("r", d => getNodeRadius(d))
+                .attr("fill", d => colorMap[d.type.toLowerCase()] || colorMap['unknown']);
+
+            nodeGroups.append("text")
+                .attr("dx", d => getNodeRadius(d) + 5)
+                .attr("dy", 4)
+                .text(d => d.label);
+
+            nodeElements = nodeGroups;
+
+            // Node interactions
+            nodeElements
+                .on("click", (event, d) => {
+                    event.stopPropagation();
+                    selectNode(d);
+                })
+                .on("mouseover", (event, d) => showTooltip(event, d))
+                .on("mouseout", hideTooltip);
+
+            // Click on SVG to deselect
+            svg.on("click", () => selectNode(null));
+
+            // Update positions on tick
+            simulation.on("tick", () => {
+                linkElements.attr("d", d => {
+                    const dx = d.target.x - d.source.x;
+                    const dy = d.target.y - d.source.y;
+                    const dr = Math.sqrt(dx * dx + dy * dy);
+                    return `M${d.source.x},${d.source.y}A${dr},${dr} 0 0,1 ${d.target.x},${d.target.y}`;
+                });
+
+                linkLabels
+                    .attr("x", d => (d.source.x + d.target.x) / 2)
+                    .attr("y", d => (d.source.y + d.target.y) / 2);
+
+                nodeElements.attr("transform", d => `translate(${d.x},${d.y})`);
+            });
+
+            // Search functionality
+            document.getElementById('searchBox').addEventListener('input', (e) => {
+                const query = e.target.value.toLowerCase();
+                nodeElements.classed("highlighted", false);
+                linkElements.classed("highlighted", false);
+
+                if (query) {
+                    const matches = nodes.filter(n => 
+                        n.label.toLowerCase().includes(query) ||
+                        n.type.toLowerCase().includes(query)
+                    );
+                    
+                    matches.forEach(node => {
+                        nodeElements.filter(d => d.id === node.id).classed("highlighted", true);
+                        linkElements.filter(l => l.source.id === node.id || l.target.id === node.id)
+                            .classed("highlighted", true);
+                    });
+                }
+            });
+        }
+
+        function getNodeRadius(node) {
+            const base = 8;
+            const mentionsFactor = Math.min(node.mentions * 2, 10);
+            const importanceFactor = node.importance * 8;
+            return base + mentionsFactor + importanceFactor;
+        }
+
+        function selectNode(node) {
+            selectedNode = node;
+            
+            if (node) {
+                document.getElementById('selectedEntity').textContent = node.label;
+                nodeElements.classed("highlighted", d => d.id === node.id);
+                linkElements.classed("highlighted", l => 
+                    l.source.id === node.id || l.target.id === node.id
+                );
+            } else {
+                document.getElementById('selectedEntity').textContent = 'None';
+                nodeElements.classed("highlighted", false);
+                linkElements.classed("highlighted", false);
+            }
+        }
+
+        function showTooltip(event, node) {
+            const tooltip = document.getElementById('tooltip');
+            tooltip.innerHTML = `
+                <h3>${node.label}</h3>
+                <p><strong>Type:</strong> ${node.type}</p>
+                <p><strong>Mentions:</strong> ${node.mentions}</p>
+                <p><strong>Importance:</strong> ${(node.importance * 100).toFixed(0)}%</p>
+                ${Object.keys(node.attributes).length > 0 ? 
+                    '<p><strong>Attributes:</strong></p>' + 
+                    Object.entries(node.attributes).slice(0, 3).map(([k, v]) => 
+                        `<p style="margin-left: 12px;">• ${k}: ${v}</p>`
+                    ).join('') : ''}
+            `;
+            tooltip.style.left = (event.pageX + 15) + 'px';
+            tooltip.style.top = (event.pageY + 15) + 'px';
+            tooltip.classList.add('active');
+        }
+
+        function hideTooltip() {
+            document.getElementById('tooltip').classList.remove('active');
+        }
+
+        function resetGraph() {
+            simulation.alpha(1).restart();
+            selectNode(null);
+            document.getElementById('searchBox').value = '';
+        }
+
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+    </script>
+</body>
+</html>
