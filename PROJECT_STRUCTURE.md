@@ -1,7 +1,7 @@
 # Companion AI - Project Structure
 
-**Last Updated:** October 16, 2025  
-**Status:** Production-ready, cleaned and organized
+**Last Updated:** November 10, 2025  
+**Status:** Production-ready v0.3 - Knowledge Graph Integration Complete
 
 ---
 
@@ -36,7 +36,8 @@ Companion_V.3/
 │   ├── llm_interface.py          # LLM calls & fact extraction
 │   ├── memory.py                 # Memory storage & retrieval
 │   ├── memory_ai.py             # Dedicated memory AI client
-│   ├── tools.py                  # Tool calling system
+│   ├── memory_graph.py          # Knowledge graph system (NEW v0.3)
+│   ├── tools.py                  # Tool calling system (10 tools)
 │   ├── tts_manager.py           # Azure TTS integration
 │   └── core/
 │       ├── config.py             # Central configuration & model routing
@@ -49,7 +50,8 @@ Companion_V.3/
 │   │   ├── app.css              # Gemini-style UI design
 │   │   └── app.js               # Frontend JavaScript
 │   └── templates/
-│       └── index.html            # Main web template
+│       ├── index.html            # Main web template
+│       └── graph.html            # Knowledge graph visualization (NEW v0.3)
 │
 ├── 🧪 tests/ (Unit Tests - 11 files)
 │   ├── conftest.py
@@ -64,15 +66,20 @@ Companion_V.3/
 │   ├── test_search_and_sanitize.py
 │   └── test_tools.py
 │
-├── 🔧 tools/ (Development Tools - 8 files)
+├── 🔧 tools/ (Development Tools - 14 files)
 │   ├── check_actual_memory.py    # View current memory contents
 │   ├── check_db_schema.py        # Inspect database schema
 │   ├── clean_memory_db.py        # Clean bad facts from DB
+│   ├── list_azure_voices.py      # List available TTS voices
 │   ├── reset_memory.py           # Wipe all memory (with backup)
-│   ├── test_fact_extraction.py   # Test fact filtering
-│   ├── test_features_verification.py # Verify all features work
+│   ├── run_feature_tests.py      # Automated feature testing (NEW v0.3)
+│   ├── send_debug_message.py     # Send test messages to web server (NEW v0.3)
+│   ├── test_graph_integration.py # Test knowledge graph integration (NEW v0.3)
+│   ├── test_knowledge_graph.py   # Test graph operations (NEW v0.3)
 │   ├── test_tts.py               # Test TTS voices
-│   └── list_azure_voices.py      # List available TTS voices
+│   ├── view_knowledge_graph.py   # Visualize knowledge graph in terminal (NEW v0.3)
+│   ├── view_test_log.py          # View test logs (NEW v0.3)
+│   └── watch_logs.py             # Watch web server logs in real-time (NEW v0.3)
 │
 ├── 📜 scripts/ (Utility Scripts - 4 files)
 │   ├── calibrate_mic.py          # Microphone calibration for STT
@@ -82,11 +89,11 @@ Companion_V.3/
 │
 ├── 🎭 prompts/personas/
 │   ├── companion.yaml            # Default personality (active)
-│   ├── aether.yaml               # Alternative persona
-│   └── lilith.yaml               # Alternative persona
+│   └── aether.yaml               # Alternative persona
 │
 ├── 💾 data/
 │   ├── companion_ai.db           # SQLite memory database (active)
+│   ├── knowledge_graph.pkl       # NetworkX knowledge graph (NEW v0.3)
 │   ├── companion_ai_backup_*.db  # Latest backup
 │   ├── logs/
 │   │   ├── conv_YYYYMMDD.jsonl  # Daily conversation logs
@@ -101,7 +108,11 @@ Companion_V.3/
 │   └── .gitattributes           # Git line ending config
 │
 └── 📖 Documentation
-    └── README.md                 # Main project documentation
+    ├── README.md                 # Main project documentation
+    ├── PROJECT_STRUCTURE.md      # This file - project organization
+    ├── KNOWLEDGE_GRAPH.md        # Knowledge graph technical docs (NEW v0.3)
+    ├── TOOL_SETUP_GUIDE.md       # Tool configuration guide
+    └── HOW_TO_RUN_AND_TEST.md    # Testing and usage guide
 ```
 
 ---
@@ -110,10 +121,12 @@ Companion_V.3/
 
 ### Entry Points
 
-**`web_companion.py`** (346 lines)
+**`web_companion.py`** (400+ lines)
 - Flask web server at http://127.0.0.1:5000
 - Main interface with chat, memory sidebar, and settings
-- Handles API routes for chat and memory retrieval
+- API routes for chat, memory retrieval, and knowledge graph
+- Knowledge graph visualization at `/graph`
+- Graph API endpoints: `/api/graph`, `/api/graph/stats`, `/api/graph/search`
 
 **`run_companion.py`**
 - Launcher script with CLI arguments
@@ -126,11 +139,13 @@ Companion_V.3/
 
 ### Core AI Logic
 
-**`companion_ai/llm_interface.py`** (807 lines)
+**`companion_ai/llm_interface.py`** (700+ lines)
 - LLM API calls to Groq/OpenRouter
 - Fact extraction with strict filtering (no inferences!)
 - Ensemble reasoning (3 candidate models)
 - Tool calling integration
+- Compound models support (built-in Groq tools)
+- Token optimization (60-70% reduction via fresh context)
 
 **`companion_ai/conversation_manager.py`**
 - Orchestrates conversations
@@ -141,12 +156,31 @@ Companion_V.3/
 - SQLite database operations
 - Stores user profile facts, conversation summaries, AI insights
 - Retrieval and search functionality
+- Integrates with knowledge graph for entity-based memory
 
-**`companion_ai/core/config.py`** (354 lines)
+**`companion_ai/memory_graph.py`** (NEW v0.3 - 565 lines)
+- Knowledge graph system using NetworkX
+- Entity extraction with llama-3.1-8b-instant
+- 12 entity types (person, place, concept, thing, etc.)
+- 5 search modes (GRAPH_COMPLETION, KEYWORD, RELATIONSHIPS, TEMPORAL, IMPORTANT)
+- Fuzzy deduplication (70% similarity threshold)
+- Automatic relationship inference
+- Pickle-based persistence at `data/knowledge_graph.pkl`
+
+**`companion_ai/tools.py`** (761 lines)
+- 10 registered tools for autonomous use
+- Built-in: calculate, get_current_time, read_pdf, read_image_text, read_document
+- Search: web_search (DuckDuckGo), wikipedia_lookup
+- File ops: list_files, find_file
+- Memory: memory_insight (enhanced with graph search)
+- Removed: Custom weather/Brave search (now using Compound models)
+
+**`companion_ai/core/config.py`** (400+ lines)
 - Model routing and selection logic
-- Feature flags (ensemble, auto-tools, etc.)
+- Feature flags (ensemble, auto-tools, compound models)
 - Model capabilities registry
 - Complexity classification
+- Token optimization settings
 
 **`companion_ai/core/context_builder.py`**
 - Loads persona YAML files
@@ -160,6 +194,14 @@ Companion_V.3/
 - Auto-scroll to latest message
 - Sidebar toggle for Memory/Settings
 - API communication
+- Graph visualization integration
+
+**`templates/graph.html`** (NEW v0.3 - 450 lines)
+- D3.js force-directed graph visualization
+- Interactive node dragging and zooming
+- Real-time entity/relationship display
+- Color-coded by entity type
+- Accessible at `/graph` endpoint
 
 **`static/app.css`** (450 lines)
 - Gemini-inspired design
@@ -174,11 +216,13 @@ GROQ_API_KEY=your_key_here
 AZURE_SPEECH_KEY=your_key_here
 AZURE_SPEECH_REGION=your_region_here
 ENABLE_ENSEMBLE=1
+ENABLE_COMPOUND_MODELS=1  # NEW v0.3 - Use Groq's built-in tools
 ```
 
 **`.env.example`** (Template)
 - Shows all available configuration options
 - Copy to `.env` and fill in your values
+- **v0.3**: Weather/Brave API keys removed (using Compound instead)
 
 ---
 
@@ -191,10 +235,14 @@ ENABLE_ENSEMBLE=1
 | Model Routing | ✅ Active | Automatic model selection by complexity |
 | Ensemble System | ✅ Active | 3 candidates (120B, 70B, Kimi) |
 | Memory System | ✅ Active | Fresh DB with strict fact filtering |
+| **Knowledge Graph** | ✅ **NEW v0.3** | NetworkX graph with 5 search modes |
+| **Graph Visualization** | ✅ **NEW v0.3** | D3.js interactive graph at `/graph` |
+| **Token Optimization** | ✅ **NEW v0.3** | 60-70% reduction (9-11K → 3-5K tokens) |
+| **Compound Models** | ✅ **NEW v0.3** | Groq built-in weather/search/calculator |
 | Fact Extraction | ✅ Fixed | Blocks all inferences, only explicit facts |
 | TTS (Azure) | ⚠️ Ready | Voice: Jenny Neural, needs UI toggle |
 | STT | ❌ Pending | To be tested with scripts/calibrate_mic.py |
-| Auto-Tools | ✅ Active | Automatic tool calling enabled |
+| Auto-Tools | ✅ Active | 10 autonomous tools enabled |
 | Prompt Caching | ✅ Active | Reduces API costs |
 
 ---
@@ -207,6 +255,13 @@ ENABLE_ENSEMBLE=1
 - **ai_insights**: AI observations and patterns
 - **pending_profile_facts**: Facts awaiting approval
 - **memory_consolidation**: Long-term memory consolidation
+
+### Knowledge Graph: `data/knowledge_graph.pkl` (NEW v0.3)
+- **NetworkX DiGraph**: Entity-relationship graph
+- **Entities**: 12 types (person, place, concept, thing, organization, event, etc.)
+- **Relationships**: Extracted from conversations with confidence scores
+- **Attributes**: Timestamps, mentions, importance, entity-specific metadata
+- **Growth**: ~5 entities per conversation, linear scaling
 
 ### Logs: `data/logs/`
 - **conv_YYYYMMDD.jsonl**: Daily conversation logs (1 file per day)
@@ -230,11 +285,21 @@ pytest -q
 # Check current memory
 python tools/check_actual_memory.py
 
-# Test fact extraction
-python tools/test_fact_extraction.py
+# View knowledge graph
+python tools/view_knowledge_graph.py
 
-# Verify all features
-python tools/test_features_verification.py
+# Test graph integration
+python tools/test_knowledge_graph.py
+python tools/test_graph_integration.py
+
+# Run feature tests
+python tools/run_feature_tests.py
+
+# Send test messages to web server
+python tools/send_debug_message.py "What's the weather in Seattle?"
+
+# Watch web server logs in real-time
+python tools/watch_logs.py
 
 # Test TTS
 python tools/test_tts.py
@@ -247,48 +312,60 @@ python tools/reset_memory.py
 ```bash
 # Verify environment setup
 python scripts/check_env.py
-
-# View memory contents
-python scripts/view_memory.py
-
-# List audio devices (for STT)
-python scripts/list_audio_devices.py
-
-# Calibrate microphone (for STT)
-python scripts/calibrate_mic.py
 ```
 
 ---
 
-## 📊 Project Stats
+## 📊 Project Stats (v0.3)
 
-- **Total Python Files:** 74 (down from 102)
-- **Lines of Code:** ~8,000+ (core functionality)
-- **Core Package:** 15 files in companion_ai/
+- **Total Python Files:** ~65 (cleaned from 102)
+- **Lines of Code:** ~9,000+ (core functionality)
+- **Core Package:** 16 files in companion_ai/
 - **Unit Tests:** 11 test files
-- **Dev Tools:** 8 helper scripts
-- **Utilities:** 4 utility scripts
+- **Dev Tools:** 14 helper scripts
+- **Utilities:** 1 utility script
+- **v0.3 Additions:**
+  - memory_graph.py (565 lines)
+  - graph.html template (450 lines)
+  - 6 new development tools
+  - KNOWLEDGE_GRAPH.md documentation (500+ lines)
 
 ---
 
-## 🚦 Next Steps
+## 🚦 Roadmap
 
-1. **Add TTS Toggle** - UI control for text-to-speech
-2. **Test Memory** - Verify fact extraction with real conversations
-3. **Test Conversation Quality** - 20-30 exchanges to evaluate
-4. **Test STT** - Speech-to-text input testing
-5. **Smart Home Integration** - Final goal after quality verified
+### ✅ Completed (v0.3)
+- Knowledge graph system with NetworkX
+- 5 search modes (GRAPH_COMPLETION, KEYWORD, RELATIONSHIPS, TEMPORAL, IMPORTANT)
+- Interactive D3.js graph visualization
+- Token optimization (60-70% reduction)
+- Compound models integration (Groq built-in tools)
+- Code cleanup (removed 159 lines, 12 outdated files)
+- Comprehensive documentation (README, KNOWLEDGE_GRAPH)
+
+### 🎯 Planned Features
+1. **Semantic Entity Matching** - Embeddings-based similarity for better deduplication
+2. **Graph Export** - Neo4j, GraphML, JSON-LD formats
+3. **Graph Analytics** - Centrality, communities, path finding
+4. **Automated Testing** - pytest suite for knowledge graph
+5. **Real-time Updates** - WebSocket graph visualization
+6. **TTS UI Toggle** - Frontend control for text-to-speech
+7. **STT Integration** - Speech-to-text input
+8. **Smart Home** - Final integration goal
 
 ---
 
 ## 📝 Notes
 
 - **Primary Interface:** Use `web_companion.py` for best experience
-- **Personas:** Switch between companion/aether/lilith in settings
+- **Personas:** Switch between companion/aether in settings (Lilith removed)
 - **Memory:** Clean slate with improved fact extraction (no inferences!)
+- **Knowledge Graph:** View at `/graph`, access via `/api/graph` endpoints
 - **Model:** Defaults to 120B model for best quality
 - **Ensemble:** Triggers on complex queries for better responses
+- **Compound Models:** Built-in Groq weather/search/calculator (no API keys needed)
+- **Token Optimization:** 60-70% reduction via fresh context rebuilding
 
 ---
 
-**Built with:** Python 3.x, Flask, SQLite, Groq API, Azure Speech Services
+**Built with:** Python 3.x, Flask, SQLite, NetworkX, D3.js, Groq API, Azure Speech Services

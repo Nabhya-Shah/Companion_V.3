@@ -283,41 +283,42 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// Live message polling
-let lastMessageCount = 0;
-let displayedMessageIds = new Set();
+// Live message polling - DISABLED to prevent duplication
+// Messages are already added via sendMessage() function
+// let lastMessageCount = 0;
+// let displayedMessageIds = new Set();
 
-async function pollForNewMessages() {
-  try {
-    const resp = await fetch('/api/chat/history');
-    if (!resp.ok) return;
-    const data = await resp.json();
-    
-    // If there are new messages, add them to the chat
-    if (data.count > lastMessageCount) {
-      const newMessages = data.history.slice(lastMessageCount);
-      newMessages.forEach((entry, index) => {
-        // Create unique ID based on timestamp and content
-        const msgId = `${entry.timestamp || ''}_${(entry.user || '').substring(0, 20)}`;
-        
-        // Only add if we haven't displayed this message yet
-        if (!displayedMessageIds.has(msgId)) {
-          addMessage('user', entry.user);
-          addMessage('ai', entry.ai);
-          displayedMessageIds.add(msgId);
-        }
-      });
-      lastMessageCount = data.count;
-    }
-  } catch (e) {
-    console.error('Poll error:', e);
-  }
-}
+// async function pollForNewMessages() {
+//   try {
+//     const resp = await fetch('/api/chat/history');
+//     if (!resp.ok) return;
+//     const data = await resp.json();
+//     
+//     // If there are new messages, add them to the chat
+//     if (data.count > lastMessageCount) {
+//       const newMessages = data.history.slice(lastMessageCount);
+//       newMessages.forEach((entry, index) => {
+//         // Create unique ID based on timestamp and content
+//         const msgId = `${entry.timestamp || ''}_${(entry.user || '').substring(0, 20)}`;
+//         
+//         // Only add if we haven't displayed this message yet
+//         if (!displayedMessageIds.has(msgId)) {
+//           addMessage('user', entry.user);
+//           addMessage('ai', entry.ai);
+//           displayedMessageIds.add(msgId);
+//         }
+//       });
+//       lastMessageCount = data.count;
+//     }
+//   } catch (e) {
+//     console.error('Poll error:', e);
+//   }
+// }
 
 // Start polling every 2 seconds
-setInterval(pollForNewMessages, 2000);
+// setInterval(pollForNewMessages, 2000);
 // Initial poll to catch up
-pollForNewMessages();
+// pollForNewMessages();
 
 // Initial load
 loadMemory();

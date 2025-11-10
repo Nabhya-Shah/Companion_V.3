@@ -26,6 +26,10 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 LOG_FILE = os.path.join(DATA_DIR, 'web_server.log')
 os.makedirs(DATA_DIR, exist_ok=True)
 
+# Clear log file on server restart
+if os.path.exists(LOG_FILE):
+    os.remove(LOG_FILE)
+
 # Create formatters and handlers
 console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
 file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -35,14 +39,19 @@ console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.INFO)
 console_handler.setFormatter(console_formatter)
 
-# File handler (for persistent logs)
-file_handler = logging.FileHandler(LOG_FILE)
+# File handler (for persistent logs) - 'w' mode overwrites if file exists, UTF-8 encoding for emoji/arrows
+file_handler = logging.FileHandler(LOG_FILE, mode='w', encoding='utf-8')
 file_handler.setLevel(logging.DEBUG)
 file_handler.setFormatter(file_formatter)
 
-# Configure root logger
-logging.basicConfig(level=logging.INFO, handlers=[console_handler, file_handler])
+# Configure root logger with force=True to override any existing config
+logging.basicConfig(level=logging.DEBUG, handlers=[console_handler, file_handler], force=True)
 logger = logging.getLogger(__name__)
+
+# Force flush after every log message
+import sys
+sys.stdout.flush()
+sys.stderr.flush()
 
 logger.info("=" * 70)
 logger.info("🚀 COMPANION AI WEB SERVER STARTING")

@@ -6,8 +6,9 @@ Inspired by Cognee's GraphRAG approach, this implements:
 - Graph-based memory with temporal tracking
 - Hybrid retrieval (graph + vector + temporal)
 - Multiple search modes (GRAPH_COMPLETION, RAG_COMPLETION, RELATIONSHIPS, TEMPORAL)
+- Semantic entity matching using sentence-transformers
 
-Uses NetworkX for graph operations and lightweight embeddings for semantic search.
+Uses NetworkX for graph operations and sentence-transformers for semantic deduplication.
 """
 import logging
 import json
@@ -16,7 +17,16 @@ import os
 from typing import Dict, List, Tuple, Set, Optional
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
+from difflib import SequenceMatcher
 import networkx as nx
+
+# Semantic matching imports
+try:
+    from sentence_transformers import SentenceTransformer
+    SEMANTIC_MATCHING_AVAILABLE = True
+except ImportError:
+    SEMANTIC_MATCHING_AVAILABLE = False
+    logging.warning("sentence-transformers not installed - semantic matching disabled")
 
 logger = logging.getLogger(__name__)
 
@@ -62,17 +72,34 @@ class Relationship:
 
 class KnowledgeGraph:
     """
-    Hybrid Knowledge Graph + Vector Memory System
+    Hybrid Knowledge Graph + Semantic Memory System
     
     Combines:
     - NetworkX graph for entity relationships
-    - Simple embeddings for semantic search
+    - Sentence-transformers for semantic entity deduplication
     - Temporal tracking for time-based queries
+    
+    Semantic matching prevents duplicate entities:
+    - "Python" and "python programming" → same entity
+    - "NYC" and "New York City" → same entity
+    - Uses hybrid fuzzy + semantic approach for best accuracy
     """
     
     def __init__(self):
         self.graph: nx.DiGraph = nx.DiGraph()
         self.embeddings: Dict[str, List[float]] = {}
+        
+        # Initialize semantic model for entity deduplication (lazy load)
+        self.semantic_model = None
+        if SEMANTIC_MATCHING_AVAILABLE:
+            try:
+                # Use lightweight model: 80MB, fast, accurate
+                self.semantic_model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+                logger.info("✅ Semantic matching enabled (all-MiniLM-L6-v2)")
+            except Exception as e:
+                logger.warning(f"Failed to load semantic model: {e}")
+                self.semantic_model = None
+        
         self._load_graph()
         logger.info(f"Knowledge Graph initialized: {self.graph.number_of_nodes()} entities, {self.graph.number_of_edges()} relationships")
     
@@ -104,13 +131,100 @@ class KnowledgeGraph:
         except Exception as e:
             logger.error(f"Failed to save graph: {e}")
     
+    def _find_similar_entity(self, entity_name: str, entity_type: str) -> Optional[str]:
+        """
+        Find existing entity that matches this one (hybrid fuzzy + semantic).
+        
+        Returns the name of the matching entity, or None if no match.
+        
+        Strategy:
+        1. Exact match (case-insensitive) - same type only
+        2. Fuzzy string matching (70% threshold) - same type only
+        3. Semantic similarity (80% threshold) - relaxed type checking
+           (JS/JavaScript might be classified as thing/concept but are same entity)
+        """
+        if not self.graph.has_node(entity_name):
+            # Normalize for comparison
+            entity_lower = entity_name.lower().strip()
+            
+            # Check existing entities of same type FIRST
+            candidates_same_type = [
+                node for node in self.graph.nodes()
+                if self.graph.nodes[node].get('entity_type') == entity_type
+            ]
+            
+            for candidate in candidates_same_type:
+                candidate_lower = candidate.lower().strip()
+                
+                # 1. Case-insensitive exact match
+                if entity_lower == candidate_lower:
+                    logger.info(f"🔍 Exact match: '{entity_name}' → '{candidate}'")
+                    return candidate
+                
+                # 2. Fuzzy string matching (fast, catches typos)
+                ratio = SequenceMatcher(None, entity_lower, candidate_lower).ratio()
+                if ratio >= 0.70:  # 70% similar
+                    logger.info(f"🔍 Fuzzy match ({ratio:.0%}): '{entity_name}' → '{candidate}'")
+                    return candidate
+            
+            # 3. Semantic similarity across ALL types (abbreviations might be misclassified)
+            if self.semantic_model is not None:
+                try:
+                    all_candidates = list(self.graph.nodes())
+                    
+                    for candidate in all_candidates:
+                        candidate_type = self.graph.nodes[candidate].get('entity_type', 'unknown')
+                        
+                        # Skip if already checked in same-type pass
+                        if candidate in candidates_same_type:
+                            continue
+                        
+                        # Encode both entities
+                        embedding1 = self.semantic_model.encode(entity_name, convert_to_tensor=True)
+                        embedding2 = self.semantic_model.encode(candidate, convert_to_tensor=True)
+                        
+                        # Calculate cosine similarity
+                        from torch.nn.functional import cosine_similarity
+                        similarity = cosine_similarity(embedding1.unsqueeze(0), embedding2.unsqueeze(0)).item()
+                        
+                        # Lowered from 0.85 → 0.80 to catch abbreviations (JS→JavaScript: 0.829)
+                        # and variations (Python→Python programming language: 0.841)
+                        # Still avoids false matches (Java→JavaScript: 0.404)
+                        if similarity >= 0.80:
+                            logger.info(f"🧠 Semantic match ({similarity:.0%}, cross-type {entity_type}→{candidate_type}): '{entity_name}' → '{candidate}'")
+                            return candidate
+                except Exception as e:
+                    logger.debug(f"Semantic matching failed: {e}")
+        
+        return None  # No match found
+    
     def add_entity(self, entity: Entity) -> bool:
-        """Add or update entity in graph"""
+        """Add or update entity in graph with semantic deduplication"""
         try:
             now = datetime.now(timezone.utc).isoformat()
             
-            if self.graph.has_node(entity.name):
-                # Update existing entity
+            # Check for duplicate via semantic matching
+            existing_match = self._find_similar_entity(entity.name, entity.entity_type)
+            
+            if existing_match:
+                # Merge with existing entity
+                node_data = self.graph.nodes[existing_match]
+                node_data['last_mentioned'] = now
+                node_data['mention_count'] = node_data.get('mention_count', 0) + 1
+                node_data['attributes'].update(entity.attributes)
+                
+                # Store alias mapping
+                if existing_match != entity.name:
+                    aliases = node_data.get('aliases', [])
+                    if entity.name not in aliases:
+                        aliases.append(entity.name)
+                        node_data['aliases'] = aliases
+                    logger.info(f"🔄 Merged '{entity.name}' → '{existing_match}' (alias added)")
+                else:
+                    logger.info(f"🔄 Updated entity: {existing_match}")
+            
+            elif self.graph.has_node(entity.name):
+                # Update existing entity (exact name match)
                 node_data = self.graph.nodes[entity.name]
                 node_data['last_mentioned'] = now
                 node_data['mention_count'] = node_data.get('mention_count', 0) + 1
@@ -471,22 +585,29 @@ Return JSON only:"""
 def add_conversation_to_graph(user_message: str, ai_response: str):
     """Process conversation and add to knowledge graph"""
     try:
+        logger.info(f"🔍 Processing conversation for graph: User={user_message[:50]}... AI={ai_response[:50]}...")
         kg = get_knowledge_graph()
         
         # Extract entities and relationships
         entities, relationships = extract_entities_and_relationships(user_message, ai_response)
         
+        logger.info(f"📊 Extracted {len(entities)} entities, {len(relationships)} relationships")
+        
         # Add to graph
         for entity in entities:
-            kg.add_entity(entity)
+            success = kg.add_entity(entity)
+            logger.info(f"  ➜ Entity '{entity.name}' added: {success}")
         
         for rel in relationships:
-            kg.add_relationship(rel)
+            success = kg.add_relationship(rel)
+            logger.info(f"  ➜ Relationship '{rel.source}→{rel.target}' added: {success}")
         
-        logger.info(f"✅ Added conversation to knowledge graph")
+        logger.info(f"✅ Graph now has {kg.graph.number_of_nodes()} entities, {kg.graph.number_of_edges()} relationships")
         
     except Exception as e:
         logger.error(f"Failed to add conversation to graph: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 
 def search_graph(query: str, mode: str = "GRAPH_COMPLETION", limit: int = 10) -> List[Dict]:

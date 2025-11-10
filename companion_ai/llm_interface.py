@@ -154,9 +154,12 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
             mode = 'legacy'
             memory_meta = None
         start_t = time.perf_counter()
-        # Optional ensemble deep reasoning (best-of-two) when complexity high
+        # Initialize tool tracking variables
         first_output = None
+        tool_used = None
+        tool_result = None
         ensemble_meta = None
+        # Optional ensemble deep reasoning (best-of-two) when complexity high
         if (core_config.ENABLE_ENSEMBLE and complexity >= 2 and persona.lower() == 'companion' and not model):
             try:
                 # Build candidate model list (three-model trio: smart(120b), heavy(r1), alt(kimi))
@@ -295,7 +298,14 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
                     first_output = None
             
             # Use custom tools if Compound not used or failed
-            if first_output is None and core_config.ENABLE_AUTO_TOOLS:
+            # OPTIMIZATION: Skip tool checking for casual chat (complexity 0) to save tokens
+            # Tool schemas add ~8-10K tokens per request!
+            should_check_tools = (
+                core_config.ENABLE_AUTO_TOOLS and 
+                (complexity > 0 or core_config.should_use_compound(user_message))
+            )
+            
+            if first_output is None and should_check_tools:
                 # Use dedicated tool model with parallel tool support
                 tool_model = core_config.MODEL_ROLES.get('tools', chosen_model)
                 # IMPORTANT: Don't pass full conversation history to tool execution
@@ -309,8 +319,10 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
                 final_output = first_output
             elif first_output is None:
                 # Tools disabled - just generate normally
+                logger.info("Tools skipped (casual chat), generating normal response")
                 first_output = generate_model_response(user_message, system_prompt, chosen_model)
                 final_output = first_output
+                logger.info(f"Generated response length: {len(first_output) if first_output else 0}")
         else:
             final_output = first_output
         
@@ -340,12 +352,15 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
 
 def _maybe_cache_opts(system_prompt: str) -> dict:
     """Return cache options dict if prompt caching enabled and supported."""
-    if not core_config.ENABLE_PROMPT_CACHING:
-        return {}
-    # Stable hash of system prompt content acts as cache key
-    key = hashlib.sha256(system_prompt.encode('utf-8')).hexdigest()[:40]
-    # Groq prompt caching (if supported by SDK) typically via `cache_key` or `cache` param
-    return {"cache_key": f"sys:{key}"}
+    # NOTE: Groq SDK doesn't currently support prompt caching via cache_key parameter
+    # Disabling for now to avoid TypeError exceptions
+    return {}
+    # if not core_config.ENABLE_PROMPT_CACHING:
+    #     return {}
+    # # Stable hash of system prompt content acts as cache key
+    # key = hashlib.sha256(system_prompt.encode('utf-8')).hexdigest()[:40]
+    # # Groq prompt caching (if supported by SDK) typically via `cache_key` or `cache` param
+    # return {"cache_key": f"sys:{key}"}
 
 def generate_model_response_with_tools(user_message: str, system_prompt: str, model: str, conversation_model: str = None, memory_context: dict = None) -> tuple[str, str | None, str | None]:
     """Generate response using Groq native function calling with TOKEN OPTIMIZATION.
@@ -644,8 +659,14 @@ def generate_model_response(user_message: str, system_prompt: str, model: str) -
             top_p=0.9,
             stream=False
         )
-    raw = response.choices[0].message.content.strip()
-    return sanitize_output(raw)
+    raw = response.choices[0].message.content
+    if not raw:
+        logger.warning(f"API returned empty content for model={model}")
+        return ""
+    raw = raw.strip()
+    sanitized = sanitize_output(raw)
+    logger.info(f"API response: raw_len={len(raw)}, sanitized_len={len(sanitized)}")
+    return sanitized
 
 def generate_groq_response(prompt: str, model: str = "llama-3.1-8b-instant") -> str:
     """Generate response using Groq API with selectable model"""
