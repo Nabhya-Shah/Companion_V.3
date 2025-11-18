@@ -3,7 +3,7 @@
 Web-based Companion AI Interface
 """
 
-from flask import Flask, render_template, request, jsonify, make_response
+from flask import Flask, render_template, request, jsonify, make_response, Response, stream_with_context
 import threading
 import webbrowser
 import time
@@ -62,6 +62,8 @@ app = Flask(__name__)
 
 conversation_history = []
 conversation_session = ConversationSession()
+history_version = 0
+history_condition = threading.Condition()
 
 @app.route('/')
 def index():
@@ -121,6 +123,10 @@ def chat():
             'persona': persona
         }
         conversation_history.append(entry)
+        global history_version
+        with history_condition:
+            history_version += 1
+            history_condition.notify_all()
         
         # Auto-process memory every 5 messages to store facts in database
         if len(conversation_history) % 5 == 0:
@@ -177,6 +183,10 @@ def debug_chat():
             'source': 'debug_api'
         }
         conversation_history.append(entry)
+        global history_version
+        with history_condition:
+            history_version += 1
+            history_condition.notify_all()
         
         # Auto-process memory every 5 messages to store facts in database
         if len(conversation_history) % 5 == 0:
@@ -208,6 +218,30 @@ def get_chat_history():
     except Exception as e:
         logger.error(f"Get history error: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/chat/stream')
+def chat_history_stream():
+    """Server-sent events stream pushing history updates when they occur."""
+    def event_stream():
+        last_version = -1
+        while True:
+            with history_condition:
+                current_version = history_version
+                snapshot = list(conversation_history)
+            if current_version != last_version:
+                payload = json.dumps({
+                    'history': snapshot,
+                    'count': len(snapshot)
+                })
+                last_version = current_version
+                yield f"data: {payload}\n\n"
+            with history_condition:
+                history_condition.wait(timeout=20)
+
+    response = Response(stream_with_context(event_stream()), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['X-Accel-Buffering'] = 'no'
+    return response
 
 @app.route('/api/memory')
 def get_memory():

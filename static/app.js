@@ -31,7 +31,19 @@ if (toggleSidebarBtn) {
   });
 }
 
-function addMessage(role, text) {
+function formatTimestamp(tsString) {
+  if (!tsString) return new Date().toLocaleTimeString();
+  try {
+    const date = new Date(tsString);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleTimeString();
+    }
+  } catch {}
+  return new Date().toLocaleTimeString();
+}
+
+function addMessage(role, text, options = {}) {
+  const { timestamp, skipScroll } = options;
   // Remove welcome message on first interaction
   const welcome = chatPane.querySelector('.msg.system');
   if (welcome) welcome.remove();
@@ -41,14 +53,16 @@ function addMessage(role, text) {
   div.textContent = text;
   const ts = document.createElement('span');
   ts.className = 'timestamp';
-  ts.textContent = new Date().toLocaleTimeString();
+  ts.textContent = formatTimestamp(timestamp);
   div.appendChild(ts);
   chatPane.appendChild(div);
   
   // Smooth scroll to bottom - scroll the container, not the element
-  setTimeout(() => {
-    chatPane.scrollTop = chatPane.scrollHeight;
-  }, 50);
+  if (!skipScroll) {
+    setTimeout(() => {
+      chatPane.scrollTop = chatPane.scrollHeight;
+    }, 50);
+  }
 }
 
 async function sendMessage(retry=false) {
@@ -283,42 +297,72 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// Live message polling - DISABLED to prevent duplication
-// Messages are already added via sendMessage() function
-// let lastMessageCount = 0;
-// let displayedMessageIds = new Set();
+// Live chat synchronization
+let syncInProgress = false;
+let lastHistoryMeta = { count: 0, latestTs: '' };
+let historySource = null;
 
-// async function pollForNewMessages() {
-//   try {
-//     const resp = await fetch('/api/chat/history');
-//     if (!resp.ok) return;
-//     const data = await resp.json();
-//     
-//     // If there are new messages, add them to the chat
-//     if (data.count > lastMessageCount) {
-//       const newMessages = data.history.slice(lastMessageCount);
-//       newMessages.forEach((entry, index) => {
-//         // Create unique ID based on timestamp and content
-//         const msgId = `${entry.timestamp || ''}_${(entry.user || '').substring(0, 20)}`;
-//         
-//         // Only add if we haven't displayed this message yet
-//         if (!displayedMessageIds.has(msgId)) {
-//           addMessage('user', entry.user);
-//           addMessage('ai', entry.ai);
-//           displayedMessageIds.add(msgId);
-//         }
-//       });
-//       lastMessageCount = data.count;
-//     }
-//   } catch (e) {
-//     console.error('Poll error:', e);
-//   }
-// }
+function renderChatHistory(history) {
+  chatPane.querySelectorAll('.msg.user, .msg.ai').forEach(node => node.remove());
+  history.forEach(entry => {
+    if (entry.user) {
+      addMessage('user', entry.user, { timestamp: entry.timestamp, skipScroll: true });
+    }
+    if (entry.ai) {
+      addMessage('ai', entry.ai, { timestamp: entry.timestamp, skipScroll: true });
+    }
+  });
+  chatPane.scrollTop = chatPane.scrollHeight;
+}
 
-// Start polling every 2 seconds
-// setInterval(pollForNewMessages, 2000);
-// Initial poll to catch up
-// pollForNewMessages();
+async function syncChatHistory(options = {}) {
+  if (syncInProgress) return;
+  syncInProgress = true;
+  const { force = false, payload = null } = options;
+  try {
+    let data = payload;
+    if (!data) {
+      const resp = await fetch('/api/chat/history');
+      if (!resp.ok) return;
+      data = await resp.json();
+    }
+    const history = Array.isArray(data.history) ? data.history : [];
+    const count = typeof data.count === 'number' ? data.count : history.length;
+    const latestTs = history.length ? (history[history.length - 1].timestamp || '') : '';
+    const unchanged = !force &&
+      count === lastHistoryMeta.count &&
+      latestTs === lastHistoryMeta.latestTs;
+    if (unchanged) return;
+
+    renderChatHistory(history);
+    lastHistoryMeta = { count, latestTs };
+  } catch (e) {
+    console.error('Chat sync error:', e);
+  } finally {
+    syncInProgress = false;
+  }
+}
+
+function startHistoryStream() {
+  if (!window.EventSource) return;
+  if (historySource) historySource.close();
+  historySource = new EventSource('/api/chat/stream');
+  historySource.onmessage = event => {
+    try {
+      const data = JSON.parse(event.data);
+      syncChatHistory({ force: true, payload: data });
+    } catch (err) {
+      console.error('History stream parse error', err);
+    }
+  };
+  historySource.onerror = () => {
+    historySource.close();
+    setTimeout(startHistoryStream, 3000);
+  };
+}
+
+syncChatHistory({ force: true });
+startHistoryStream();
 
 // Initial load
 loadMemory();
