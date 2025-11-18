@@ -207,6 +207,21 @@ def debug_chat():
         logger.error(f"Debug chat error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/debug/reset', methods=['POST'])
+def debug_reset():
+    """Clear conversation history and start a fresh ConversationSession (testing only)."""
+    try:
+        global conversation_history, conversation_session, history_version
+        conversation_history.clear()
+        conversation_session = ConversationSession()
+        with history_condition:
+            history_version += 1
+            history_condition.notify_all()
+        return jsonify({'reset': True, 'history_length': 0})
+    except Exception as e:
+        logger.error(f"Debug reset error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/chat/history')
 def get_chat_history():
     """Get conversation history for live updates."""

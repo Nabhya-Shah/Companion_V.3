@@ -192,6 +192,15 @@ Navigate to `http://localhost:5000/graph` to see the D3.js force-directed visual
    pytest -q
    ```
 
+  5. **Run the conversational evaluation harness** (optional, for prompt tuning)
+     ```bash
+     # Ensure the web server is running on localhost:5000, then:
+     python tools/run_prompt_eval.py --label current
+     ```
+     This script reads `tools/eval_scenarios.json`, resets the debug session between scenarios, and records
+     full transcripts plus summary metrics in `data/eval_reports/<timestamp>_<label>*.json`. Run again with
+     `--label new_prompt` after making prompt changes, then diff the summaries to spot regressions.
+
 ## 🎯 Usage
 
 ### GUI Interface

@@ -8,13 +8,18 @@ __pycache__/
 *.env
 .env
 .env.local
+
+# Runtime data & logs
+data/chat_logs/
+data/logs/
+data/eval_reports/
+data/companion_ai.db
+
 venv/
 .venv/
 env/
 build/
 dist/
-data/companion_ai.db
-data/logs/*.jsonl
 memory_export_*.txt
 /.pytest_cache/
 /.mypy_cache/
