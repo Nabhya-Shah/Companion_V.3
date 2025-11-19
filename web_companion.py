@@ -340,22 +340,59 @@ def toggle_tts():
         logger.error(f"TTS toggle error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/tts/voices', methods=['GET'])
+def get_voices():
+    try:
+        voices = tts_manager.get_available_voices()
+        return jsonify({'voices': voices})
+    except Exception as e:
+        logger.error(f"Get voices error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tts/config', methods=['GET', 'POST'])
+def tts_config():
+    try:
+        if request.method == 'POST':
+            data = request.json or {}
+            token = request.headers.get('X-API-TOKEN') or data.get('token') or request.cookies.get('api_token')
+            if not core_config.require_auth(token):
+                return jsonify({'error': 'Unauthorized'}), 401
+            
+            voice = data.get('voice')
+            rate = data.get('rate')
+            pitch = data.get('pitch')
+            
+            if voice:
+                tts_manager.set_voice(voice)
+            if rate:
+                tts_manager.set_speech_rate(rate)
+            if pitch:
+                tts_manager.set_speech_pitch(pitch)
+                
+            return jsonify(tts_manager.get_status())
+        else:
+            return jsonify(tts_manager.get_status())
+    except Exception as e:
+        logger.error(f"TTS config error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/voice/change', methods=['POST'])
 def change_voice():
+    # Legacy endpoint - redirect to new config
     try:
         data = request.json or {}
         token = request.headers.get('X-API-TOKEN') or data.get('token') or request.cookies.get('api_token')
         if not core_config.require_auth(token):
             return jsonify({'error': 'Unauthorized'}), 401
         voice_name = data.get('voice')
+        # Try to map friendly names if needed, or just pass through
         mapping = {
             'Phoebe Dragon HD': 'en-US-Phoebe:DragonHDLatestNeural',
             'Ava Dragon HD': 'en-US-Ava:DragonHDLatestNeural'
         }
-        if voice_name in mapping:
-            success = tts_manager.set_voice(mapping[voice_name])
-            return jsonify({'success': success})
-        return jsonify({'error': 'Invalid voice'}), 400
+        target_voice = mapping.get(voice_name, voice_name)
+        success = tts_manager.set_voice(target_voice)
+        return jsonify({'success': success})
     except Exception as e:
         logger.error(f"Voice change error: {e}")
         return jsonify({'error': str(e)}), 500

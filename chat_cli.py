@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 
 from companion_ai import memory as mem
 from companion_ai import llm_interface
+from companion_ai.tts_manager import tts_manager
 
 load_dotenv()
 
@@ -39,12 +40,20 @@ def print_banner():
     print("\n=== Companion Chat (Adaptive Persona) ===")
     if not have_groq():
         print("[WARN] GROQ_API_KEY not set – responses will say offline.")
-    print("Commands: /exit /quit /memstats /health /help")
+    if tts_manager.is_enabled:
+        print(f"[INFO] Voice enabled: {tts_manager.current_voice}")
+    else:
+        print("[INFO] Voice disabled (missing keys or init failed)")
+    print("Commands: /exit /quit /voice [on|off] /memstats /health /help")
 
 def main():
     print_banner()
     recent_inputs: deque[str] = deque(maxlen=3)
     turn_index = 0
+    
+    # Auto-enable voice if keys are present
+    voice_active = tts_manager.is_enabled
+
     while True:
         try:
             user_raw = input("You> ")
@@ -60,8 +69,24 @@ def main():
         if cmd in {"/exit", "/quit"}:
             print("Bye.")
             break
+        if cmd.startswith("/voice"):
+            parts = cmd.split()
+            if len(parts) > 1:
+                if parts[1] == "on":
+                    if tts_manager.is_enabled:
+                        voice_active = True
+                        print("Voice output ON.")
+                    else:
+                        print("Cannot enable voice: Azure keys missing or init failed.")
+                elif parts[1] == "off":
+                    voice_active = False
+                    tts_manager.stop_current_speech()
+                    print("Voice output OFF.")
+            else:
+                print(f"Voice is {'ON' if voice_active else 'OFF'}")
+            continue
         if cmd in {"/help", "help"}:
-            print("Commands: /exit /quit /memstats /health /help")
+            print("Commands: /exit /quit /voice [on|off] /memstats /health /help")
             continue
         if cmd == "/memstats":
             from companion_ai.memory import get_memory_stats
@@ -96,6 +121,11 @@ def main():
 
         reply = llm_interface.generate_response(user_with_style, ctx, persona="Companion")
         print(f"AI > {reply}")
+        
+        # Speak response if voice is active
+        if voice_active:
+            tts_manager.speak_text(reply, blocking=False)
+
         turn_index += 1
 
         # Memory gating heuristics

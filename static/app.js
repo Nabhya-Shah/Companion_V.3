@@ -42,6 +42,10 @@ function formatTimestamp(tsString) {
   return new Date().toLocaleTimeString();
 }
 
+function scrollToBottom() {
+  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+}
+
 function addMessage(role, text, options = {}) {
   const { timestamp, skipScroll } = options;
   // Remove welcome message on first interaction
@@ -57,11 +61,9 @@ function addMessage(role, text, options = {}) {
   div.appendChild(ts);
   chatPane.appendChild(div);
   
-  // Smooth scroll to bottom - scroll the container, not the element
+  // Smooth scroll to bottom
   if (!skipScroll) {
-    setTimeout(() => {
-      chatPane.scrollTop = chatPane.scrollHeight;
-    }, 50);
+    setTimeout(scrollToBottom, 50);
   }
 }
 
@@ -77,7 +79,7 @@ async function sendMessage(retry=false) {
   loadingDiv.className = 'msg ai loading';
   loadingDiv.textContent = '...';
   chatPane.appendChild(loadingDiv);
-  chatPane.scrollTop = chatPane.scrollHeight;
+  scrollToBottom();
   
   try {
     const resp = await fetch('/api/chat', {
@@ -95,7 +97,11 @@ async function sendMessage(retry=false) {
     
     // Remove loading indicator
     loadingDiv.remove();
-    addMessage('ai', data.response);
+    
+    // Force sync instead of manually adding to avoid duplicates
+    // The server has already updated the history, so this will fetch and render the correct state
+    await syncChatHistory({ force: true });
+    
   } catch (e) {
     loadingDiv.remove();
     addMessage('ai', 'Error: ' + e.message);
@@ -312,7 +318,7 @@ function renderChatHistory(history) {
       addMessage('ai', entry.ai, { timestamp: entry.timestamp, skipScroll: true });
     }
   });
-  chatPane.scrollTop = chatPane.scrollHeight;
+  scrollToBottom();
 }
 
 async function syncChatHistory(options = {}) {
@@ -371,4 +377,69 @@ loadModelsPanel();
 loadRecentRouting();
 // Auto-refresh routing panel on health refresh
 healthBtn.addEventListener('click', ()=>{ loadModelsPanel(); loadRecentRouting(); });
+
+async function loadSettings() {
+  const voiceSelect = document.getElementById('voiceSelect');
+  const rateSelect = document.getElementById('rateSelect');
+  const pitchSelect = document.getElementById('pitchSelect');
+  
+  if (!voiceSelect || !rateSelect || !pitchSelect) return;
+
+  try {
+    // Fetch voices
+    const vResp = await fetch('/api/tts/voices', { headers: authHeaders() });
+    const vData = await vResp.json();
+    
+    if (vData.voices) {
+      voiceSelect.innerHTML = '';
+      vData.voices.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v;
+        // Clean up name for display
+        let label = v.replace('en-US-', '').replace('Neural', '');
+        if (label.includes(':')) label = label.split(':')[0] + ' (HD)';
+        opt.textContent = label;
+        voiceSelect.appendChild(opt);
+      });
+    }
+
+    // Fetch current config
+    const cResp = await fetch('/api/tts/config', { headers: authHeaders() });
+    const cData = await cResp.json();
+    
+    if (cData.voice) voiceSelect.value = cData.voice;
+    if (cData.rate) rateSelect.value = cData.rate;
+    if (cData.pitch) pitchSelect.value = cData.pitch;
+
+    // Add listeners
+    voiceSelect.addEventListener('change', async () => {
+      await fetch('/api/tts/config', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ voice: voiceSelect.value })
+      });
+    });
+
+    rateSelect.addEventListener('change', async () => {
+      await fetch('/api/tts/config', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ rate: rateSelect.value })
+      });
+    });
+
+    pitchSelect.addEventListener('change', async () => {
+      await fetch('/api/tts/config', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ pitch: pitchSelect.value })
+      });
+    });
+
+  } catch (e) {
+    console.error('Error loading settings:', e);
+  }
+}
+
+loadSettings();
 

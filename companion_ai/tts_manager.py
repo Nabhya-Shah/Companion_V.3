@@ -257,6 +257,16 @@ class AzureTTSManager:
             logger.error(f"Failed to set speech rate: {e}")
             return False
     
+    def set_speech_pitch(self, pitch: str) -> bool:
+        """Set speech pitch (e.g., '-10%', '0%', '+10%')"""
+        try:
+            self.speech_pitch = pitch
+            logger.info(f"Speech pitch set to: {pitch}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to set speech pitch: {e}")
+            return False
+    
     def get_available_voices(self) -> list:
         """Get list of available voices optimized for companion AI personality"""
         return [
