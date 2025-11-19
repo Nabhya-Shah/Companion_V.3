@@ -234,6 +234,23 @@ MODEL_CAPABILITIES: dict[str, dict] = {
         "agentic": True,
         "roles": ["agent.compound"]
     },
+    # Vision models
+    "llama-3.2-11b-vision-preview": {
+        "speed": 2,
+        "quality": 4,
+        "cost_weight": 3,
+        "tier": "vision",
+        "vision": True,
+        "roles": ["vision"]
+    },
+    "llama-3.2-90b-vision-preview": {
+        "speed": 3,
+        "quality": 5,
+        "cost_weight": 5,
+        "tier": "vision_high",
+        "vision": True,
+        "roles": ["vision.high"]
+    },
 }
 
 # Models that are confirmed available (defensive runtime fallback). Adjust as provider evolves.
@@ -244,6 +261,8 @@ KNOWN_AVAILABLE_MODELS = {
     "openai/gpt-oss-20b",
     "openai/gpt-oss-120b",
     "moonshotai/kimi-k2-0905",  # include kimi in available set for ensemble
+    "llama-3.2-11b-vision-preview",
+    "llama-3.2-90b-vision-preview",
 }
 
 def safest_fallback() -> str:

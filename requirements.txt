@@ -22,6 +22,9 @@ azure-cognitiveservices-speech>=1.30.0
 # Optional: Advanced audio processing
 openai-whisper>=20231117
 
+# Vision
+mss>=9.0.1              # Fast screen capture
+
 # Knowledge Graph & Embeddings
 networkx>=3.1           # Graph operations for knowledge graph
 sentence-transformers>=2.2.0  # Lightweight embeddings (optional, for future semantic search)

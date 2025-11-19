@@ -436,6 +436,27 @@ async function loadSettings() {
       });
     });
 
+    // Vision Toggle
+    const visionToggle = document.getElementById('visionToggle');
+    const visionStatus = document.getElementById('visionStatus');
+    
+    if (visionToggle) {
+      // Initial check
+      const vResp = await fetch('/api/vision/status', { headers: authHeaders() });
+      const vData = await vResp.json();
+      visionToggle.checked = vData.enabled;
+      visionStatus.textContent = vData.enabled ? 'Status: Watching (Active)' : 'Status: Off';
+      
+      visionToggle.addEventListener('change', async () => {
+        const resp = await fetch('/api/vision/toggle', { 
+          method: 'POST', 
+          headers: authHeaders() 
+        });
+        const data = await resp.json();
+        visionStatus.textContent = data.enabled ? 'Status: Watching (Active)' : 'Status: Off';
+      });
+    }
+
   } catch (e) {
     console.error('Error loading settings:', e);
   }

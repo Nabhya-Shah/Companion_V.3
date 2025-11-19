@@ -267,6 +267,8 @@ def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
         return tool_fn(arguments.get('directory', '.'), arguments.get('file_type'))
     elif function_name == 'find_file':
         return tool_fn(arguments.get('filename', ''), arguments.get('file_type'))
+    elif function_name == 'look_at_screen':
+        return tool_fn(arguments.get('prompt', 'What is on the screen?'))
     else:
         # Fallback: pass first argument or empty string
         first_arg = next(iter(arguments.values()), '') if arguments else ''
@@ -757,5 +759,30 @@ def tool_find_file(filename: str, file_type: str | None = None) -> str:
         result.append(f"\n... and {len(matches) - 10} more matches")
     
     return '\n'.join(result)
+
+@tool('look_at_screen', schema={
+    "type": "function",
+    "function": {
+        "name": "look_at_screen",
+        "description": "Take a screenshot of the user's current screen and analyze it. Use this when the user asks you to 'look at this', 'see my screen', 'what am I doing', or asks for help with something visible on their monitor.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "Specific question about the screen content (e.g., 'What code is this?', 'Help me with this error', 'Describe the image'). Defaults to general description."
+                }
+            },
+            "required": []
+        }
+    }
+})
+def tool_look_at_screen(prompt: str = "What is on the screen?") -> str:
+    """Analyze the current screen content."""
+    try:
+        from companion_ai.vision_manager import vision_manager
+        return vision_manager.analyze_current_screen(prompt)
+    except Exception as e:
+        return f"Error analyzing screen: {e}"
 
 __all__ = ['list_tools', 'run_tool', 'get_function_schemas', 'execute_function_call']

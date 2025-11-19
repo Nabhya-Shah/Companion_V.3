@@ -16,6 +16,7 @@ from companion_ai.conversation_manager import ConversationSession
 from companion_ai.core import config as core_config
 from companion_ai import memory as db
 from companion_ai.tts_manager import tts_manager
+from companion_ai.vision_manager import vision_manager
 from companion_ai.tools import run_tool, list_tools
 from companion_ai.core import metrics
 from companion_ai import memory as mem
@@ -103,8 +104,27 @@ def chat():
             first, rest = user_message[1:].split(' ', 1)
             tool_result = run_tool(first, rest)
             ai_response = f"[tool:{first}]\n{tool_result}"
+        elif user_message.lower().startswith(('look at', 'see this', 'what is on my screen', 'check screen')):
+            # Trigger active vision analysis
+            logger.info("Triggering active vision analysis from chat")
+            vision_result = vision_manager.analyze_current_screen(user_message)
+            # Feed the vision result back into the conversation as context
+            context_msg = f"[SYSTEM: The user asked you to look at their screen. Here is what you see:\n{vision_result}]"
+            # Now generate response based on this visual context
+            ai_response = conversation_session.process_message(f"{context_msg}\n\nUser: {user_message}", conversation_history)
         else:
             # Use conversation session with FULL conversation history
+            # Inject visual context if watcher is enabled
+            if vision_manager.watcher_enabled and len(vision_manager.visual_log) > 0:
+                # Add a subtle system note with recent visual context
+                # We don't want to overwhelm the prompt, just give a hint
+                latest = vision_manager.visual_log[-1]['description']
+                # We can inject this into the message processing if we modify ConversationSession
+                # For now, let's just append it to the user message invisibly? 
+                # Better: The ConversationSession should handle context injection.
+                # Let's keep it simple for now:
+                pass 
+            
             ai_response = conversation_session.process_message(user_message, conversation_history)
         
         # Guard against empty responses
@@ -374,6 +394,48 @@ def tts_config():
             return jsonify(tts_manager.get_status())
     except Exception as e:
         logger.error(f"TTS config error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# --- Vision Endpoints ---
+
+@app.route('/api/vision/toggle', methods=['POST'])
+def toggle_vision():
+    try:
+        token = request.headers.get('X-API-TOKEN')
+        if not core_config.require_auth(token):
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        if vision_manager.watcher_enabled:
+            vision_manager.stop_watcher()
+        else:
+            vision_manager.start_watcher()
+            
+        return jsonify({'enabled': vision_manager.watcher_enabled})
+    except Exception as e:
+        logger.error(f"Vision toggle error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/vision/status', methods=['GET'])
+def vision_status():
+    return jsonify({
+        'enabled': vision_manager.watcher_enabled,
+        'log_count': len(vision_manager.visual_log),
+        'last_update': vision_manager.visual_log[-1]['timestamp'] if vision_manager.visual_log else None
+    })
+
+@app.route('/api/vision/analyze', methods=['POST'])
+def vision_analyze():
+    try:
+        data = request.json or {}
+        token = request.headers.get('X-API-TOKEN')
+        if not core_config.require_auth(token):
+            return jsonify({'error': 'Unauthorized'}), 401
+            
+        prompt = data.get('prompt', 'What is on the screen?')
+        result = vision_manager.analyze_current_screen(prompt)
+        return jsonify({'result': result})
+    except Exception as e:
+        logger.error(f"Vision analyze error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/voice/change', methods=['POST'])
