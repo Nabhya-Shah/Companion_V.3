@@ -321,6 +321,20 @@ def list_profile_facts_detailed(limit: int | None = None) -> list[dict]:
     finally:
         conn.close()
 
+def delete_profile_fact(key: str) -> bool:
+    """Delete a profile fact by key. Returns True if deleted."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM user_profile WHERE key = ?", (key,))
+        conn.commit()
+        deleted = cursor.rowcount > 0
+        if deleted:
+            logger.info(f"Deleted profile fact: {key}")
+        return deleted
+    finally:
+        conn.close()
+
 def list_pending_profile_facts() -> list[dict]:
     conn = get_db_connection()
     cursor = conn.cursor()

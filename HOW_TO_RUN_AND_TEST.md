@@ -235,3 +235,26 @@ All tested and working:
 ---
 
 **REMEMBER**: Always start server in external window first! 🚀
+
+---
+
+## 🤖 AI Agent Instructions (Copilot/Claude)
+
+**CRITICAL**: When testing the web server from VS Code terminals, the AI agent MUST start the server in an EXTERNAL PowerShell window, not in the VS Code integrated terminal. This allows the agent to send test commands in VS Code while the server runs separately.
+
+### Start Server in External Window:
+```powershell
+Get-Process python* | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; Start-Process "C:/Users/shahn/AppData/Local/Programs/Python/Python314/python.exe" -ArgumentList "run_companion.py", "--web" -WorkingDirectory "c:\Main Folder\Code\Github\Companion_V.3"
+```
+
+### Then Test in VS Code Terminal:
+```powershell
+python tools/send_debug_message.py "Your test message"
+```
+
+**Why this matters:**
+- VS Code terminal blocks when running the server directly
+- External window keeps server visible and running
+- Agent can send debug messages without blocking
+- Server output is visible in the external window
+

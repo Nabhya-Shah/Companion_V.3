@@ -8,7 +8,7 @@ import logging
 import re
 from typing import Dict, List, Tuple
 from companion_ai import memory as db
-from companion_ai.llm_interface import generate_response, groq_memory_client
+from companion_ai.llm_interface import generate_response, generate_response_streaming, groq_memory_client
 from companion_ai.memory_ai import analyze_conversation_importance, extract_smart_profile_facts, generate_smart_summary, generate_contextual_insight, categorize_insight
 from companion_ai.core import config as core_config
 
@@ -66,14 +66,16 @@ class ConversationSession:
         # Step 1: Update memory context based on current message
         self._update_memory_context_with_keywords(user_message)
         
-        # Step 2: Build recent conversation context from ALL history
+        # Step 2: Build recent conversation context - LIMIT TO LAST 3 TURNS to save tokens
         if full_conversation_history:
             recent_turns = []
-            for entry in full_conversation_history:
+            # Only use last 3 exchanges (6 messages) - older context is in memory summaries
+            recent_history = full_conversation_history[-3:]
+            for entry in recent_history:
                 recent_turns.append(f"User: {entry.get('user', '')}")
                 recent_turns.append(f"AI: {entry.get('ai', '')}")
             self.memory_context['recent_conversation'] = "\n".join(recent_turns)
-            logger.info(f"Using full conversation history: {len(full_conversation_history)} exchanges")
+            logger.info(f"Using last {len(recent_history)} of {len(full_conversation_history)} exchanges")
         
         # Step 3: Generate response with enhanced context
         ai_response = generate_response(user_message, self.memory_context)
@@ -88,6 +90,38 @@ class ConversationSession:
         logger.info(f"Conversation exchange stored. Session length: {len(self.conversation_history)}")
         
         return ai_response
+    
+    def process_message_streaming(self, user_message: str, full_conversation_history: List[Dict] = None):
+        """Streaming version of process_message.
+        
+        Yields text chunks as they arrive. Stores response after completion.
+        """
+        # Step 1: Update memory context
+        self._update_memory_context_with_keywords(user_message)
+        
+        # Step 2: Build recent conversation context
+        if full_conversation_history:
+            recent_turns = []
+            recent_history = full_conversation_history[-3:]
+            for entry in recent_history:
+                recent_turns.append(f"User: {entry.get('user', '')}")
+                recent_turns.append(f"AI: {entry.get('ai', '')}")
+            self.memory_context['recent_conversation'] = "\n".join(recent_turns)
+        
+        # Step 3: Generate response with streaming
+        full_response = ""
+        for chunk in generate_response_streaming(user_message, self.memory_context):
+            full_response += chunk
+            yield chunk
+        
+        # Step 4: Store conversation after completion
+        self.conversation_history.append({
+            "user": user_message,
+            "ai": full_response,
+            "timestamp": db.datetime.now().isoformat()
+        })
+        
+        logger.info(f"Streaming complete. Session length: {len(self.conversation_history)}")
     
     def process_session_memory(self):
         """
@@ -177,7 +211,7 @@ Return only the decimal score:"""
 
         try:
             response = groq_memory_client.chat.completions.create(
-                model="llama-3.1-8b-instant",  # Fast model for analysis
+                model="meta-llama/llama-4-scout-17b-16e-instruct",  # Scout for quality
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=50
@@ -215,7 +249,7 @@ Summary:"""
 
         try:
             response = groq_memory_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+                model="meta-llama/llama-4-scout-17b-16e-instruct",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 max_tokens=100
@@ -248,7 +282,7 @@ Insight:"""
 
         try:
             response = groq_memory_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+                model="meta-llama/llama-4-scout-17b-16e-instruct",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.4,
                 max_tokens=150
@@ -273,7 +307,7 @@ Category:"""
 
         try:
             response = groq_memory_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+                model="meta-llama/llama-4-scout-17b-16e-instruct",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=20

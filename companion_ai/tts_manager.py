@@ -7,7 +7,15 @@ import os
 import logging
 import threading
 from typing import Optional
-import azure.cognitiveservices.speech as speechsdk
+
+# Conditional import - Azure SDK is optional
+try:
+    import azure.cognitiveservices.speech as speechsdk
+    AZURE_AVAILABLE = True
+except ImportError:
+    speechsdk = None
+    AZURE_AVAILABLE = False
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -24,6 +32,11 @@ class AzureTTSManager:
         self.synthesizer = None
         self.is_enabled = False
         self.current_synthesis = None  # Track current synthesis for interruption
+        
+        # Check if Azure SDK is available
+        if not AZURE_AVAILABLE:
+            logger.warning("Azure Speech SDK not installed. TTS disabled.")
+            return
         
         # Voice settings - Jenny Neural (warm and friendly, perfect for Aether)
         self.current_voice = "en-US-JennyNeural"  # Warm, friendly, natural

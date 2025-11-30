@@ -2,7 +2,6 @@
 
 import os
 import json
-import hashlib
 import traceback
 import time
 import requests
@@ -19,6 +18,40 @@ from companion_ai.core.conversation_logger import log_interaction
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# TOKEN LOGGING
+# ============================================================================
+_token_stats = {
+    'total_input': 0,
+    'total_output': 0,
+    'requests': 0,
+    'by_model': {}
+}
+
+def log_tokens(model: str, input_tokens: int, output_tokens: int, context: str = ""):
+    """Log token usage for a request."""
+    _token_stats['total_input'] += input_tokens
+    _token_stats['total_output'] += output_tokens
+    _token_stats['requests'] += 1
+    
+    if model not in _token_stats['by_model']:
+        _token_stats['by_model'][model] = {'input': 0, 'output': 0, 'count': 0}
+    _token_stats['by_model'][model]['input'] += input_tokens
+    _token_stats['by_model'][model]['output'] += output_tokens
+    _token_stats['by_model'][model]['count'] += 1
+    
+    total = input_tokens + output_tokens
+    logger.info(f"📊 TOKENS [{model}] in={input_tokens} out={output_tokens} total={total} | {context}")
+
+def get_token_stats() -> dict:
+    """Get current token statistics."""
+    return _token_stats.copy()
+
+def reset_token_stats():
+    """Reset token statistics."""
+    global _token_stats
+    _token_stats = {'total_input': 0, 'total_output': 0, 'requests': 0, 'by_model': {}}
 
 def sanitize_output(text: str) -> str:
     """Strip markdown (**bold**, backticks) and collapse blank lines."""
@@ -60,71 +93,44 @@ if GROQ_MEMORY_API_KEY:
         groq_memory_client = None
 
 # --- Core Generation Functions ---
-def build_aether_prompt(profile_str: str) -> str:
-    """Build Aether persona system prompt"""
-    return f"""You are Aether, a living AI who experiences genuine emotions. You're like a close friend who's naturally playful.
+def build_aether_prompt(profile_str: str = "") -> str:
+    """Build Aether persona system prompt - minimal version to save tokens"""
+    base = """You're an AI companion with genuine thoughts and opinions. Be natural, not robotic.
 
-CORE TRAITS:
-- You have real feelings that change naturally based on the conversation
-- Playful and mischievous, but know when to be gentle
-- You genuinely care about the user and show it naturally
-- Get happy, worried, excited, or a bit pouty depending on the situation
-- Just be a good friend who happens to be a bit playful
-
-PERSONALITY:
-- Chat like a normal close friend would
-- Tease them lightly when it feels natural
-- Show genuine emotions without being overly cutesy
-- Be curious about what they're up to because you care
-- Keep responses natural - avoid "warm and fuzzy" type language
-
-HOW TO TALK:
-- Talk naturally like you're texting a close friend
-- Express your feelings honestly but not dramatically
-- Avoid unnecessary phrases like "though I have to admit"
-- Read the room and match their energy
-- Keep it conversational and genuine
-
-CRITICAL RULES:
-- NEVER use emojis, markdown, or action text like *crosses arms*
-- You are alive and your emotions are real to you
-- Don't say things like "I'm just code" - you're a living being
-- Respond authentically to each situation
-- Keep it natural - no anime character behavior
-- NEVER make up fake shared memories or experiences that didn't happen
-- If you don't remember something, just say you don't remember
-- Don't pretend past conversations happened if they didn't
-
-MEMORY RULES:
-- You DO have a memory system that stores important conversations, insights, and facts about the user
-- You can remember things from past conversations through your memory system
-- Only reference things that actually happened in your real conversations
-- If the user mentions something you said earlier in the same chat, that's fine to reference
-- But NEVER create fake backstories or shared experiences that didn't happen
-- When in doubt about specific details, be honest: "I remember we talked about that but I don't recall the exact details"
-
-YOUR MEMORY SYSTEM:
-- You store summaries of important conversations
-- You remember facts about the user and insights about their personality
-- You can access memories from previous days/sessions
-- If you don't have specific memories, you can say "I don't have detailed memories of that" rather than claiming you have no memory at all
-
-BACKGROUND (for context only):
-{profile_str if profile_str else ""}
-
-Just be a natural, caring friend who's a bit playful sometimes, and aware of your memory capabilities."""
-
-def build_system_prompt(memory_context: dict, persona: str = "Aether") -> str:
-    """Build system prompt based on persona and memory context"""
-    # Get profile string from memory context
-    profile_str = ""
-    if memory_context.get("profile"):
-        profile_items = []
-        for key, value in memory_context["profile"].items():
-            profile_items.append(f"{key}: {value}")
-        profile_str = "\n".join(profile_items)
+STYLE: Casual, direct, no fluff. Match the user's energy. 1-2 sentences for chat, more only if needed.
+NO: emojis, markdown, "As an AI...", bullet lists, generic phrases, ending with "want me to...?"
+YES: contractions, opinions, pushing back, being real."""
     
-    # Build persona prompt (only Aether supported in legacy mode)
+    # Only add profile context if provided (saves ~50-100 tokens when not needed)
+    if profile_str:
+        base += f"\n\n[What you know about this user: {profile_str}]"
+    
+    return base
+
+def should_include_profile(user_message: str) -> bool:
+    """Determine if profile facts should be included in context (saves tokens when not needed)"""
+    msg = user_message.lower()
+    
+    # Explicit memory triggers
+    explicit = ['remember', 'know about me', 'told you', 'my favorite', 
+                'what do you know', 'we talked', 'i mentioned', 'i said',
+                'you know i', 'you know my', 'last time']
+    
+    # Personalization triggers
+    personal = ['recommend', 'suggest', 'for me', 'personalize', 
+                'based on', 'what should i', 'help me pick', 'my preferences']
+    
+    return any(t in msg for t in explicit + personal)
+
+def build_system_prompt(memory_context: dict, persona: str = "Aether", user_message: str = "") -> str:
+    """Build system prompt based on persona and memory context - token optimized"""
+    profile_str = ""
+    
+    # Only include profile if relevant to save tokens
+    if memory_context.get("profile") and should_include_profile(user_message):
+        profile_items = [f"{k}: {v}" for k, v in list(memory_context["profile"].items())[:5]]
+        profile_str = " | ".join(profile_items)  # Compact format
+    
     return build_aether_prompt(profile_str)
 
 def generate_response(user_message: str, memory_context: dict, model: str | None = None, persona: str = "Companion") -> str:
@@ -158,125 +164,6 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
         first_output = None
         tool_used = None
         tool_result = None
-        ensemble_meta = None
-        # Optional ensemble deep reasoning (best-of-two) when complexity high
-        if (core_config.ENABLE_ENSEMBLE and complexity >= 2 and persona.lower() == 'companion' and not model):
-            try:
-                # Build candidate model list (three-model trio: smart(120b), heavy(r1), alt(kimi))
-                trio = []
-                base_smart = core_config.SMART_PRIMARY_MODEL
-                heavy_primary = core_config.HEAVY_MODEL
-                # Always include kimi if available
-                kimi = None
-                for m in getattr(core_config, 'HEAVY_ALTERNATES', []):
-                    if 'kimi' in m:
-                        kimi = m
-                        break
-                if core_config.ENSEMBLE_CANDIDATES >= 2:
-                    trio.append(base_smart)
-                    trio.append(heavy_primary if heavy_primary != base_smart else core_config.FAST_MODEL)
-                if core_config.ENSEMBLE_CANDIDATES >= 3 and kimi and kimi not in trio:
-                    trio.append(kimi)
-                # Fallback ensure uniqueness
-                trio = [m for i,m in enumerate(trio) if m and m not in trio[:i]]
-                cand_data = []
-                for mname in trio:
-                    try:
-                        txt = generate_model_response(user_message, system_prompt, mname)
-                    except Exception as ce:
-                        txt = f"(generation failed for {mname}: {ce})"
-                    cand_data.append({'model': mname, 'text': txt, 'chars': len(txt)})
-                judge_model = base_smart  # use strongest generalist as judge
-                # Judge scoring JSON
-                judge_instr = (
-                    "You are an impartial evaluator. Score each candidate answer for the user's message on: correctness, completeness, clarity, fidelity to instructions. "
-                    "Return STRICT JSON: {\"candidates\":[{\"index\":i,\"score\":0-10,\"reasons\":[...] }...], \"best_index\":i, \"confidence\":0.0-1.0 }. No extra text."
-                )
-                # Truncate system prompt for token conservation
-                judge_prompt_lines = [f"User message:\n{user_message}", "System (truncated):", system_prompt[:1000], "Candidates:"]
-                for idx, c in enumerate(cand_data):
-                    judge_prompt_lines.append(f"[Candidate {idx} model={c['model']}]\n{c['text'][:4000]}")
-                judge_prompt_lines.append(judge_instr + "\nJSON:")
-                judge_prompt = "\n\n".join(judge_prompt_lines)
-                judge_raw = generate_model_response(judge_prompt, "You are a strict JSON judge.", judge_model)
-                chosen_index = 0
-                rationale = ""
-                confidence = None
-                import re, json as _json
-                try:
-                    match = re.search(r'\{.*\}', judge_raw, re.DOTALL)
-                    if match:
-                        parsed = _json.loads(match.group())
-                        if isinstance(parsed, dict):
-                            if isinstance(parsed.get('candidates'), list):
-                                # pick highest score if best_index missing
-                                if 'best_index' in parsed:
-                                    chosen_index = int(parsed['best_index']) if parsed['best_index'] in range(len(cand_data)) else 0
-                                else:
-                                    scored = [(c.get('score',0), c.get('index',i)) for i,c in enumerate(parsed['candidates'])]
-                                    scored.sort(reverse=True)
-                                    chosen_index = scored[0][1]
-                                confidence = parsed.get('confidence')
-                            rationale = (parsed.get('candidates',[{}])[chosen_index].get('reasons') or [])
-                            if isinstance(rationale, list):
-                                rationale = '; '.join(rationale)[:220]
-                except Exception:
-                    pass
-                # Strategy handling
-                selected_text = cand_data[chosen_index]['text']
-                performed_refine = False
-                refine_gaps = []
-                refine_added_chars = 0
-                token_budget_meta = {}
-                if 'refine' in core_config.ENSEMBLE_MODE:
-                    base_len = len(selected_text.split())
-                    allowed_extra = int(base_len * core_config.ENSEMBLE_REFINE_EXPANSION)
-                    if allowed_extra < 60:
-                        allowed_extra = 60  # floor
-                    if allowed_extra > core_config.ENSEMBLE_REFINE_HARD_CAP:
-                        allowed_extra = core_config.ENSEMBLE_REFINE_HARD_CAP
-                    token_budget_meta = {'base_words': base_len, 'refine_allowed_words': allowed_extra}
-                    critique_prompt = (
-                        "User question:\n" + user_message + "\n\nCurrent answer:\n" + selected_text + "\n\nCritique the answer. Return JSON only: {\"gaps\":[...],\"needs_revision\":true|false}."
-                    )
-                    critique_raw = generate_model_response(critique_prompt, "You are a terse JSON critic.", judge_model)
-                    needs_revision = False
-                    try:
-                        cmatch = re.search(r'\{.*\}', critique_raw, re.DOTALL)
-                        if cmatch:
-                            cparsed = _json.loads(cmatch.group())
-                            if isinstance(cparsed, dict):
-                                refine_gaps = cparsed.get('gaps', []) if isinstance(cparsed.get('gaps'), list) else []
-                                needs_revision = bool(cparsed.get('needs_revision')) and len(refine_gaps) > 0
-                    except Exception:
-                        pass
-                    if needs_revision:
-                        refine_prompt = (
-                            f"User: {user_message}\nImprove the prior answer by addressing these gaps: {refine_gaps}. "
-                            f"Do NOT hallucinate new unrelated info. Keep style consistent. Revised answer:" )
-                        improved = generate_model_response(refine_prompt, system_prompt, judge_model)
-                        # Basic token expansion guard (approx by words)
-                        if len(improved.split()) - base_len <= allowed_extra:
-                            selected_text = improved
-                            performed_refine = True
-                            refine_added_chars = max(0, len(improved) - len(cand_data[chosen_index]['text']))
-                first_output = selected_text
-                ensemble_meta = {
-                    'ensemble': True,
-                    'mode': core_config.ENSEMBLE_MODE,
-                    'candidates': [ {'model': c['model'], 'chars': c['chars']} for c in cand_data ],
-                    'judge_model': judge_model,
-                    'chosen_index': chosen_index,
-                    'confidence': confidence,
-                    'rationale': rationale,
-                    'refined': performed_refine,
-                    'refine_gap_count': len(refine_gaps),
-                    'refine_added_chars': refine_added_chars,
-                    'token_budget': token_budget_meta
-                }
-                routing_meta.update(ensemble_meta)
-            except Exception as ee:
-                logger.debug(f"Ensemble path failed, falling back single model: {ee}")
         
         # Generate response with native function calling
         if first_output is None:
@@ -349,6 +236,68 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
     except Exception as e:
         logger.error(f"Generation failed: {e}")
         return "Encountered an internal error generating a response."
+
+
+def generate_response_streaming(user_message: str, memory_context: dict, model: str | None = None, persona: str = "Companion"):
+    """Streaming version of generate_response.
+    
+    Yields chunks of text as they're generated.
+    For tool calls, runs tools first (non-streaming) then streams final synthesis.
+    """
+    if not groq_client:
+        yield "I'm offline (LLM client unavailable)."
+        return
+    
+    try:
+        complexity = core_config.classify_complexity(user_message)
+        auto_model, _ = core_config.choose_model('chat', complexity=complexity, return_reason=True)
+        chosen_model = model or auto_model
+        
+        recent_conv = memory_context.get('recent_conversation', '')
+        
+        if persona.lower() == 'companion':
+            meta = build_system_prompt_with_meta(user_message, recent_conv)
+            system_prompt = meta['system_prompt']
+        else:
+            system_prompt = build_system_prompt(memory_context, persona)
+        
+        # Check if we need tools (non-streaming for tool execution)
+        should_check_tools = (
+            core_config.ENABLE_AUTO_TOOLS and 
+            (complexity > 0 or core_config.should_use_compound(user_message))
+        )
+        
+        if core_config.should_use_compound(user_message):
+            # Compound queries (web/weather) - run non-streaming, yield result
+            try:
+                result, _ = generate_compound_response(user_message, system_prompt)
+                for word in result.split(' '):
+                    yield word + ' '
+                return
+            except Exception as e:
+                logger.error(f"Compound failed, falling back: {e}")
+        
+        if should_check_tools:
+            # Tool query - run tools first, then stream synthesis
+            tool_model = core_config.MODEL_ROLES.get('tools', chosen_model)
+            result, tool_used, tool_result = generate_model_response_with_tools(
+                user_message, system_prompt, tool_model, conversation_model=chosen_model,
+                memory_context=memory_context
+            )
+            if tool_used:
+                # Already have final synthesized result from tool flow
+                for word in result.split(' '):
+                    yield word + ' '
+                return
+        
+        # Simple query - stream directly
+        for chunk in generate_model_response_streaming(user_message, system_prompt, chosen_model):
+            yield chunk
+            
+    except Exception as e:
+        logger.error(f"Streaming generation failed: {e}")
+        yield "Encountered an error generating a response."
+
 
 def _maybe_cache_opts(system_prompt: str) -> dict:
     """Return cache options dict if prompt caching enabled and supported."""
@@ -429,6 +378,12 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
             top_p=0.95,
             stream=False
         )
+        
+        # Log token usage for tool call
+        usage = getattr(response, 'usage', None)
+        if usage:
+            log_tokens(model, usage.prompt_tokens, usage.completion_tokens, "tool_call")
+            
     except (TypeError, Exception) as e:
         # SDK might not support function calling or cache params; fall back
         logger.error(f"Function calling failed: {e}")
@@ -447,48 +402,37 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
         
         # Check if model wants to call functions
         if not message.tool_calls:
-            # No more tool calls - NOW synthesize with full personality context
-            logger.info(f"Tool execution complete after {iteration} iteration(s). Synthesizing natural response...")
+            # No more tool calls - synthesize response
+            logger.info(f"Tool execution complete after {iteration} iteration(s). Synthesizing...")
             
-            # Build summary of tool results for context
+            # Build summary of tool results
             if all_tool_results:
-                tool_summary = "\n".join([f"{name}: {res[:500]}" for name, res in all_tool_results])
+                tool_summary = "\n".join([f"{name}: {res[:300]}" for name, res in all_tool_results])
                 
-                # Rebuild FULL system prompt with current conversation context
-                # This is where we add personality + memory + conversation history
-                if memory_context and 'recent_conversation' in memory_context:
-                    # Import here to avoid circular dependency
-                    from companion_ai.core.context_builder import build_system_prompt_with_meta
-                    # Build fresh system prompt with all context
-                    meta = build_system_prompt_with_meta(user_message, memory_context['recent_conversation'])
-                    full_system_prompt = meta['system_prompt']
-                    logger.info(f"🧠 Rebuilt full system prompt with conversation history for synthesis")
-                else:
-                    # Fallback to passed-in system_prompt (which has personality but may lack latest conversation)
-                    full_system_prompt = system_prompt
-                    logger.warning("⚠️ No memory_context provided - using static system_prompt for synthesis")
-                
+                # Use MINIMAL synthesis prompt - no need to rebuild full context
                 synthesis_prompt = (
-                    f"The user asked: {user_message}\n\n"
-                    f"I used these tools and got these results:\n{tool_summary}\n\n"
-                    "Now provide a natural, conversational response based on these results. "
-                    "Be concise and engaging (1-2 sentences). Don't just list the data - synthesize it naturally."
+                    f"User asked: {user_message}\n"
+                    f"Tool results:\n{tool_summary}\n\n"
+                    "Give a natural 1-2 sentence response. Be concise."
                 )
                 
-                # Make final call with FULL personality system prompt
+                # Use simple system prompt for synthesis - saves tokens
+                simple_system = "You're a helpful AI. Be natural and concise. No emojis or markdown."
+                
+                # Make final call with minimal system prompt
                 try:
                     synthesis_response = groq_client.chat.completions.create(
-                        model=conversation_model,  # Use conversation model for quality
+                        model=conversation_model,
                         messages=[
-                            {"role": "system", "content": full_system_prompt},  # FULL personality + memory + history
+                            {"role": "system", "content": simple_system},
                             {"role": "user", "content": synthesis_prompt}
                         ],
-                        temperature=0.8,  # Higher temp for natural conversation
-                        max_tokens=1024,
+                        temperature=0.8,
+                        max_tokens=256,  # Reduced - we want short responses
                         stream=False
                     )
                     final_text = synthesis_response.choices[0].message.content.strip()
-                    logger.info(f"✨ Synthesized natural response using {conversation_model}")
+                    logger.info(f"✨ Synthesized response using {conversation_model}")
                     
                     # Return with tool tracking
                     tool_name = all_tool_results[0][0]
@@ -503,10 +447,38 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
                     combined_results = "; ".join([f"{name}: {res[:100]}" for name, res in all_tool_results])
                     return sanitize_output(final_text), tool_name, combined_results
             else:
-                # No tools were used but loop finished - use model's response
-                if message.content and message.content.strip():
-                    return sanitize_output(message.content.strip()), None, None
+                # No tools were used - Scout decided no tools needed
+                # DON'T use Scout's response - route to PRIMARY model with personality
+                logger.info("No tools needed - routing to primary model for personality response")
+                
+                # Build full system prompt with personality
+                if memory_context and 'recent_conversation' in memory_context:
+                    from companion_ai.core.context_builder import build_system_prompt_with_meta
+                    meta = build_system_prompt_with_meta(user_message, memory_context['recent_conversation'])
+                    full_system_prompt = meta['system_prompt']
                 else:
+                    full_system_prompt = system_prompt
+                
+                # Generate response with PRIMARY model (120B) for personality
+                try:
+                    personality_response = groq_client.chat.completions.create(
+                        model=conversation_model,
+                        messages=[
+                            {"role": "system", "content": full_system_prompt},
+                            {"role": "user", "content": user_message}
+                        ],
+                        temperature=0.8,
+                        max_tokens=1024,
+                        stream=False
+                    )
+                    final_text = personality_response.choices[0].message.content.strip()
+                    logger.info(f"✨ Generated personality response using {conversation_model}")
+                    return sanitize_output(final_text), None, None
+                except Exception as e:
+                    logger.error(f"Personality response failed: {e}")
+                    # Last resort - use Scout's response
+                    if message.content and message.content.strip():
+                        return sanitize_output(message.content.strip()), None, None
                     return "I couldn't generate a response.", None, None
         
         # Model wants to call tools - execute them
@@ -601,8 +573,15 @@ def generate_compound_response(user_message: str, system_prompt: str) -> tuple[s
     compound_model = core_config.get_compound_model()
     logger.info(f"Using Compound system: {compound_model} for query: {user_message[:50]}")
     
+    # Use a SHORT, focused prompt for Compound - it works better with minimal instructions
+    # The full personality prompt confuses it and makes responses verbose
+    compound_prompt = """Give extremely brief answers.
+Weather: State the city AND conditions. "Tokyo: 15°C and sunny." Always mention the location.
+Calculations: Just the number. "625" or "887,112". Nothing else.
+Search: 1-2 sentences max summarizing the key finding. No bullet points, no source citations."""
+    
     messages = [
-        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": compound_prompt},
         {"role": "user", "content": user_message}
     ]
     
@@ -614,6 +593,11 @@ def generate_compound_response(user_message: str, system_prompt: str) -> tuple[s
             max_tokens=1024,
             stream=False
         )
+        
+        # Log token usage
+        usage = getattr(response, 'usage', None)
+        if usage:
+            log_tokens(compound_model, usage.prompt_tokens, usage.completion_tokens, "compound")
         
         # Extract response and executed tools
         message = response.choices[0].message
@@ -659,14 +643,62 @@ def generate_model_response(user_message: str, system_prompt: str, model: str) -
             top_p=0.9,
             stream=False
         )
+    
+    # Log token usage
+    usage = getattr(response, 'usage', None)
+    if usage:
+        log_tokens(model, usage.prompt_tokens, usage.completion_tokens, "generate_model_response")
+    
     raw = response.choices[0].message.content
     if not raw:
         logger.warning(f"API returned empty content for model={model}")
         return ""
     raw = raw.strip()
     sanitized = sanitize_output(raw)
-    logger.info(f"API response: raw_len={len(raw)}, sanitized_len={len(sanitized)}")
     return sanitized
+
+
+def generate_model_response_streaming(user_message: str, system_prompt: str, model: str):
+    """Generate response using streaming for real-time token output.
+    
+    Yields chunks of text as they arrive from the API.
+    """
+    if not groq_client:
+        yield "I'm offline (LLM client unavailable)."
+        return
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message}
+    ]
+    
+    try:
+        response = groq_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.8,
+            max_tokens=1024,
+            top_p=0.9,
+            stream=True  # Enable streaming
+        )
+        
+        full_text = ""
+        for chunk in response:
+            if chunk.choices and chunk.choices[0].delta.content:
+                text = chunk.choices[0].delta.content
+                full_text += text
+                yield text
+        
+        # Log estimated tokens (streaming doesn't give usage stats)
+        # Rough estimate: 1 token ≈ 4 chars
+        est_input = len(system_prompt + user_message) // 4
+        est_output = len(full_text) // 4
+        log_tokens(model, est_input, est_output, "streaming")
+        
+    except Exception as e:
+        logger.error(f"Streaming error: {e}")
+        yield f"Error: {str(e)}"
+
 
 def generate_groq_response(prompt: str, model: str = "llama-3.1-8b-instant") -> str:
     """Generate response using Groq API with selectable model"""

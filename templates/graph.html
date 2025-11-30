@@ -39,19 +39,183 @@
             position: absolute;
             top: 20px;
             left: 20px;
-            background: rgba(0, 0, 0, 0.8);
-            padding: 20px;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 16px;
             border-radius: 12px;
             backdrop-filter: blur(10px);
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-            max-width: 300px;
+            width: 280px;
             z-index: 1000;
+            max-height: calc(100vh - 40px);
+            overflow-y: auto;
+        }
+
+        .controls::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .controls::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.2);
+            border-radius: 3px;
         }
 
         .controls h2 {
-            font-size: 1.5rem;
-            margin-bottom: 15px;
+            font-size: 1.3rem;
+            margin-bottom: 12px;
             color: #a78bfa;
+        }
+
+        /* Collapsible sections */
+        .section {
+            margin-bottom: 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding-bottom: 12px;
+        }
+
+        .section:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            padding: 6px 0;
+            user-select: none;
+        }
+
+        .section-header:hover {
+            color: #a78bfa;
+        }
+
+        .section-title {
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: rgba(255,255,255,0.7);
+        }
+
+        .section-toggle {
+            font-size: 12px;
+            color: rgba(255,255,255,0.5);
+            transition: transform 0.2s;
+        }
+
+        .section.collapsed .section-toggle {
+            transform: rotate(-90deg);
+        }
+
+        .section.collapsed .section-content {
+            display: none;
+        }
+
+        .section-content {
+            padding-top: 8px;
+        }
+
+        /* Sliders */
+        .slider-group {
+            margin-bottom: 12px;
+        }
+
+        .slider-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            margin-bottom: 4px;
+            color: rgba(255,255,255,0.8);
+        }
+
+        .slider-value {
+            color: #a78bfa;
+            font-family: monospace;
+        }
+
+        .slider {
+            width: 100%;
+            height: 6px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: rgba(255,255,255,0.1);
+            border-radius: 3px;
+            outline: none;
+        }
+
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            background: #a78bfa;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+
+        .slider::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+
+        .slider::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            background: #a78bfa;
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+        }
+
+        /* Checkbox toggles */
+        .toggle-group {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 0.8rem;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 36px;
+            height: 20px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            inset: 0;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            transition: 0.2s;
+        }
+
+        .toggle-slider:before {
+            content: "";
+            position: absolute;
+            height: 14px;
+            width: 14px;
+            left: 3px;
+            bottom: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: 0.2s;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background: #a78bfa;
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(16px);
         }
 
         .search-box {
@@ -130,47 +294,74 @@
 
         /* Node and link styles */
         .link {
-            stroke: rgba(255, 255, 255, 0.3);
-            stroke-width: 1.5px;
+            stroke: rgba(255, 255, 255, 0.15);
+            stroke-width: 1px;
             fill: none;
         }
 
         .link.highlighted {
             stroke: #fbbf24;
-            stroke-width: 3px;
+            stroke-width: 2.5px;
         }
 
         .node circle {
-            stroke: #fff;
+            stroke: rgba(0, 0, 0, 0.4);
             stroke-width: 2px;
             cursor: pointer;
             transition: all 0.3s;
         }
 
         .node:hover circle {
-            stroke-width: 4px;
-            filter: brightness(1.2);
+            stroke: #fff;
+            stroke-width: 3px;
+            filter: brightness(1.2) drop-shadow(0 0 8px currentColor);
         }
 
         .node.highlighted circle {
             stroke: #fbbf24;
-            stroke-width: 4px;
+            stroke-width: 3px;
+            filter: drop-shadow(0 0 10px #fbbf24);
+        }
+
+        .node.dimmed circle {
+            opacity: 0.2;
+        }
+
+        .node.dimmed text {
+            opacity: 0.2;
+        }
+
+        .link.dimmed {
+            opacity: 0.05;
         }
 
         .node text {
-            font-size: 11px;
+            font-size: 10px;
+            font-weight: 500;
             fill: #fff;
-            text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+            text-shadow: 
+                -1px -1px 0 rgba(0,0,0,0.8),
+                1px -1px 0 rgba(0,0,0,0.8),
+                -1px 1px 0 rgba(0,0,0,0.8),
+                1px 1px 0 rgba(0,0,0,0.8),
+                0 0 8px rgba(0,0,0,0.9);
             pointer-events: none;
             user-select: none;
         }
 
         .link-label {
-            font-size: 9px;
-            fill: rgba(255, 255, 255, 0.6);
+            font-size: 8px;
+            fill: rgba(255, 255, 255, 0.4);
             text-anchor: middle;
             pointer-events: none;
             text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+            display: none;
+        }
+
+        .link.highlighted + .link-label,
+        .link-label.visible {
+            display: block;
+            fill: rgba(255, 255, 255, 0.8);
         }
 
         /* Reset button */
@@ -189,6 +380,37 @@
         .reset-btn:hover {
             background: #c4b5fd;
         }
+
+        .zoom-controls {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .zoom-btn {
+            flex: 1;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .zoom-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: #a78bfa;
+        }
+
+        .controls-hint {
+            margin-top: 12px;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.5);
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -198,44 +420,150 @@
             
             <input type="text" class="search-box" placeholder="Search entities..." id="searchBox">
             
-            <div class="stats">
-                <p><strong id="entityCount">0</strong> Entities</p>
-                <p><strong id="relationshipCount">0</strong> Relationships</p>
-                <p><strong id="selectedEntity">None</strong></p>
-            </div>
-
-            <div class="legend">
-                <div class="legend-item">
-                    <div class="legend-color" style="background: #ef4444;"></div>
-                    <span>Person</span>
+            <!-- Stats Section -->
+            <div class="section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <span class="section-title">📊 Stats</span>
+                    <span class="section-toggle">▼</span>
                 </div>
-                <div class="legend-item">
-                    <div class="legend-color" style="background: #3b82f6;"></div>
-                    <span>Place</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color" style="background: #10b981;"></div>
-                    <span>Concept</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color" style="background: #f59e0b;"></div>
-                    <span>Thing</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color" style="background: #8b5cf6;"></div>
-                    <span>Organization</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color" style="background: #ec4899;"></div>
-                    <span>Event</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color" style="background: #6b7280;"></div>
-                    <span>Other</span>
+                <div class="section-content">
+                    <div class="stats">
+                        <p><strong id="entityCount">0</strong> Entities</p>
+                        <p><strong id="relationshipCount">0</strong> Relationships</p>
+                        <p>Selected: <strong id="selectedEntity">None</strong></p>
+                    </div>
                 </div>
             </div>
 
-            <button class="reset-btn" onclick="resetGraph()">Reset View</button>
+            <!-- Forces Section (Obsidian-style) -->
+            <div class="section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <span class="section-title">⚡ Forces</span>
+                    <span class="section-toggle">▼</span>
+                </div>
+                <div class="section-content">
+                    <div class="slider-group">
+                        <div class="slider-label">
+                            <span>Center Force</span>
+                            <span class="slider-value" id="centerForceVal">0.05</span>
+                        </div>
+                        <input type="range" class="slider" id="centerForce" min="0" max="0.2" step="0.01" value="0.05">
+                    </div>
+                    <div class="slider-group">
+                        <div class="slider-label">
+                            <span>Repel Force</span>
+                            <span class="slider-value" id="repelForceVal">400</span>
+                        </div>
+                        <input type="range" class="slider" id="repelForce" min="50" max="1000" step="10" value="400">
+                    </div>
+                    <div class="slider-group">
+                        <div class="slider-label">
+                            <span>Link Distance</span>
+                            <span class="slider-value" id="linkDistanceVal">150</span>
+                        </div>
+                        <input type="range" class="slider" id="linkDistance" min="30" max="400" step="10" value="150">
+                    </div>
+                    <div class="slider-group">
+                        <div class="slider-label">
+                            <span>Link Strength</span>
+                            <span class="slider-value" id="linkStrengthVal">0.5</span>
+                        </div>
+                        <input type="range" class="slider" id="linkStrength" min="0" max="1" step="0.05" value="0.5">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Display Section -->
+            <div class="section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <span class="section-title">👁️ Display</span>
+                    <span class="section-toggle">▼</span>
+                </div>
+                <div class="section-content">
+                    <div class="slider-group">
+                        <div class="slider-label">
+                            <span>Node Size</span>
+                            <span class="slider-value" id="nodeSizeVal">1.0</span>
+                        </div>
+                        <input type="range" class="slider" id="nodeSize" min="0.3" max="2" step="0.1" value="1">
+                    </div>
+                    <div class="slider-group">
+                        <div class="slider-label">
+                            <span>Link Opacity</span>
+                            <span class="slider-value" id="linkOpacityVal">0.15</span>
+                        </div>
+                        <input type="range" class="slider" id="linkOpacity" min="0.02" max="0.5" step="0.01" value="0.15">
+                    </div>
+                    <div class="slider-group">
+                        <div class="slider-label">
+                            <span>Text Size</span>
+                            <span class="slider-value" id="textSizeVal">10</span>
+                        </div>
+                        <input type="range" class="slider" id="textSize" min="6" max="16" step="1" value="10">
+                    </div>
+                    <div class="toggle-group">
+                        <span>Show Labels</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="showLabels" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="toggle-group">
+                        <span>Show Arrows</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="showArrows" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Legend Section -->
+            <div class="section collapsed">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <span class="section-title">🎨 Legend</span>
+                    <span class="section-toggle">▼</span>
+                </div>
+                <div class="section-content">
+                    <div class="legend">
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #ef4444;"></div>
+                            <span>Person</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #3b82f6;"></div>
+                            <span>Place</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #10b981;"></div>
+                            <span>Concept</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #f59e0b;"></div>
+                            <span>Thing</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #8b5cf6;"></div>
+                            <span>Organization</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #ec4899;"></div>
+                            <span>Event</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="zoom-controls">
+                <button class="zoom-btn" onclick="zoomIn()" title="Zoom In">+</button>
+                <button class="zoom-btn" onclick="zoomOut()" title="Zoom Out">−</button>
+                <button class="zoom-btn" onclick="zoomReset()" title="Reset Zoom">⟲</button>
+            </div>
+            
+            <button class="reset-btn" onclick="resetGraph()">Reset All</button>
+            
+            <p class="controls-hint">Scroll to zoom • Drag to pan • Click nodes to focus</p>
         </div>
 
         <svg id="graph"></svg>
@@ -243,11 +571,41 @@
     </div>
 
     <script>
+        // Section toggle
+        function toggleSection(header) {
+            header.parentElement.classList.toggle('collapsed');
+        }
+
         const width = window.innerWidth;
         const height = window.innerHeight;
 
         const svg = d3.select("#graph")
             .attr("viewBox", [0, 0, width, height]);
+
+        // Create a container group for zoom/pan
+        const container = svg.append("g").attr("class", "graph-container");
+
+        // Set up zoom behavior
+        const zoom = d3.zoom()
+            .scaleExtent([0.1, 4])
+            .on("zoom", (event) => {
+                container.attr("transform", event.transform);
+            });
+
+        svg.call(zoom);
+
+        // Zoom controls
+        function zoomIn() {
+            svg.transition().duration(300).call(zoom.scaleBy, 1.3);
+        }
+        
+        function zoomOut() {
+            svg.transition().duration(300).call(zoom.scaleBy, 0.7);
+        }
+        
+        function zoomReset() {
+            svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
+        }
 
         // Color mapping for entity types
         const colorMap = {
@@ -299,15 +657,16 @@
                 context: e.context || ''
             }));
 
-            // Create force simulation
+            // Create force simulation - spread out more for clarity
             simulation = d3.forceSimulation(nodes)
-                .force("link", d3.forceLink(links).id(d => d.id).distance(100))
-                .force("charge", d3.forceManyBody().strength(-300))
+                .force("link", d3.forceLink(links).id(d => d.id).distance(150))
+                .force("charge", d3.forceManyBody().strength(-400))
                 .force("center", d3.forceCenter(width / 2, height / 2))
-                .force("collision", d3.forceCollide().radius(d => getNodeRadius(d) + 10));
+                .force("collision", d3.forceCollide().radius(d => getNodeRadius(d) + 20));
 
             // Create links
-            linkElements = svg.append("g")
+            linkElements = container.append("g")
+                .attr("class", "links")
                 .selectAll("path")
                 .data(links)
                 .enter().append("path")
@@ -315,7 +674,8 @@
                 .attr("marker-end", "url(#arrowhead)");
 
             // Create link labels
-            linkLabels = svg.append("g")
+            linkLabels = container.append("g")
+                .attr("class", "link-labels")
                 .selectAll("text")
                 .data(links)
                 .enter().append("text")
@@ -336,7 +696,8 @@
                 .attr("fill", "rgba(255, 255, 255, 0.3)");
 
             // Create nodes
-            const nodeGroups = svg.append("g")
+            const nodeGroups = container.append("g")
+                .attr("class", "nodes")
                 .selectAll("g")
                 .data(nodes)
                 .enter().append("g")
@@ -407,9 +768,9 @@
         }
 
         function getNodeRadius(node) {
-            const base = 8;
-            const mentionsFactor = Math.min(node.mentions * 2, 10);
-            const importanceFactor = node.importance * 8;
+            const base = 12;
+            const mentionsFactor = Math.min(node.mentions * 1.5, 8);
+            const importanceFactor = node.importance * 10;
             return base + mentionsFactor + importanceFactor;
         }
 
@@ -418,14 +779,33 @@
             
             if (node) {
                 document.getElementById('selectedEntity').textContent = node.label;
+                
+                // Find connected nodes
+                const connectedIds = new Set([node.id]);
+                links.forEach(l => {
+                    if (l.source.id === node.id) connectedIds.add(l.target.id);
+                    if (l.target.id === node.id) connectedIds.add(l.source.id);
+                });
+                
+                // Highlight selected and connected, dim others
                 nodeElements.classed("highlighted", d => d.id === node.id);
+                nodeElements.classed("dimmed", d => !connectedIds.has(d.id));
                 linkElements.classed("highlighted", l => 
+                    l.source.id === node.id || l.target.id === node.id
+                );
+                linkElements.classed("dimmed", l => 
+                    l.source.id !== node.id && l.target.id !== node.id
+                );
+                linkLabels.classed("visible", l => 
                     l.source.id === node.id || l.target.id === node.id
                 );
             } else {
                 document.getElementById('selectedEntity').textContent = 'None';
                 nodeElements.classed("highlighted", false);
+                nodeElements.classed("dimmed", false);
                 linkElements.classed("highlighted", false);
+                linkElements.classed("dimmed", false);
+                linkLabels.classed("visible", false);
             }
         }
 
@@ -452,6 +832,9 @@
         }
 
         function resetGraph() {
+            // Reset zoom
+            svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
+            // Reset simulation
             simulation.alpha(1).restart();
             selectNode(null);
             document.getElementById('searchBox').value = '';
@@ -473,6 +856,109 @@
             d.fx = null;
             d.fy = null;
         }
+
+        // ============================================
+        // Graph Settings (Obsidian-style controls)
+        // ============================================
+        let nodeSizeMultiplier = 1;
+
+        // Force sliders
+        document.getElementById('centerForce').addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            document.getElementById('centerForceVal').textContent = val.toFixed(2);
+            simulation.force("center", d3.forceCenter(width / 2, height / 2).strength(val));
+            simulation.alpha(0.3).restart();
+        });
+
+        document.getElementById('repelForce').addEventListener('input', (e) => {
+            const val = parseInt(e.target.value);
+            document.getElementById('repelForceVal').textContent = val;
+            simulation.force("charge", d3.forceManyBody().strength(-val));
+            simulation.alpha(0.5).restart();
+        });
+
+        document.getElementById('linkDistance').addEventListener('input', (e) => {
+            const val = parseInt(e.target.value);
+            document.getElementById('linkDistanceVal').textContent = val;
+            simulation.force("link").distance(val);
+            simulation.alpha(0.5).restart();
+        });
+
+        document.getElementById('linkStrength').addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            document.getElementById('linkStrengthVal').textContent = val.toFixed(2);
+            simulation.force("link").strength(val);
+            simulation.alpha(0.3).restart();
+        });
+
+        // Display sliders
+        document.getElementById('nodeSize').addEventListener('input', (e) => {
+            nodeSizeMultiplier = parseFloat(e.target.value);
+            document.getElementById('nodeSizeVal').textContent = nodeSizeMultiplier.toFixed(1);
+            nodeElements.selectAll('circle').attr('r', d => getNodeRadius(d) * nodeSizeMultiplier);
+            nodeElements.selectAll('text').attr('dx', d => getNodeRadius(d) * nodeSizeMultiplier + 5);
+            simulation.force("collision", d3.forceCollide().radius(d => getNodeRadius(d) * nodeSizeMultiplier + 15));
+            simulation.alpha(0.3).restart();
+        });
+
+        document.getElementById('linkOpacity').addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            document.getElementById('linkOpacityVal').textContent = val.toFixed(2);
+            linkElements.style('stroke', `rgba(255, 255, 255, ${val})`);
+        });
+
+        document.getElementById('textSize').addEventListener('input', (e) => {
+            const val = parseInt(e.target.value);
+            document.getElementById('textSizeVal').textContent = val;
+            nodeElements.selectAll('text').style('font-size', val + 'px');
+        });
+
+        // Toggle switches
+        document.getElementById('showLabels').addEventListener('change', (e) => {
+            nodeElements.selectAll('text').style('display', e.target.checked ? 'block' : 'none');
+        });
+
+        document.getElementById('showArrows').addEventListener('change', (e) => {
+            linkElements.attr('marker-end', e.target.checked ? 'url(#arrowhead)' : null);
+        });
+
+        // Reset also resets sliders
+        const originalResetGraph = resetGraph;
+        resetGraph = function() {
+            originalResetGraph();
+            // Reset sliders to defaults
+            document.getElementById('centerForce').value = 0.05;
+            document.getElementById('centerForceVal').textContent = '0.05';
+            document.getElementById('repelForce').value = 400;
+            document.getElementById('repelForceVal').textContent = '400';
+            document.getElementById('linkDistance').value = 150;
+            document.getElementById('linkDistanceVal').textContent = '150';
+            document.getElementById('linkStrength').value = 0.5;
+            document.getElementById('linkStrengthVal').textContent = '0.5';
+            document.getElementById('nodeSize').value = 1;
+            document.getElementById('nodeSizeVal').textContent = '1.0';
+            document.getElementById('linkOpacity').value = 0.15;
+            document.getElementById('linkOpacityVal').textContent = '0.15';
+            document.getElementById('textSize').value = 10;
+            document.getElementById('textSizeVal').textContent = '10';
+            document.getElementById('showLabels').checked = true;
+            document.getElementById('showArrows').checked = true;
+            
+            // Re-apply defaults
+            nodeSizeMultiplier = 1;
+            nodeElements.selectAll('circle').attr('r', d => getNodeRadius(d));
+            nodeElements.selectAll('text')
+                .attr('dx', d => getNodeRadius(d) + 5)
+                .style('font-size', '10px')
+                .style('display', 'block');
+            linkElements
+                .style('stroke', 'rgba(255, 255, 255, 0.15)')
+                .attr('marker-end', 'url(#arrowhead)');
+            simulation
+                .force("charge", d3.forceManyBody().strength(-400))
+                .force("link", d3.forceLink(links).id(d => d.id).distance(150).strength(0.5))
+                .force("collision", d3.forceCollide().radius(d => getNodeRadius(d) + 20));
+        };
     </script>
 </body>
 </html>

@@ -12,6 +12,8 @@ import mss
 from PIL import Image
 from groq import Groq
 
+from companion_ai.core.config import GROQ_VISION_API_KEY, VISION_MODEL
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -19,9 +21,12 @@ class VisionManager:
     """
     Manages screen capture, visual memory, and vision model interactions.
     Supports both 'Active' (on-demand) and 'Watcher' (background summary) modes.
+    
+    Uses Llama 4 Maverick for vision tasks with a dedicated API key.
     """
     def __init__(self):
-        self.api_key = os.getenv("GROQ_API_KEY")
+        # Use dedicated vision API key (falls back to main key in config)
+        self.api_key = GROQ_VISION_API_KEY
         self.client = Groq(api_key=self.api_key) if self.api_key else None
         
         # Configuration
@@ -35,13 +40,11 @@ class VisionManager:
         self.last_image: Optional[Image.Image] = None
         self.watcher_thread: Optional[threading.Thread] = None
         self.stop_event = threading.Event()
-        # self.sct = mss.mss() # Removed: mss is not thread-safe to share
         
-        # Models
-        self.fast_model = "llama-3.2-11b-vision-preview"  # For watcher/summary
-        self.detail_model = "llama-3.2-90b-vision-preview" # For active queries
+        # Unified vision model - Llama 4 Maverick for all vision tasks
+        self.vision_model = VISION_MODEL
         
-        logger.info("VisionManager initialized")
+        logger.info(f"VisionManager initialized with model: {self.vision_model}")
 
     def start_watcher(self):
         """Start the background watcher thread."""
@@ -148,7 +151,7 @@ class VisionManager:
             b64_img = self._image_to_base64(img)
             
             response = self.client.chat.completions.create(
-                model=self.fast_model,
+                model=self.vision_model,
                 messages=[
                     {
                         "role": "user",
@@ -186,7 +189,7 @@ class VisionManager:
     def analyze_current_screen(self, prompt: str) -> str:
         """
         Active Mode: Analyze the current screen with a specific prompt.
-        Uses the higher quality model.
+        Uses Llama 4 Maverick for high-quality vision analysis.
         """
         if not self.client:
             return "Vision API unavailable"
@@ -205,7 +208,7 @@ User Question: {prompt}
 """
             
             response = self.client.chat.completions.create(
-                model=self.detail_model,
+                model=self.vision_model,
                 messages=[
                     {
                         "role": "user",

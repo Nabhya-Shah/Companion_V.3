@@ -1,1 +1,0 @@
-{"models": {"openai/gpt-oss-120b": {"count": 2, "latencies": [1023.08, 634.16]}}, "total_interactions": 2, "last_update_ts": 1763589793.796513, "tools": {"total_invocations": 0, "by_name": {}, "blocked": 0, "failures": 0, "decision_types": {}, "skill": {"by_name": {}}}}

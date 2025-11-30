@@ -11,7 +11,7 @@ import logging
 from datetime import datetime
 import os
 
-from companion_ai.llm_interface import generate_response
+from companion_ai.llm_interface import generate_response, get_token_stats, reset_token_stats
 from companion_ai.conversation_manager import ConversationSession
 from companion_ai.core import config as core_config
 from companion_ai import memory as db
@@ -167,6 +167,59 @@ def chat():
         logger.error(f"Chat error: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/chat/send', methods=['POST'])
+def chat_streaming():
+    """Streaming chat endpoint - sends response tokens as they arrive."""
+    try:
+        data = request.json or {}
+        token = (request.headers.get('X-API-TOKEN') or data.get('token')
+                 or request.cookies.get('api_token'))
+        if not core_config.require_auth(token):
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        user_message = data.get('message', '').strip()
+        if not user_message:
+            return jsonify({'error': 'Empty message'}), 400
+        
+        def generate():
+            """Generator for streaming response."""
+            full_response = ""
+            try:
+                for chunk in conversation_session.process_message_streaming(user_message, conversation_history):
+                    full_response += chunk
+                    # Send chunk as SSE event
+                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                
+                # Signal completion and update history
+                yield f"data: {json.dumps({'done': True, 'full_response': full_response})}\n\n"
+                
+                # Store in history
+                entry = {
+                    'user': user_message,
+                    'ai': full_response,
+                    'timestamp': datetime.now().isoformat(),
+                    'persona': 'Companion'
+                }
+                conversation_history.append(entry)
+                
+                # Notify SSE listeners of history update
+                global history_version
+                with history_condition:
+                    history_version += 1
+                    history_condition.notify_all()
+                    
+            except Exception as e:
+                logger.error(f"Streaming error: {e}")
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        
+        return Response(generate(), mimetype='text/event-stream')
+        
+    except Exception as e:
+        logger.error(f"Chat streaming error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/debug/chat', methods=['POST'])
 def debug_chat():
     """
@@ -261,8 +314,14 @@ def chat_history_stream():
         last_version = -1
         while True:
             with history_condition:
+                # Wait for notification or timeout, then check version
+                if history_version == last_version:
+                    history_condition.wait(timeout=20)
+                # After wait (or if version changed), grab current state
                 current_version = history_version
                 snapshot = list(conversation_history)
+            
+            # Send update if version changed
             if current_version != last_version:
                 payload = json.dumps({
                     'history': snapshot,
@@ -270,8 +329,6 @@ def chat_history_stream():
                 })
                 last_version = current_version
                 yield f"data: {payload}\n\n"
-            with history_condition:
-                history_condition.wait(timeout=20)
 
     response = Response(stream_with_context(event_stream()), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
@@ -346,6 +403,18 @@ def clear_memory():
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"Clear memory error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/memory/fact/<key>', methods=['DELETE'])
+def delete_fact(key: str):
+    try:
+        token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
+        if not core_config.require_auth(token):
+            return jsonify({'error': 'Unauthorized'}), 401
+        deleted = db.delete_profile_fact(key)
+        return jsonify({'deleted': deleted, 'key': key})
+    except Exception as e:
+        logger.error(f"Delete fact error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/tts/toggle', methods=['POST'])
@@ -496,52 +565,68 @@ def health():
         logger.error(f"Health error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/tokens')
+def token_stats():
+    """Get token usage statistics."""
+    try:
+        stats = get_token_stats()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"Token stats error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tokens/reset', methods=['POST'])
+def reset_tokens():
+    """Reset token usage statistics."""
+    try:
+        token = request.headers.get('X-API-TOKEN')
+        if not core_config.require_auth(token):
+            return jsonify({'error': 'Unauthorized'}), 401
+        reset_token_stats()
+        return jsonify({'success': True, 'message': 'Token stats reset'})
+    except Exception as e:
+        logger.error(f"Token reset error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/config')
 def config_info():
     return jsonify({'auth_required': bool(core_config.API_AUTH_TOKEN)})
 
 @app.route('/api/models')
 def models_info():
-    """Return structured model + routing + ensemble configuration metadata.
+    """Return structured model configuration metadata (simplified architecture).
 
     This endpoint is read-only and exposes only non-sensitive configuration
-    needed by the UI for transparency / debugging. If an auth token is
-    configured, it can be optionally supplied but isn't required (similar to
-    /api/health). Adjust to enforce auth if later desired.
+    needed by the UI for transparency / debugging.
     """
     try:
-        capability_summary = core_config.model_capability_summary()
         data = {
-            'roles': {
-                'SMART_PRIMARY_MODEL': getattr(core_config, 'SMART_PRIMARY_MODEL', None),
-                'HEAVY_MODEL': getattr(core_config, 'HEAVY_MODEL', None),
-                'HEAVY_ALTERNATES': getattr(core_config, 'HEAVY_ALTERNATES', []),
-                'FAST_MODEL': getattr(core_config, 'FAST_MODEL', core_config.DEFAULT_CONVERSATION_MODEL),
+            'models': {
+                'PRIMARY_MODEL': core_config.PRIMARY_MODEL,
+                'TOOLS_MODEL': core_config.TOOLS_MODEL,
+                'VISION_MODEL': core_config.VISION_MODEL,
+                'COMPOUND_MODEL': core_config.COMPOUND_MODEL,
             },
-            'routing': {
-                'aggressive_escalation': getattr(core_config, 'AGGRESSIVE_ESCALATION', False),
-                'always_heavy_chat': getattr(core_config, 'ALWAYS_HEAVY_CHAT', False),
-                'heavy_memory': getattr(core_config, 'HEAVY_MEMORY', False),
+            'model_info': core_config.MODEL_INFO,
+            'flags': {
+                'knowledge_graph': core_config.ENABLE_KNOWLEDGE_GRAPH,
+                'fact_extraction': core_config.ENABLE_FACT_EXTRACTION,
+                'tool_calling': core_config.ENABLE_TOOL_CALLING,
+                'vision': core_config.ENABLE_VISION,
+                'compound': core_config.ENABLE_COMPOUND,
+                'auto_tools': core_config.ENABLE_AUTO_TOOLS,
+            },
+            # Legacy fields for backward compatibility
+            'roles': {
+                'SMART_PRIMARY_MODEL': core_config.PRIMARY_MODEL,
+                'HEAVY_MODEL': core_config.PRIMARY_MODEL,
+                'HEAVY_ALTERNATES': [],
+                'FAST_MODEL': core_config.PRIMARY_MODEL,
             },
             'ensemble': {
-                'enabled': getattr(core_config, 'ENABLE_ENSEMBLE', False),
-                'mode': getattr(core_config, 'ENSEMBLE_MODE', None),
-                'candidates': getattr(core_config, 'ENSEMBLE_CANDIDATES', None),
-                'refine': {
-                    'expansion': getattr(core_config, 'ENSEMBLE_REFINE_EXPANSION', None),
-                    'hard_cap': getattr(core_config, 'ENSEMBLE_REFINE_HARD_CAP', None),
-                    'max_total_factor': getattr(core_config, 'ENSEMBLE_MAX_TOTAL_FACTOR', None)
-                }
-            },
-            'capabilities': capability_summary,
-            'available': sorted(list(getattr(core_config, 'KNOWN_AVAILABLE_MODELS', []))),
-            'flags': {
-                'experimental_models': getattr(core_config, 'ENABLE_EXPERIMENTAL_MODELS', False),
-                'compound_models': getattr(core_config, 'ENABLE_COMPOUND_MODELS', False),
-                'auto_tools': getattr(core_config, 'ENABLE_AUTO_TOOLS', False),
-                'prompt_caching': getattr(core_config, 'ENABLE_PROMPT_CACHING', False),
-                'fact_approval': getattr(core_config, 'ENABLE_FACT_APPROVAL', False),
-                'verify_facts_second_pass': getattr(core_config, 'VERIFY_FACTS_SECOND_PASS', False),
+                'enabled': False,
+                'mode': None,
+                'candidates': None,
             }
         }
         return jsonify(data)

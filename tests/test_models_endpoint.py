@@ -3,21 +3,28 @@ from companion_ai.core import config as core_config
 from web_companion import app
 
 def test_models_endpoint_structure():
+    """Test that the /api/models endpoint returns the simplified model architecture."""
     client = app.test_client()
     res = client.get('/api/models')
     assert res.status_code == 200
     data = res.get_json()
-    for key in ['roles','routing','ensemble','capabilities','available','flags']:
-        assert key in data, f"Missing key {key}"
-    roles = data['roles']
-    assert roles.get('SMART_PRIMARY_MODEL')
-    assert roles.get('HEAVY_MODEL')
-    ens = data['ensemble']
-    for k in ['enabled','mode','candidates']:
-        assert k in ens
-    caps = data['capabilities']
-    assert isinstance(caps, dict) and caps
-    assert core_config.DEFAULT_CONVERSATION_MODEL in data['available']
+    
+    # Check new simplified structure
+    assert 'models' in data, "Missing 'models' key"
+    models = data['models']
+    assert models.get('PRIMARY_MODEL') == core_config.PRIMARY_MODEL
+    assert models.get('TOOLS_MODEL') == core_config.TOOLS_MODEL
+    assert models.get('VISION_MODEL') == core_config.VISION_MODEL
+    assert models.get('COMPOUND_MODEL') == core_config.COMPOUND_MODEL
+    
+    # Check flags
+    assert 'flags' in data
     flags = data['flags']
-    for f in ['auto_tools','prompt_caching','fact_approval']:
-        assert f in flags
+    assert 'auto_tools' in flags
+    assert 'knowledge_graph' in flags
+    assert 'vision' in flags
+    
+    # Check legacy compatibility fields exist
+    assert 'roles' in data
+    assert 'ensemble' in data
+    assert data['ensemble']['enabled'] == False  # Ensemble is removed

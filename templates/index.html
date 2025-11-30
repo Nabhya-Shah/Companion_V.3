@@ -5,134 +5,266 @@
   <title>Companion AI</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="stylesheet" href="/static/app.css" />
+  <!-- Marked.js for Markdown rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- Highlight.js for code syntax highlighting -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11"></script>
 </head>
 <body>
   <div id="app-root">
-    <!-- Sidebar (hidden by default) -->
-    <aside class="side" id="sidebar">
+    <!-- Main Content Area -->
+    <div class="main-content">
+      <header class="topbar">
+        <div class="topbar-left">
+          <div class="brand">Companion</div>
+        </div>
+        <div class="topbar-right">
+          <a href="/graph" target="_blank" class="icon-btn" title="Knowledge Graph">🕸️</a>
+          <button id="toggleSettingsBtn" class="icon-btn" title="Settings">⚙️</button>
+          <button id="toggleMemoryBtn" class="icon-btn" title="Memory & Debug">🧠</button>
+        </div>
+      </header>
+      
+      <main class="chat-container" id="chatPane">
+        <!-- Welcome Screen -->
+        <div class="welcome-screen" id="welcomeScreen">
+          <div class="welcome-icon">✨</div>
+          <h1>Hey there</h1>
+          <p>What's on your mind?</p>
+          <div class="suggestion-chips">
+            <button class="chip" data-prompt="Recommend me something to watch tonight">🎬 Recommend something to watch</button>
+            <button class="chip" data-prompt="Help me brainstorm ideas for a project">💡 Brainstorm project ideas</button>
+            <button class="chip" data-prompt="Explain something complex simply">📚 Explain something simply</button>
+            <button class="chip" data-prompt="What's the weather like today?">🌤️ Check the weather</button>
+          </div>
+        </div>
+        
+        <!-- Messages will be inserted here -->
+      </main>
+      
+      <footer class="composer">
+        <div class="composer-wrapper">
+          <div class="composer-box">
+            <textarea id="userInput" rows="1" placeholder="Message Companion..." spellcheck="false" autofocus></textarea>
+            <div class="composer-tools">
+              <span class="hint">Shift+Enter for new line</span>
+              <button id="sendBtn" class="send-btn" disabled>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </footer>
+    </div>
+
+    <!-- Right Sidebar - Memory & Debug -->
+    <aside class="memory-sidebar" id="memorySidebar">
+      <div class="sidebar-header">
+        <h3>Memory & Debug</h3>
+        <button id="closeMemoryBtn" class="close-btn">×</button>
+      </div>
       <nav class="tabs">
         <button class="tab active" data-tab="memory">Memory</button>
+        <button class="tab" data-tab="tokens">Tokens</button>
         <button class="tab" data-tab="models">Models</button>
-        <button class="tab" data-tab="search">Search</button>
         <button class="tab" data-tab="metrics">Metrics</button>
-        <button class="tab" data-tab="settings">Settings</button>
       </nav>
       <div class="tabpanes">
         <div class="pane active" id="pane-memory">
-          <h3>Profile Facts</h3>
-          <ul id="profileList" class="kv facts"></ul>
-          <div class="legend" style="font-size:11px;color:#808080;margin:8px 0 16px;">
-            Confidence: 
-            <span class="badge conf-high">high</span> 
-            <span class="badge conf-med">medium</span> 
-            <span class="badge conf-low">low</span>
-          </div>
-          <h3>Pending Facts <span id="pendingBadge" style="font-size:0.7em;color:#888;"></span></h3>
-          <ul id="pendingFacts" class="kv"></ul>
-          <h3>Summaries</h3>
-          <ul id="summaryList" class="bullets"></ul>
-          <h3>Insights</h3>
-          <ul id="insightList" class="bullets"></ul>
-        </div>
-        <div class="pane" id="pane-models">
-          <h3>Routing & Ensemble</h3>
-          <div id="modelsPanel" class="models-panel"></div>
-          <h3>Recent Routing</h3>
-          <div id="recentRouting" class="recent"></div>
-        </div>
-        <div class="pane" id="pane-search">
-          <div class="searchBox">
-            <input id="searchInput" placeholder="Search memory..." />
-            <button id="searchBtn">Search</button>
-          </div>
-          <div id="searchResults" class="results"></div>
-        </div>
-        <div class="pane" id="pane-metrics">
-          <pre id="metricsOut" class="metrics"></pre>
-        </div>
-        <div class="pane" id="pane-settings">
-          <h3>Settings</h3>
-          <div style="padding: 12px 0;">
-            <label style="display: flex; align-items: center; cursor: pointer; user-select: none; margin-bottom: 16px;">
-              <input type="checkbox" id="ttsToggle" style="margin-right: 8px; width: 18px; height: 18px; cursor: pointer;">
-              <span style="font-size: 15px;">Enable Text-to-Speech (TTS)</span>
-            </label>
-            
-            <div class="setting-group" style="margin-bottom: 16px;">
-              <label for="voiceSelect" style="display: block; margin-bottom: 6px; font-size: 14px; color: var(--text-secondary);">Voice</label>
-              <select id="voiceSelect" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary);">
-                <option value="" disabled selected>Loading voices...</option>
-              </select>
+          <div class="stats-card">
+            <div class="stats-header">
+              <span class="stats-icon">🧠</span>
+              <span class="stats-title">Memory Stats</span>
             </div>
-
-            <div class="setting-group">
-              <label for="rateSelect" style="display: block; margin-bottom: 6px; font-size: 14px; color: var(--text-secondary);">Speech Rate</label>
-              <select id="rateSelect" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary);">
-                <option value="-20%">Slow (-20%)</option>
-                <option value="-10%">Slightly Slow (-10%)</option>
-                <option value="+0%">Normal</option>
-                <option value="+5%" selected>Slightly Fast (+5%)</option>
-                <option value="+10%">Fast (+10%)</option>
-                <option value="+20%">Very Fast (+20%)</option>
-              </select>
-            </div>
-
-            <div class="setting-group" style="margin-top: 16px;">
-              <label for="pitchSelect" style="display: block; margin-bottom: 6px; font-size: 14px; color: var(--text-secondary);">Speech Pitch</label>
-              <select id="pitchSelect" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary);">
-                <option value="-10%">Low (-10%)</option>
-                <option value="-5%">Slightly Low (-5%)</option>
-                <option value="+0%" selected>Normal</option>
-                <option value="+5%">Slightly High (+5%)</option>
-                <option value="+10%">High (+10%)</option>
-              </select>
-            </div>
-
-            <div class="setting-group" style="margin-top: 24px; border-top: 1px solid var(--border-color); padding-top: 16px;">
-              <label style="display: flex; align-items: center; cursor: pointer; user-select: none;">
-                <input type="checkbox" id="visionToggle" style="margin-right: 8px; width: 18px; height: 18px; cursor: pointer;">
-                <span style="font-size: 15px; font-weight: 600;">Enable Visual Watcher</span>
-              </label>
-              <div style="margin-top: 8px; font-size: 12px; color: var(--text-secondary);">
-                Allows the AI to passively see your screen activity to provide context.
-                <br><span id="visionStatus" style="color: var(--accent-color);">Status: Off</span>
+            <div class="stats-grid">
+              <div class="stat-item">
+                <span class="stat-value" id="memFactCount">0</span>
+                <span class="stat-label">Facts</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-value" id="memInsightCount">0</span>
+                <span class="stat-label">Insights</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-value" id="memSummaryCount">0</span>
+                <span class="stat-label">Summaries</span>
               </div>
             </div>
           </div>
+          <div class="memory-section">
+            <div class="section-header-row">
+              <h4>What I Know About You</h4>
+              <span class="fact-hint">Click fact to delete</span>
+            </div>
+            <div id="profileList" class="fact-cards"></div>
+          </div>
+          <div class="memory-section">
+            <h4>Recent Insights</h4>
+            <div id="insightList" class="insight-cards"></div>
+          </div>
+          <button id="refreshMemoryBtn" class="refresh-btn">↻ Refresh</button>
+        </div>
+        <div class="pane" id="pane-tokens">
+          <div class="memory-section">
+            <h4>Session Token Usage</h4>
+            <div id="tokenStats" class="token-stats">
+              <div class="token-total">
+                <span class="token-label">Total</span>
+                <span id="tokenTotal" class="token-value">0</span>
+              </div>
+              <div class="token-breakdown">
+                <div class="token-item">
+                  <span class="token-label">Input</span>
+                  <span id="tokenInput" class="token-value">0</span>
+                </div>
+                <div class="token-item">
+                  <span class="token-label">Output</span>
+                  <span id="tokenOutput" class="token-value">0</span>
+                </div>
+                <div class="token-item">
+                  <span class="token-label">Requests</span>
+                  <span id="tokenRequests" class="token-value">0</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="memory-section">
+            <h4>By Model</h4>
+            <div id="tokenByModel" class="token-by-model"></div>
+          </div>
+          <button id="refreshTokensBtn" class="refresh-btn">↻ Refresh</button>
+          <button id="resetTokensBtn" class="refresh-btn" style="margin-top: 8px; background: var(--error);">Reset Stats</button>
+        </div>
+        <div class="pane" id="pane-models">
+          <div class="stats-card">
+            <div class="stats-header">
+              <span class="stats-icon">🤖</span>
+              <span class="stats-title">Model Architecture</span>
+            </div>
+            <div id="modelCards" class="model-cards"></div>
+          </div>
+          <div class="memory-section">
+            <h4>Feature Flags</h4>
+            <div id="featureFlags" class="feature-flags"></div>
+          </div>
+        </div>
+        <div class="pane" id="pane-metrics">
+          <div class="stats-card">
+            <div class="stats-header">
+              <span class="stats-icon">📊</span>
+              <span class="stats-title">Performance</span>
+            </div>
+            <div class="stats-grid">
+              <div class="stat-item">
+                <span class="stat-value" id="metricInteractions">0</span>
+                <span class="stat-label">Interactions</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-value" id="metricAvgLatency">0</span>
+                <span class="stat-label">Avg Latency</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-value" id="metricToolCalls">0</span>
+                <span class="stat-label">Tool Calls</span>
+              </div>
+            </div>
+          </div>
+          <div class="memory-section">
+            <h4>Model Latency</h4>
+            <div id="latencyBars" class="latency-bars"></div>
+          </div>
+          <button id="refreshMetricsBtn" class="refresh-btn">↻ Refresh</button>
         </div>
       </div>
     </aside>
 
-    <header class="topbar">
-      <div class="brand">Companion AI<span class="tag">personal</span></div>
-      <div class="controls">
-        <button id="toggleSidebar" title="Toggle Sidebar">☰ Menu</button>
-        <button id="healthBtn" title="Refresh Metrics">⟳ Refresh</button>
-      </div>
-    </header>
-    
-    <main class="layout">
-      <section class="chat" id="chatPane">
-        <!-- Welcome message will be inserted here -->
-        <div class="msg system" style="text-align: center; border: none; background: transparent;">
-          <h1 style="font-size: 2.5rem; margin-bottom: 1rem; background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-weight: 600;">
-            Hello, what can I help with?
-          </h1>
-          <p style="color: var(--text-secondary); font-size: 1.1rem;">
-            Your AI companion is ready to chat
-          </p>
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>⚙️ Settings</h3>
+          <button id="closeSettingsBtn" class="close-btn">×</button>
         </div>
-      </section>
-    </main>
-    
-    <footer class="composer">
-      <div class="composer-col">
-        <textarea id="userInput" rows="1" placeholder="Message Companion AI..." spellcheck="false" autofocus></textarea>
-        <div class="composer-actions">
-          <button id="sendBtn">Send</button>
+        <div class="modal-body">
+          <!-- Voice Section -->
+          <div class="setting-section">
+            <div class="setting-section-header">🔊 Voice</div>
+            <div class="setting-group">
+              <label class="toggle-label">
+                <input type="checkbox" id="ttsToggle">
+                <span>Enable Text-to-Speech</span>
+              </label>
+              <p class="setting-hint">AI responses will be spoken aloud</p>
+            </div>
+            <div class="setting-group" id="voiceSettings">
+              <label for="voiceSelect">Voice</label>
+              <select id="voiceSelect">
+                <option value="" disabled selected>Loading voices...</option>
+              </select>
+            </div>
+            <div class="setting-group" id="rateSettings">
+              <label for="rateSelect">Speech Rate</label>
+              <select id="rateSelect">
+                <option value="-20%">Slow</option>
+                <option value="-10%">Slightly Slow</option>
+                <option value="+0%">Normal</option>
+                <option value="+5%" selected>Slightly Fast</option>
+                <option value="+10%">Fast</option>
+              </select>
+            </div>
+          </div>
+          
+          <!-- Vision Section -->
+          <div class="setting-section">
+            <div class="setting-section-header">👁️ Vision</div>
+            <div class="setting-group">
+              <label class="toggle-label">
+                <input type="checkbox" id="visionToggle">
+                <span>Enable Screen Awareness</span>
+              </label>
+              <p class="setting-hint" id="visionStatus">Companion can see and analyze your screen when asked</p>
+            </div>
+          </div>
+          
+          <!-- Data Management Section -->
+          <div class="setting-section">
+            <div class="setting-section-header">💾 Data</div>
+            <div class="setting-links">
+              <a href="#" id="exportChatBtn" class="setting-link">
+                <span class="link-icon">📥</span>
+                <span class="link-text">Export Chat History</span>
+                <span class="link-arrow">→</span>
+              </a>
+              <a href="/graph" target="_blank" class="setting-link">
+                <span class="link-icon">🕸️</span>
+                <span class="link-text">View Knowledge Graph</span>
+                <span class="link-arrow">→</span>
+              </a>
+            </div>
+          </div>
+          
+          <!-- Danger Zone -->
+          <div class="setting-section danger-zone">
+            <div class="setting-section-header">⚠️ Danger Zone</div>
+            <div class="setting-links">
+              <a href="#" id="clearChatBtn" class="setting-link danger">
+                <span class="link-icon">🧹</span>
+                <span class="link-text">Clear Chat History</span>
+                <span class="link-arrow">→</span>
+              </a>
+              <a href="#" id="clearMemoryBtn" class="setting-link danger">
+                <span class="link-icon">🗑️</span>
+                <span class="link-text">Reset All Memory</span>
+                <span class="link-arrow">→</span>
+              </a>
+            </div>
+          </div>
         </div>
       </div>
-    </footer>
+    </div>
   </div>
   
   <script src="/static/app.js"></script>

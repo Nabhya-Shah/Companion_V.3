@@ -4,7 +4,7 @@ Supports both legacy text-based tools (Phase 0) and modern JSON Schema
 function calling for Groq native integration.
 """
 from __future__ import annotations
-import math, datetime, re, os, textwrap, json
+import datetime, re, os, json
 from typing import Callable, Dict, Any
 from companion_ai import memory as mem
 
@@ -35,9 +35,6 @@ ToolFn = Callable[[str], str]
 
 # Legacy text-based tools
 _TOOLS: Dict[str, ToolFn] = {}
-
-# Modern function calling schemas (JSON Schema format for Groq)
-_FUNCTION_SCHEMAS: Dict[str, Dict[str, Any]] = {}
 
 # Modern function calling schemas (JSON Schema format for Groq)
 _FUNCTION_SCHEMAS: Dict[str, Dict[str, Any]] = {}
@@ -76,142 +73,6 @@ def tool_time(_: str = "") -> str:
     """Get current time in ISO format."""
     return datetime.datetime.now().isoformat(timespec='seconds')
 
-@tool('get_current_time', schema={
-    "type": "function",
-    "function": {
-        "name": "get_current_time",
-        "description": "Get the current date and time in ISO format",
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
-    }
-})
-def tool_time(_: str = "") -> str:
-    """Get current time in ISO format."""
-    return datetime.datetime.now().isoformat(timespec='seconds')
-
-@tool('calculate', schema={
-    "type": "function",
-    "function": {
-        "name": "calculate",
-        "description": "Perform mathematical calculations. Supports basic operations (+, -, *, /, %, **) and functions like abs(), round(), pow()",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "expression": {
-                    "type": "string",
-                    "description": "Mathematical expression to evaluate (e.g., '2 + 2', '15% of 200', 'pow(2, 8)')"
-                }
-            },
-            "required": ["expression"]
-        }
-    }
-})
-def tool_calc(expr: str) -> str:
-    """Calculate mathematical expressions safely."""
-    try:
-        # Handle percentage calculations
-        expr = expr.lower().replace('% of', '* 0.01 *').replace('%', '* 0.01')
-        # extremely restricted eval: digits, operators, parentheses, dots, spaces
-        if not all(c in '0123456789+-*/(). %' for c in expr.replace('pow', '').replace('abs', '').replace('round', '')):
-            return 'Invalid characters in expression'
-        result = eval(expr, {'__builtins__': {'abs': abs, 'round': round, 'pow': pow}, 'math': math}, {})
-        return str(result)
-    except Exception as e:
-        return f'Calculation error: {e}'
-
-@tool('calculate', schema={
-    "type": "function",
-    "function": {
-        "name": "calculate",
-        "description": "Perform mathematical calculations. Supports basic operations (+, -, *, /, %, **) and functions like abs(), round(), pow()",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "expression": {
-                    "type": "string",
-                    "description": "Mathematical expression to evaluate (e.g., '2 + 2', '15% of 200', 'pow(2, 8)')"
-                }
-            },
-            "required": ["expression"]
-        }
-    }
-})
-def tool_calc(expr: str) -> str:
-    """Calculate mathematical expressions safely."""
-    try:
-        # Handle percentage calculations
-        expr = expr.lower().replace('% of', '* 0.01 *').replace('%', '* 0.01')
-        # extremely restricted eval: digits, operators, parentheses, dots, spaces
-        if not all(c in '0123456789+-*/(). %' for c in expr.replace('pow', '').replace('abs', '').replace('round', '')):
-            return 'Invalid characters in expression'
-        result = eval(expr, {'__builtins__': {'abs': abs, 'round': round, 'pow': pow}, 'math': math}, {})
-        return str(result)
-    except Exception as e:
-        return f'Calculation error: {e}'
-
-@tool('web_search', schema={
-    "type": "function",
-    "function": {
-        "name": "web_search",
-        "description": "Search the web for current information, facts, news, or answers to questions. Use this when the user asks about current events, facts you don't know, or requests to look something up.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The search query or question to look up"
-                }
-            },
-            "required": ["query"]
-        }
-    }
-})
-def tool_search(query: str) -> str:
-    """Search web and memory for information."""
-    q = (query or '').strip()
-    if not q:
-        return 'SEARCH_RESULTS (empty query)'
-    
-    results = []
-    
-    # 1. Memory search first (fast, personalized)
-    mem_hits = mem.search_memory(q, limit=5)
-    if mem_hits:
-        results.append(f"📚 Memory ({len(mem_hits)} results):")
-        for i, hit in enumerate(mem_hits[:3], 1):  # Top 3
-            snippet = hit['text']
-            if len(snippet) > 120:
-                snippet = snippet[:117] + '...'
-            results.append(f"  {i}. [{hit['type']}] {snippet}")
-    
-    # 2. Web search using DuckDuckGo Instant Answer API (no key needed)
-    if requests:
-        try:
-            resp = requests.get(
-                'https://api.duckduckgo.com/',
-                params={'q': q, 'format': 'json', 'no_html': 1, 'skip_disambig': 1},
-                timeout=4.0
-            )
-            if resp.ok:
-                data = resp.json()
-                abstract = data.get('AbstractText', '')
-                if abstract:
-                    abstract = re.sub(r'\s+', ' ', abstract).strip()
-                    results.append(f"\n🌐 Web:")
-                    results.append(f"  {abstract[:300]}{'...' if len(abstract) > 300 else ''}")
-                
-                # Also check for instant answer
-                answer = data.get('Answer', '')
-                if answer:
-                    results.append(f"\n✨ Quick Answer: {answer}")
-        except Exception as e:
-            results.append(f"\n🌐 Web: (unavailable - {str(e)[:50]})")
-    
-    return '\n'.join(results) if results else f"No results found for '{q}'"
-
 def list_tools() -> list[str]:
     """List all available tool names."""
     return sorted(_TOOLS.keys())
@@ -245,17 +106,9 @@ def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
     # Handle different function signatures
     if function_name == 'get_current_time':
         return tool_fn("")
-    elif function_name == 'calculate':
-        return tool_fn(arguments.get('expression', ''))
-    elif function_name == 'web_search':
-        return tool_fn(arguments.get('query', ''))
     elif function_name == 'memory_insight':
         return tool_fn("")
-    elif function_name == 'get_weather':
-        return tool_fn(arguments.get('location', ''))
     elif function_name == 'wikipedia_lookup':
-        return tool_fn(arguments.get('query', ''))
-    elif function_name == 'brave_search':
         return tool_fn(arguments.get('query', ''))
     elif function_name == 'read_pdf':
         return tool_fn(arguments.get('file_path', ''), arguments.get('page_number'))

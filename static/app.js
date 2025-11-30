@@ -1,466 +1,1024 @@
-// Basic SPA behavior
+// Companion AI - Modern Chat UI JavaScript
+
+// ============================================
+// DOM Elements
+// ============================================
 const chatPane = document.getElementById('chatPane');
+const welcomeScreen = document.getElementById('welcomeScreen');
 const userInput = document.getElementById('userInput');
 const sendBtn = document.getElementById('sendBtn');
-const healthBtn = document.getElementById('healthBtn');
-const toggleSidebarBtn = document.getElementById('toggleSidebar');
-const sidebar = document.getElementById('sidebar');
+const toggleMemoryBtn = document.getElementById('toggleMemoryBtn');
+const toggleSettingsBtn = document.getElementById('toggleSettingsBtn');
+const closeMemoryBtn = document.getElementById('closeMemoryBtn');
+const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+const memorySidebar = document.getElementById('memorySidebar');
+const settingsModal = document.getElementById('settingsModal');
+const refreshMetricsBtn = document.getElementById('refreshMetricsBtn');
+const exportChatBtn = document.getElementById('exportChatBtn');
+const clearMemoryBtn = document.getElementById('clearMemoryBtn');
+const clearChatBtn = document.getElementById('clearChatBtn');
 
+// ============================================
+// State
+// ============================================
 let API_TOKEN = localStorage.getItem('companion_api_token') || '';
-function setApiToken(tok){ API_TOKEN = tok || ''; if(tok) localStorage.setItem('companion_api_token', tok); }
-function authHeaders(extra={}) { return { 'Content-Type':'application/json', ...(API_TOKEN? {'X-API-TOKEN':API_TOKEN}:{}), ...extra }; }
-
-// TTS Toggle
 let ttsEnabled = localStorage.getItem('companion_tts_enabled') === 'true';
-const ttsToggle = document.getElementById('ttsToggle');
-if (ttsToggle) {
-  ttsToggle.checked = ttsEnabled;
-  ttsToggle.addEventListener('change', () => {
-    ttsEnabled = ttsToggle.checked;
-    localStorage.setItem('companion_tts_enabled', ttsEnabled);
-    console.log('TTS ' + (ttsEnabled ? 'enabled' : 'disabled'));
+let currentConversation = [];
+let lastHistoryLength = -1; // Start at -1 to force initial render
+let eventSource = null;
+let isStreaming = false; // Prevents SSE from overwriting during streaming
+
+// ============================================
+// Utilities
+// ============================================
+function setApiToken(tok) {
+  API_TOKEN = tok || '';
+  if (tok) localStorage.setItem('companion_api_token', tok);
+}
+
+function authHeaders(extra = {}) {
+  return {
+    'Content-Type': 'application/json',
+    ...(API_TOKEN ? { 'X-API-TOKEN': API_TOKEN } : {}),
+    ...extra
+  };
+}
+
+function formatTime(date) {
+  return new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ============================================
+// Markdown Rendering
+// ============================================
+function renderMarkdown(text) {
+  if (typeof marked === 'undefined') {
+    // Fallback if marked.js not loaded
+    return escapeHtml(text).replace(/\n/g, '<br>');
+  }
+  
+  // Configure marked
+  marked.setOptions({
+    highlight: function(code, lang) {
+      if (typeof hljs !== 'undefined' && lang && hljs.getLanguage(lang)) {
+        try {
+          return hljs.highlight(code, { language: lang }).value;
+        } catch (e) {}
+      }
+      return code;
+    },
+    breaks: true,
+    gfm: true
+  });
+  
+  return marked.parse(text);
+}
+
+// Add copy buttons to code blocks
+function addCopyButtons(container) {
+  container.querySelectorAll('pre').forEach(pre => {
+    if (pre.querySelector('.code-copy-btn')) return;
+    
+    const btn = document.createElement('button');
+    btn.className = 'code-copy-btn';
+    btn.textContent = 'Copy';
+    btn.onclick = async () => {
+      const code = pre.querySelector('code')?.textContent || pre.textContent;
+      await navigator.clipboard.writeText(code);
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 2000);
+    };
+    pre.style.position = 'relative';
+    pre.appendChild(btn);
   });
 }
 
-// Sidebar toggle
-if (toggleSidebarBtn) {
-  toggleSidebarBtn.addEventListener('click', () => {
-    sidebar.classList.toggle('visible');
-    // Add class to body to shift layout
-    document.body.classList.toggle('sidebar-open');
-  });
+// ============================================
+// Message Rendering
+// ============================================
+function createMessageElement(role, text, timestamp) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'message-wrapper';
+  
+  const message = document.createElement('div');
+  message.className = `message ${role}`;
+  
+  const avatar = document.createElement('div');
+  avatar.className = 'message-avatar';
+  avatar.textContent = role === 'user' ? '👤' : '✨';
+  
+  const content = document.createElement('div');
+  content.className = 'message-content';
+  
+  const roleLabel = document.createElement('div');
+  roleLabel.className = 'message-role';
+  roleLabel.textContent = role === 'user' ? 'You' : 'Companion';
+  
+  const textDiv = document.createElement('div');
+  textDiv.className = 'message-text';
+  
+  if (role === 'ai') {
+    textDiv.innerHTML = renderMarkdown(text);
+    setTimeout(() => addCopyButtons(textDiv), 0);
+  } else {
+    textDiv.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
+  }
+  
+  content.appendChild(roleLabel);
+  content.appendChild(textDiv);
+  
+  // Action buttons
+  const actions = document.createElement('div');
+  actions.className = 'message-actions';
+  
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'action-btn';
+  copyBtn.innerHTML = '📋 Copy';
+  copyBtn.onclick = async () => {
+    await navigator.clipboard.writeText(text);
+    copyBtn.innerHTML = '✓ Copied';
+    setTimeout(() => copyBtn.innerHTML = '📋 Copy', 2000);
+  };
+  actions.appendChild(copyBtn);
+  
+  content.appendChild(actions);
+  
+  message.appendChild(avatar);
+  message.appendChild(content);
+  wrapper.appendChild(message);
+  
+  return wrapper;
 }
 
-function formatTimestamp(tsString) {
-  if (!tsString) return new Date().toLocaleTimeString();
-  try {
-    const date = new Date(tsString);
-    if (!Number.isNaN(date.getTime())) {
-      return date.toLocaleTimeString();
-    }
-  } catch {}
-  return new Date().toLocaleTimeString();
+function createLoadingMessage() {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'message-wrapper';
+  wrapper.id = 'loading-message';
+  
+  const message = document.createElement('div');
+  message.className = 'message ai loading';
+  
+  const avatar = document.createElement('div');
+  avatar.className = 'message-avatar';
+  avatar.textContent = '✨';
+  
+  const content = document.createElement('div');
+  content.className = 'message-content';
+  
+  const roleLabel = document.createElement('div');
+  roleLabel.className = 'message-role';
+  roleLabel.textContent = 'Companion';
+  
+  const textDiv = document.createElement('div');
+  textDiv.className = 'message-text';
+  textDiv.innerHTML = '<span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span>';
+  
+  content.appendChild(roleLabel);
+  content.appendChild(textDiv);
+  message.appendChild(avatar);
+  message.appendChild(content);
+  wrapper.appendChild(message);
+  
+  return wrapper;
+}
+
+function addMessage(role, text, timestamp) {
+  // Hide welcome screen on first message
+  if (welcomeScreen && welcomeScreen.parentNode) {
+    welcomeScreen.remove();
+  }
+  
+  const messageEl = createMessageElement(role, text, timestamp);
+  chatPane.appendChild(messageEl);
+  scrollToBottom();
 }
 
 function scrollToBottom() {
-  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  setTimeout(() => {
+    chatPane.scrollTop = chatPane.scrollHeight;
+  }, 50);
 }
 
-function addMessage(role, text, options = {}) {
-  const { timestamp, skipScroll } = options;
-  // Remove welcome message on first interaction
-  const welcome = chatPane.querySelector('.msg.system');
-  if (welcome) welcome.remove();
-  
-  const div = document.createElement('div');
-  div.className = `msg ${role}`;
-  div.textContent = text;
-  const ts = document.createElement('span');
-  ts.className = 'timestamp';
-  ts.textContent = formatTimestamp(timestamp);
-  div.appendChild(ts);
-  chatPane.appendChild(div);
-  
-  // Smooth scroll to bottom
-  if (!skipScroll) {
-    setTimeout(scrollToBottom, 50);
-  }
-}
-
-async function sendMessage(retry=false) {
+// ============================================
+// Chat Functions
+// ============================================
+async function sendMessage(retry = false) {
   const message = userInput.value.trim();
   if (!message) return;
+  
+  // Add user message
   addMessage('user', message);
   userInput.value = '';
   resizeTextarea();
+  updateSendButton();
   
-  // Show loading indicator
-  const loadingDiv = document.createElement('div');
-  loadingDiv.className = 'msg ai loading';
-  loadingDiv.textContent = '...';
-  chatPane.appendChild(loadingDiv);
+  // Create streaming AI message with proper structure (matching createMessageElement)
+  const wrapper = document.createElement('div');
+  wrapper.className = 'message-wrapper';
+  
+  const aiMsgEl = document.createElement('div');
+  aiMsgEl.className = 'message ai';
+  
+  const avatar = document.createElement('div');
+  avatar.className = 'message-avatar';
+  avatar.textContent = '✨';
+  
+  const content = document.createElement('div');
+  content.className = 'message-content';
+  
+  const roleLabel = document.createElement('div');
+  roleLabel.className = 'message-role';
+  roleLabel.textContent = 'Companion';
+  
+  const textDiv = document.createElement('div');
+  textDiv.className = 'message-text';
+  textDiv.innerHTML = '<span class="text-content"></span><span class="streaming-cursor">▋</span>';
+  
+  content.appendChild(roleLabel);
+  content.appendChild(textDiv);
+  aiMsgEl.appendChild(avatar);
+  aiMsgEl.appendChild(content);
+  wrapper.appendChild(aiMsgEl);
+  chatPane.appendChild(wrapper);
   scrollToBottom();
   
+  const textEl = textDiv.querySelector('.text-content');
+  const cursorEl = textDiv.querySelector('.streaming-cursor');
+  
+  // Set streaming flag to prevent SSE overwrites
+  isStreaming = true;
+  
+  // Typewriter state
+  let displayedText = '';
+  let pendingText = '';
+  let isTyping = false;
+  
+  // Smooth typewriter effect - types out pending text char by char
+  async function typeNextChar() {
+    if (pendingText.length === 0) {
+      isTyping = false;
+      return;
+    }
+    isTyping = true;
+    
+    // Type 1-3 chars at a time for natural feel
+    const charsToType = Math.min(pendingText.length, Math.random() > 0.7 ? 2 : 1);
+    const chars = pendingText.slice(0, charsToType);
+    pendingText = pendingText.slice(charsToType);
+    displayedText += chars;
+    
+    textEl.textContent = displayedText;
+    scrollToBottom();
+    
+    // Variable delay for natural rhythm (faster for spaces, slower for punctuation)
+    let delay = 15 + Math.random() * 10;
+    if (chars.includes('.') || chars.includes('!') || chars.includes('?')) {
+      delay = 80 + Math.random() * 40; // Pause at sentence ends
+    } else if (chars.includes(',')) {
+      delay = 40 + Math.random() * 20; // Brief pause at commas
+    }
+    
+    setTimeout(typeNextChar, delay);
+  }
+  
+  // Add text to pending queue and start typing if not already
+  function queueText(text) {
+    pendingText += text;
+    if (!isTyping) {
+      typeNextChar();
+    }
+  }
+  
   try {
-    const resp = await fetch('/api/chat', {
+    const resp = await fetch('/api/chat/send', {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({ message, tts_enabled: ttsEnabled })
     });
-    const data = await resp.json();
+    
     if (resp.status === 401 && !retry) {
-      // Prompt for token once
       const tok = prompt('API token required. Enter token:');
-      if (tok) { setApiToken(tok); return sendMessage(true); }
+      if (tok) {
+        setApiToken(tok);
+        wrapper.remove();
+        return sendMessage(true);
+      }
     }
-    if (!resp.ok) throw new Error(data.error || 'Error');
     
-    // Remove loading indicator
-    loadingDiv.remove();
+    if (!resp.ok) {
+      const data = await resp.json();
+      throw new Error(data.error || 'Error');
+    }
     
-    // Force sync instead of manually adding to avoid duplicates
-    // The server has already updated the history, so this will fetch and render the correct state
-    await syncChatHistory({ force: true });
+    // Read streaming response
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let fullResponse = '';
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      const text = decoder.decode(value);
+      const lines = text.split('\n');
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            
+            if (data.chunk) {
+              fullResponse += data.chunk;
+              queueText(data.chunk);
+            }
+            
+            if (data.error) {
+              throw new Error(data.error);
+            }
+          } catch (parseErr) {
+            // Ignore parse errors for incomplete JSON
+          }
+        }
+      }
+    }
+    
+    // Wait for typing to finish, then remove cursor smoothly
+    const waitForTyping = () => {
+      if (pendingText.length > 0 || isTyping) {
+        setTimeout(waitForTyping, 50);
+      } else {
+        // Fade out cursor
+        cursorEl.style.transition = 'opacity 0.3s';
+        cursorEl.style.opacity = '0';
+        setTimeout(() => {
+          cursorEl.remove();
+          // Re-enable SSE updates now that streaming is done
+          isStreaming = false;
+          lastHistoryLength++; // Prevent immediate re-render
+        }, 300);
+      }
+    };
+    waitForTyping();
     
   } catch (e) {
-    loadingDiv.remove();
-    addMessage('ai', 'Error: ' + e.message);
+    isStreaming = false; // Clear flag on error too
+    wrapper.remove();
+    addMessage('ai', 'Sorry, something went wrong: ' + e.message);
   }
 }
-
-sendBtn.addEventListener('click', sendMessage);
-userInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-});
 
 function resizeTextarea() {
   userInput.style.height = 'auto';
-  userInput.style.height = Math.min(userInput.scrollHeight, 160) + 'px';
-}
-userInput.addEventListener('input', resizeTextarea);
-
-// Tabs
-const tabs = document.querySelectorAll('.tab');
-const panes = document.querySelectorAll('.pane');
-tabs.forEach(btn => btn.addEventListener('click', () => {
-  tabs.forEach(b => b.classList.remove('active'));
-  panes.forEach(p => p.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById('pane-' + btn.dataset.tab).classList.add('active');
-}));
-
-async function loadMemory(retry=false) {
-  try {
-    const r = await fetch('/api/memory?detailed=1', { headers: authHeaders({}) });
-    if (r.status === 401 && !retry) {
-      const tok = prompt('API token required. Enter token:'); if(tok){ setApiToken(tok); return loadMemory(true);} else return;
-    }
-    const data = await r.json();
-    if (data.error) return;
-    const profileUl = document.getElementById('profileList');
-    profileUl.innerHTML = '';
-    const detailed = data.profile_detailed || [];
-    detailed.forEach(row => {
-      const li = document.createElement('li');
-      li.classList.add('pfact');
-      li.innerHTML = `<span class="pf-main"><strong>${row.key}</strong>: ${row.value}</span>`;
-      const meta = document.createElement('span'); meta.className = 'meta';
-      const badge = document.createElement('span'); badge.className = 'badge conf-' + row.confidence_label; badge.textContent = row.confidence_label;
-      meta.appendChild(badge);
-      const reaf = document.createElement('span'); reaf.className='badge'; reaf.textContent = `${row.reaffirmations}×`; meta.appendChild(reaf);
-      li.appendChild(meta);
-      const expand = document.createElement('div'); expand.className='pf-details';
-      expand.style.display='none';
-      expand.innerHTML = `<div><span class="sub">confidence:</span> ${row.confidence.toFixed(2)} | <span class="sub">updated:</span> ${row.last_updated || ''}</div>` +
-        `<div><span class="sub">first seen:</span> ${row.first_seen_ts || '—'} | <span class=\"sub\">last seen:</span> ${row.last_seen_ts || '—'}</div>` +
-        (row.evidence ? `<div class="pf-evidence">evidence: ${row.evidence}</div>`: '') ;
-      li.appendChild(expand);
-      li.addEventListener('click', () => { expand.style.display = expand.style.display==='none' ? 'block':'none'; });
-      profileUl.appendChild(li);
-    });
-    const summaryUl = document.getElementById('summaryList');
-    summaryUl.innerHTML='';
-    (data.summaries||[]).forEach(s => { const li=document.createElement('li'); li.textContent=s.summary_text; summaryUl.appendChild(li); });
-    const insightUl = document.getElementById('insightList');
-    insightUl.innerHTML='';
-    (data.insights||[]).forEach(s => { const li=document.createElement('li'); li.textContent=s.insight_text; insightUl.appendChild(li); });
-    // Pending facts
-    const pendingUl = document.getElementById('pendingFacts');
-    pendingUl.innerHTML='';
-    try {
-      const pr = await fetch('/api/pending_facts', { headers: authHeaders({}) });
-      const pdata = await pr.json();
-      if (pdata.enabled) {
-        document.getElementById('pendingBadge').textContent = `(${pdata.pending.length})`;
-        pdata.pending.forEach(p => {
-          const li = document.createElement('li');
-          li.innerHTML = `<span>${p.key}: ${p.value} (${p.confidence.toFixed(2)})</span> <button data-act="approve" data-id="${p.id}">✓</button> <button data-act="reject" data-id="${p.id}">✗</button>`;
-          pendingUl.appendChild(li);
-        });
-        pendingUl.querySelectorAll('button').forEach(btn => {
-          btn.addEventListener('click', async () => {
-            const id = btn.getAttribute('data-id');
-            const act = btn.getAttribute('data-act');
-            const ep = `/api/pending_facts/${id}/${act==='approve'?'approve':'reject'}`;
-            await fetch(ep, { method:'POST', headers: authHeaders({}) });
-            loadMemory();
-          });
-        });
-      } else {
-        document.getElementById('pendingBadge').textContent = '(disabled)';
-      }
-    } catch {}
-  } catch {}
+  userInput.style.height = Math.min(userInput.scrollHeight, 200) + 'px';
 }
 
-async function doSearch() {
-  const q = document.getElementById('searchInput').value.trim();
-  if (!q) return;
-  const out = document.getElementById('searchResults');
-  out.textContent = 'Searching...';
-  try {
-  const r = await fetch('/api/search?q=' + encodeURIComponent(q), { headers: authHeaders({ 'Content-Type': 'application/json' }) });
-    const data = await r.json();
-    if (data.error) { out.textContent = 'Error: ' + data.error; return; }
-    let txt = '';
-    (data.memory_hits||[]).forEach((h,i) => { txt += `${i+1}. [${h.type}] ${h.text}\n`; });
-    if (data.web_snippet) txt += `\nWEB: ${data.web_snippet}`;
-    out.textContent = txt || 'No results';
-  } catch (e) { out.textContent = 'Error: ' + e.message; }
+function updateSendButton() {
+  sendBtn.disabled = !userInput.value.trim();
 }
 
-document.getElementById('searchBtn').addEventListener('click', doSearch);
-
-document.getElementById('searchInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter') { e.preventDefault(); doSearch(); }
+// ============================================
+// Sidebar Toggles
+// ============================================
+toggleMemoryBtn?.addEventListener('click', () => {
+  memorySidebar.classList.toggle('visible');
 });
 
-async function loadHealth(retry=false) {
-  try {
-    const r = await fetch('/api/health', { headers: authHeaders({}) });
-    if (r.status === 401 && !retry) { const tok = prompt('API token required. Enter token:'); if(tok){ setApiToken(tok); return loadHealth(true);} else return; }
-    const data = await r.json();
-    if (data.error) return;
-    const pre = document.getElementById('metricsOut');
-    const lines = [];
-    lines.push('Interactions: ' + (data.metrics?.total_interactions || 0));
-    Object.entries(data.metrics?.models || {}).forEach(([m, info]) => {
-      lines.push(`- ${m}: count=${info.count} avg=${info.avg_latency_ms}ms p95=${info.p95_latency_ms}ms`);
-    });
-    lines.push('');
-    if (data.metrics?.tools) {
-      const t = data.metrics.tools;
-      lines.push('Tools:');
-      lines.push(` total_invocations=${t.total_invocations} blocked=${t.blocked} failures=${t.failures}`);
-      if (t.by_name) {
-        Object.entries(t.by_name).forEach(([n,c])=>lines.push(`  - ${n}: ${c}`));
-      }
-      if (t.decision_types) {
-        lines.push(' decision_types: ' + Object.entries(t.decision_types).map(([k,v])=>`${k}=${v}`).join(', '));
-      }
-      lines.push('');
-    }
-    lines.push('Memory: facts=' + data.memory.profile_facts + ' summaries=' + data.memory.summaries + ' insights=' + data.memory.insights);
-  lines.push('Refreshed: ' + new Date().toLocaleTimeString());
-  pre.textContent = lines.join('\n');
-  } catch {}
-}
+toggleSettingsBtn?.addEventListener('click', () => {
+  settingsModal.classList.add('visible');
+});
 
-healthBtn.addEventListener('click', () => { loadHealth(); loadMemory(); });
+closeMemoryBtn?.addEventListener('click', () => {
+  memorySidebar.classList.remove('visible');
+});
 
-async function loadModelsPanel(retry=false) {
-  const panel = document.getElementById('modelsPanel');
-  if (!panel) return;
-  panel.textContent = 'Loading...';
-  try {
-    const r = await fetch('/api/models', { headers: authHeaders({}) });
-    if (r.status === 401 && !retry) { const tok = prompt('API token required. Enter token:'); if(tok){ setApiToken(tok); return loadModelsPanel(true);} else { panel.textContent='Auth required'; return; } }
-    const d = await r.json();
-    if (d.error) { panel.textContent = 'Error loading models'; return; }
-    const lines = [];
-    lines.push(`<div><strong>Smart</strong>: ${d.roles.SMART_PRIMARY_MODEL}</div>`);
-    lines.push(`<div><strong>Heavy</strong>: ${d.roles.HEAVY_MODEL}</div>`);
-    if (d.roles.HEAVY_ALTERNATES?.length) lines.push(`<div><strong>Alternates</strong>: ${d.roles.HEAVY_ALTERNATES.join(', ')}</div>`);
-    lines.push(`<div><strong>Fast</strong>: ${d.roles.FAST_MODEL}</div>`);
-    lines.push('<h4>Ensemble</h4>');
-    lines.push(`<div>${d.ensemble.enabled ? 'ENABLED' : 'disabled'} mode=${d.ensemble.mode} candidates=${d.ensemble.candidates}</div>`);
-    lines.push('<h4>Flags</h4>');
-    const flagKeys = Object.entries(d.flags).map(([k,v])=>`<span class="badge" style="margin:2px 4px 2px 0;">${k}:${v? 'on':'off'}</span>`).join('');
-    lines.push(`<div>${flagKeys}</div>`);
-    panel.innerHTML = lines.join('');
-  } catch (e) {
-    panel.textContent = 'Failed to load';
-  }
-}
+closeSettingsBtn?.addEventListener('click', () => {
+  settingsModal.classList.remove('visible');
+});
 
-async function loadRecentRouting() {
-  const tgt = document.getElementById('recentRouting');
-  if (!tgt) return;
-  try {
-    const r = await fetch('/api/routing/recent?n=20');
-    const d = await r.json();
-    if (d.error) { tgt.textContent = 'Error'; return; }
-    const lines = [];
-    (d.items||[]).forEach(item => {
-      const rt = item.routing || {};
-      let base = `${(item.ts||'').slice(11,19)}  c${item.complexity??'-'}  ${item.model}`;
-      if (rt.ensemble) {
-        base += `  ENS ${rt.mode} idx=${rt.chosen_index} conf=${rt.confidence??''}`;
-      } else if (rt.escalated) {
-        base += '  escalated';
-      }
-      lines.push(base);
-    });
-    tgt.textContent = lines.join('\n') || 'No routing records yet.';
-  } catch (e) { tgt.textContent = 'Error loading'; }
-}
-
-// Keyboard shortcuts (Ctrl+R for refresh, Ctrl+1-4 for tabs)
-document.addEventListener('keydown', e => {
-  if (e.ctrlKey) {
-    if (e.key === 'r') { e.preventDefault(); healthBtn.click(); }
-    if (/^[1-4]$/.test(e.key)) { const idx = parseInt(e.key)-1; if (tabs[idx]) tabs[idx].click(); }
+// Close modal on overlay click
+settingsModal?.addEventListener('click', (e) => {
+  if (e.target === settingsModal) {
+    settingsModal.classList.remove('visible');
   }
 });
 
-// Live chat synchronization
-let syncInProgress = false;
-let lastHistoryMeta = { count: 0, latestTs: '' };
-let historySource = null;
+// Export chat history
+exportChatBtn?.addEventListener('click', async (e) => {
+  e.preventDefault();
+  try {
+    const resp = await fetch('/api/chat/history', { headers: authHeaders() });
+    if (!resp.ok) throw new Error('Failed to fetch history');
+    const data = await resp.json();
+    
+    // Format as readable text
+    let text = 'Companion AI - Chat History\n';
+    text += '=' .repeat(40) + '\n\n';
+    
+    (data.history || []).forEach(entry => {
+      if (entry.user) text += `You: ${entry.user}\n\n`;
+      if (entry.ai) text += `Companion: ${entry.ai}\n\n`;
+      text += '---\n\n';
+    });
+    
+    // Download as file
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `companion-chat-${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    settingsModal.classList.remove('visible');
+  } catch (err) {
+    console.error('Export failed:', err);
+    alert('Failed to export chat history');
+  }
+});
 
-function renderChatHistory(history) {
-  chatPane.querySelectorAll('.msg.user, .msg.ai').forEach(node => node.remove());
-  history.forEach(entry => {
-    if (entry.user) {
-      addMessage('user', entry.user, { timestamp: entry.timestamp, skipScroll: true });
-    }
-    if (entry.ai) {
-      addMessage('ai', entry.ai, { timestamp: entry.timestamp, skipScroll: true });
-    }
+// Clear memory (with confirmation)
+clearMemoryBtn?.addEventListener('click', async (e) => {
+  e.preventDefault();
+  if (!confirm('Are you sure you want to clear all memory? This cannot be undone.')) return;
+  
+  try {
+    // Reset conversation history
+    await fetch('/api/debug/reset', { method: 'POST', headers: authHeaders() });
+    
+    // Clear UI
+    chatPane.innerHTML = '';
+    const welcome = document.createElement('div');
+    welcome.className = 'welcome-screen';
+    welcome.id = 'welcomeScreen';
+    welcome.innerHTML = `
+      <div class="welcome-icon">✨</div>
+      <h1>Fresh start</h1>
+      <p>Memory cleared - let's begin again!</p>
+      <div class="suggestion-chips">
+        <button class="chip" data-prompt="Tell me about yourself">Hi, who are you?</button>
+        <button class="chip" data-prompt="What can you help me with?">What can you do?</button>
+      </div>
+    `;
+    chatPane.appendChild(welcome);
+    attachChipListeners();
+    
+    lastHistoryLength = 0;
+    settingsModal.classList.remove('visible');
+    loadMemory(); // Refresh memory panel
+  } catch (err) {
+    console.error('Clear memory failed:', err);
+    alert('Failed to clear memory');
+  }
+});
+
+// Clear chat only (keep memory)
+clearChatBtn?.addEventListener('click', async (e) => {
+  e.preventDefault();
+  if (!confirm('Clear chat history? Your memory (facts about you) will be preserved.')) return;
+  
+  try {
+    // Just reset conversation, not memory
+    await fetch('/api/debug/reset', { method: 'POST', headers: authHeaders() });
+    
+    // Clear UI
+    chatPane.innerHTML = '';
+    const welcome = document.createElement('div');
+    welcome.className = 'welcome-screen';
+    welcome.id = 'welcomeScreen';
+    welcome.innerHTML = `
+      <div class="welcome-icon">✨</div>
+      <h1>Chat cleared</h1>
+      <p>Your memories are still intact!</p>
+      <div class="suggestion-chips">
+        <button class="chip" data-prompt="What do you know about me?">What do you remember?</button>
+        <button class="chip" data-prompt="Let's talk about something new">Start fresh topic</button>
+      </div>
+    `;
+    chatPane.appendChild(welcome);
+    attachChipListeners();
+    
+    lastHistoryLength = 0;
+    settingsModal.classList.remove('visible');
+  } catch (err) {
+    console.error('Clear chat failed:', err);
+    alert('Failed to clear chat');
+  }
+});
+
+// ============================================
+// Suggestion Chips
+// ============================================
+function attachChipListeners() {
+  document.querySelectorAll('.chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const prompt = chip.dataset.prompt;
+      if (prompt) {
+        userInput.value = prompt;
+        updateSendButton();
+        userInput.focus();
+      }
+    });
   });
-  scrollToBottom();
 }
 
-async function syncChatHistory(options = {}) {
-  if (syncInProgress) return;
-  syncInProgress = true;
-  const { force = false, payload = null } = options;
-  try {
-    let data = payload;
-    if (!data) {
-      const resp = await fetch('/api/chat/history');
-      if (!resp.ok) return;
-      data = await resp.json();
-    }
-    const history = Array.isArray(data.history) ? data.history : [];
-    const count = typeof data.count === 'number' ? data.count : history.length;
-    const latestTs = history.length ? (history[history.length - 1].timestamp || '') : '';
-    const unchanged = !force &&
-      count === lastHistoryMeta.count &&
-      latestTs === lastHistoryMeta.latestTs;
-    if (unchanged) return;
+// ============================================
+// Tabs
+// ============================================
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('pane-' + tab.dataset.tab)?.classList.add('active');
+  });
+});
 
-    renderChatHistory(history);
-    lastHistoryMeta = { count, latestTs };
+// ============================================
+// Memory Loading
+// ============================================
+async function loadMemory(retry = false) {
+  try {
+    const r = await fetch('/api/memory?detailed=1', { headers: authHeaders() });
+    if (r.status === 401 && !retry) {
+      const tok = prompt('API token required:');
+      if (tok) { setApiToken(tok); return loadMemory(true); }
+      return;
+    }
+    
+    const data = await r.json();
+    if (data.error) return;
+    
+    const detailed = data.profile_detailed || [];
+    const insights = data.insights || [];
+    const summaries = data.summaries || [];
+    
+    // Update stats
+    document.getElementById('memFactCount').textContent = detailed.length;
+    document.getElementById('memInsightCount').textContent = insights.length;
+    document.getElementById('memSummaryCount').textContent = summaries.length;
+    
+    // Profile facts as cards with delete capability
+    const profileDiv = document.getElementById('profileList');
+    if (profileDiv) {
+      profileDiv.innerHTML = '';
+      detailed.slice(0, 10).forEach(row => {
+        const card = document.createElement('div');
+        card.className = 'fact-card';
+        card.dataset.key = row.key;
+        card.title = 'Click to delete this fact';
+        
+        const confLabel = row.confidence_label || (row.confidence >= 0.8 ? 'high' : row.confidence >= 0.5 ? 'medium' : 'low');
+        
+        card.innerHTML = `
+          <div class="fact-key">${row.key.replace(/_/g, ' ')}</div>
+          <div class="fact-value">${row.value}</div>
+          <div class="fact-meta">
+            <span class="fact-confidence ${confLabel}">${confLabel}</span>
+            ${row.reaffirmations ? `<span>×${row.reaffirmations} confirmed</span>` : ''}
+          </div>
+        `;
+        
+        card.addEventListener('click', () => deleteFact(row.key, card));
+        profileDiv.appendChild(card);
+      });
+      if (!detailed.length) {
+        profileDiv.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 12px;">No facts stored yet. Chat with me so I can learn about you!</div>';
+      }
+    }
+    
+    // Insights as cards
+    const insightDiv = document.getElementById('insightList');
+    if (insightDiv) {
+      insightDiv.innerHTML = '';
+      insights.slice(0, 5).forEach(s => {
+        const card = document.createElement('div');
+        card.className = 'insight-card';
+        card.textContent = s.insight_text;
+        insightDiv.appendChild(card);
+      });
+      if (!insights.length) {
+        insightDiv.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 12px;">No insights yet</div>';
+      }
+    }
   } catch (e) {
-    console.error('Chat sync error:', e);
-  } finally {
-    syncInProgress = false;
+    console.error('Failed to load memory:', e);
   }
 }
 
-function startHistoryStream() {
-  if (!window.EventSource) return;
-  if (historySource) historySource.close();
-  historySource = new EventSource('/api/chat/stream');
-  historySource.onmessage = event => {
-    try {
-      const data = JSON.parse(event.data);
-      syncChatHistory({ force: true, payload: data });
-    } catch (err) {
-      console.error('History stream parse error', err);
+// Delete a single fact
+async function deleteFact(key, cardElement) {
+  if (!confirm(`Delete "${key.replace(/_/g, ' ')}"?`)) return;
+  
+  try {
+    const r = await fetch(`/api/memory/fact/${encodeURIComponent(key)}`, {
+      method: 'DELETE',
+      headers: authHeaders()
+    });
+    
+    if (r.ok) {
+      cardElement.style.opacity = '0';
+      cardElement.style.transform = 'translateX(-20px)';
+      setTimeout(() => {
+        cardElement.remove();
+        // Update count
+        const countEl = document.getElementById('memFactCount');
+        if (countEl) countEl.textContent = parseInt(countEl.textContent) - 1;
+      }, 200);
+    } else {
+      alert('Failed to delete fact');
     }
-  };
-  historySource.onerror = () => {
-    historySource.close();
-    setTimeout(startHistoryStream, 3000);
-  };
+  } catch (e) {
+    console.error('Delete fact failed:', e);
+    alert('Failed to delete fact');
+  }
 }
 
-syncChatHistory({ force: true });
-startHistoryStream();
+document.getElementById('refreshMemoryBtn')?.addEventListener('click', loadMemory);
 
-// Initial load
-loadMemory();
-loadHealth();
-loadModelsPanel();
-loadRecentRouting();
-// Auto-refresh routing panel on health refresh
-healthBtn.addEventListener('click', ()=>{ loadModelsPanel(); loadRecentRouting(); });
+// ============================================
+// Models Panel
+// ============================================
+async function loadModelsPanel(retry = false) {
+  const modelCards = document.getElementById('modelCards');
+  const featureFlags = document.getElementById('featureFlags');
+  if (!modelCards) return;
+  
+  try {
+    const r = await fetch('/api/models', { headers: authHeaders() });
+    if (r.status === 401 && !retry) {
+      const tok = prompt('API token required:');
+      if (tok) { setApiToken(tok); return loadModelsPanel(true); }
+      return;
+    }
+    
+    const d = await r.json();
+    if (d.error) return;
+    
+    // Model cards
+    modelCards.innerHTML = '';
+    if (d.models) {
+      const roles = [
+        ['Primary', d.models.PRIMARY_MODEL],
+        ['Tools', d.models.TOOLS_MODEL],
+        ['Vision', d.models.VISION_MODEL],
+        ['Compound', d.models.COMPOUND_MODEL]
+      ];
+      roles.forEach(([role, model]) => {
+        const shortName = model?.split('/').pop() || 'N/A';
+        const card = document.createElement('div');
+        card.className = 'model-card';
+        card.innerHTML = `
+          <span class="model-role">${role}</span>
+          <span class="model-name" title="${model}">${shortName}</span>
+        `;
+        modelCards.appendChild(card);
+      });
+    }
+    
+    // Feature flags
+    if (featureFlags) {
+      featureFlags.innerHTML = '';
+      Object.entries(d.flags || {}).forEach(([k, v]) => {
+        const flag = document.createElement('div');
+        flag.className = 'feature-flag';
+        flag.innerHTML = `
+          <span class="flag-dot ${v ? 'on' : 'off'}"></span>
+          <span class="flag-name">${k.replace('ENABLE_', '')}</span>
+        `;
+        featureFlags.appendChild(flag);
+      });
+    }
+  } catch (e) {
+    console.error('Failed to load models:', e);
+  }
+}
 
+// ============================================
+// Metrics
+// ============================================
+async function loadMetrics(retry = false) {
+  try {
+    const r = await fetch('/api/health', { headers: authHeaders() });
+    if (r.status === 401 && !retry) {
+      const tok = prompt('API token required:');
+      if (tok) { setApiToken(tok); return loadMetrics(true); }
+      return;
+    }
+    
+    const data = await r.json();
+    
+    // Update summary stats
+    const interactions = data.metrics?.total_interactions || 0;
+    const toolCalls = data.metrics?.tools?.total_invocations || 0;
+    
+    const interactionsEl = document.getElementById('metricInteractions');
+    const latencyEl = document.getElementById('metricAvgLatency');
+    const toolsEl = document.getElementById('metricToolCalls');
+    
+    if (interactionsEl) interactionsEl.textContent = interactions;
+    if (toolsEl) toolsEl.textContent = toolCalls;
+    
+    // Calculate overall average latency
+    let totalLatency = 0;
+    let modelCount = 0;
+    const models = data.metrics?.models || {};
+    
+    Object.values(models).forEach(info => {
+      if (info.avg_latency_ms) {
+        totalLatency += info.avg_latency_ms;
+        modelCount++;
+      }
+    });
+    
+    const avgLatency = modelCount > 0 ? Math.round(totalLatency / modelCount) : 0;
+    if (latencyEl) latencyEl.textContent = avgLatency + 'ms';
+    
+    // Build latency bars
+    const latencyBars = document.getElementById('latencyBars');
+    if (latencyBars) {
+      const maxLatency = Math.max(...Object.values(models).map(m => m.avg_latency_ms || 0), 1);
+      
+      let barsHtml = '';
+      Object.entries(models).forEach(([name, info]) => {
+        const shortName = name.split('/').pop().substring(0, 12);
+        const pct = Math.round((info.avg_latency_ms || 0) / maxLatency * 100);
+        const color = pct > 66 ? 'var(--danger)' : pct > 33 ? 'var(--warning)' : 'var(--success)';
+        
+        barsHtml += `
+          <div class="latency-row">
+            <span class="latency-name">${shortName}</span>
+            <div class="latency-bar-bg">
+              <div class="latency-bar-fill" style="width: ${pct}%; background: ${color}"></div>
+            </div>
+            <span class="latency-value">${info.avg_latency_ms || 0}ms</span>
+          </div>`;
+      });
+      
+      if (barsHtml === '') {
+        barsHtml = '<div class="empty-state">No latency data yet</div>';
+      }
+      
+      latencyBars.innerHTML = barsHtml;
+    }
+  } catch (e) {
+    console.error('Failed to load metrics:', e);
+  }
+}
+
+refreshMetricsBtn?.addEventListener('click', loadMetrics);
+
+// ============================================
+// Token Stats
+// ============================================
+async function loadTokenStats(retry = false) {
+  try {
+    const r = await fetch('/api/tokens', { headers: authHeaders() });
+    if (r.status === 401 && !retry) {
+      const tok = prompt('API token required:');
+      if (tok) { setApiToken(tok); return loadTokenStats(true); }
+      return;
+    }
+    
+    const data = await r.json();
+    
+    // Update totals
+    const total = (data.total_input || 0) + (data.total_output || 0);
+    document.getElementById('tokenTotal').textContent = total.toLocaleString();
+    document.getElementById('tokenInput').textContent = (data.total_input || 0).toLocaleString();
+    document.getElementById('tokenOutput').textContent = (data.total_output || 0).toLocaleString();
+    document.getElementById('tokenRequests').textContent = data.requests || 0;
+    
+    // Update by-model breakdown
+    const byModelDiv = document.getElementById('tokenByModel');
+    if (byModelDiv && data.by_model) {
+      byModelDiv.innerHTML = '';
+      Object.entries(data.by_model).forEach(([model, stats]) => {
+        const shortName = model.split('/').pop().substring(0, 20);
+        const modelTotal = (stats.input || 0) + (stats.output || 0);
+        const row = document.createElement('div');
+        row.className = 'model-token-row';
+        row.innerHTML = `
+          <span class="model-name" title="${model}">${shortName}</span>
+          <span class="model-tokens">${modelTotal.toLocaleString()}</span>
+          <span class="model-count">${stats.count} calls</span>
+        `;
+        byModelDiv.appendChild(row);
+      });
+      
+      if (Object.keys(data.by_model).length === 0) {
+        byModelDiv.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">No requests yet</div>';
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load token stats:', e);
+  }
+}
+
+document.getElementById('refreshTokensBtn')?.addEventListener('click', loadTokenStats);
+
+document.getElementById('resetTokensBtn')?.addEventListener('click', async () => {
+  try {
+    await fetch('/api/tokens/reset', { method: 'POST', headers: authHeaders() });
+    loadTokenStats();
+  } catch (e) {
+    console.error('Failed to reset tokens:', e);
+  }
+});
+
+// ============================================
+// Settings
+// ============================================
 async function loadSettings() {
+  const ttsToggle = document.getElementById('ttsToggle');
   const voiceSelect = document.getElementById('voiceSelect');
   const rateSelect = document.getElementById('rateSelect');
-  const pitchSelect = document.getElementById('pitchSelect');
+  const visionToggle = document.getElementById('visionToggle');
+  const visionStatus = document.getElementById('visionStatus');
   
-  if (!voiceSelect || !rateSelect || !pitchSelect) return;
-
+  // TTS toggle
+  if (ttsToggle) {
+    ttsToggle.checked = ttsEnabled;
+    ttsToggle.addEventListener('change', () => {
+      ttsEnabled = ttsToggle.checked;
+      localStorage.setItem('companion_tts_enabled', ttsEnabled);
+    });
+  }
+  
   try {
-    // Fetch voices
+    // Load voices
     const vResp = await fetch('/api/tts/voices', { headers: authHeaders() });
     const vData = await vResp.json();
     
-    if (vData.voices) {
+    if (vData.voices && voiceSelect) {
       voiceSelect.innerHTML = '';
       vData.voices.forEach(v => {
         const opt = document.createElement('option');
         opt.value = v;
-        // Clean up name for display
-        let label = v.replace('en-US-', '').replace('Neural', '');
-        if (label.includes(':')) label = label.split(':')[0] + ' (HD)';
-        opt.textContent = label;
+        opt.textContent = v.replace('en-US-', '').replace('Neural', '');
         voiceSelect.appendChild(opt);
       });
     }
-
-    // Fetch current config
+    
+    // Load current config
     const cResp = await fetch('/api/tts/config', { headers: authHeaders() });
     const cData = await cResp.json();
     
-    if (cData.voice) voiceSelect.value = cData.voice;
-    if (cData.rate) rateSelect.value = cData.rate;
-    if (cData.pitch) pitchSelect.value = cData.pitch;
-
-    // Add listeners
-    voiceSelect.addEventListener('change', async () => {
+    if (cData.voice && voiceSelect) voiceSelect.value = cData.voice;
+    if (cData.rate && rateSelect) rateSelect.value = cData.rate;
+    
+    // Voice change handler
+    voiceSelect?.addEventListener('change', async () => {
       await fetch('/api/tts/config', {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({ voice: voiceSelect.value })
       });
     });
-
-    rateSelect.addEventListener('change', async () => {
+    
+    rateSelect?.addEventListener('change', async () => {
       await fetch('/api/tts/config', {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({ rate: rateSelect.value })
       });
     });
-
-    pitchSelect.addEventListener('change', async () => {
-      await fetch('/api/tts/config', {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ pitch: pitchSelect.value })
-      });
-    });
-
-    // Vision Toggle
-    const visionToggle = document.getElementById('visionToggle');
-    const visionStatus = document.getElementById('visionStatus');
     
+    // Vision toggle
     if (visionToggle) {
-      // Initial check
-      const vResp = await fetch('/api/vision/status', { headers: authHeaders() });
-      const vData = await vResp.json();
-      visionToggle.checked = vData.enabled;
-      visionStatus.textContent = vData.enabled ? 'Status: Watching (Active)' : 'Status: Off';
+      const visResp = await fetch('/api/vision/status', { headers: authHeaders() });
+      const visData = await visResp.json();
+      visionToggle.checked = visData.enabled;
+      if (visionStatus) {
+        visionStatus.textContent = visData.enabled ? 'Status: Active' : 'Status: Off';
+      }
       
       visionToggle.addEventListener('change', async () => {
-        const resp = await fetch('/api/vision/toggle', { 
-          method: 'POST', 
-          headers: authHeaders() 
+        const resp = await fetch('/api/vision/toggle', {
+          method: 'POST',
+          headers: authHeaders()
         });
         const data = await resp.json();
-        visionStatus.textContent = data.enabled ? 'Status: Watching (Active)' : 'Status: Off';
+        if (visionStatus) {
+          visionStatus.textContent = data.enabled ? 'Status: Active' : 'Status: Off';
+        }
       });
     }
-
   } catch (e) {
-    console.error('Error loading settings:', e);
+    console.error('Failed to load settings:', e);
   }
 }
 
-loadSettings();
+// ============================================
+// Chat History Sync & SSE (Server-Sent Events)
+// ============================================
+function renderHistory(history) {
+  if (!history || history.length === 0) return;
+  
+  // Don't overwrite while streaming - let the typewriter finish
+  if (isStreaming) return;
+  
+  const totalMessages = history.reduce((n, e) => n + (e.user ? 1 : 0) + (e.ai ? 1 : 0), 0);
+  
+  // Skip if no change
+  if (totalMessages === lastHistoryLength) return;
+  lastHistoryLength = totalMessages;
+  
+  // Remove welcome screen
+  const welcome = document.getElementById('welcomeScreen');
+  if (welcome && welcome.parentNode) {
+    welcome.remove();
+  }
+  
+  // Remove loading indicator if present
+  const loading = document.getElementById('loading-message');
+  if (loading) loading.remove();
+  
+  // Clear and re-render
+  chatPane.querySelectorAll('.message-wrapper').forEach(el => el.remove());
+  
+  history.forEach(entry => {
+    if (entry.user) addMessage('user', entry.user);
+    if (entry.ai) addMessage('ai', entry.ai);
+  });
+}
+
+async function syncChatHistory() {
+  try {
+    const resp = await fetch('/api/chat/history', { headers: authHeaders() });
+    if (!resp.ok) return;
+    
+    const data = await resp.json();
+    renderHistory(data.history || []);
+  } catch (e) {
+    console.error('Failed to sync history:', e);
+  }
+}
+
+function startSSE() {
+  if (eventSource) return;
+  
+  eventSource = new EventSource('/api/chat/stream');
+  
+  eventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      renderHistory(data.history || []);
+    } catch (e) {
+      console.error('SSE parse error:', e);
+    }
+  };
+  
+  eventSource.onerror = (e) => {
+    console.warn('SSE connection error, will auto-reconnect');
+    // EventSource auto-reconnects, no action needed
+  };
+}
+
+function stopSSE() {
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
+  }
+}
+
+// ============================================
+// Event Listeners
+// ============================================
+sendBtn.addEventListener('click', sendMessage);
+
+userInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+userInput.addEventListener('input', () => {
+  resizeTextarea();
+  updateSendButton();
+});
+
+// ============================================
+// Initialize
+// ============================================
+document.addEventListener('DOMContentLoaded', () => {
+  attachChipListeners();
+  lastHistoryLength = -1; // Force initial sync
+  syncChatHistory();
+  loadMemory();
+  loadModelsPanel();
+  loadMetrics();
+  loadTokenStats();
+  loadSettings();
+  updateSendButton();
+  
+  // Use SSE for real-time updates (only pushes when messages change)
+  startSSE();
+});
 

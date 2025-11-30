@@ -13,25 +13,27 @@ REQUIRED = [
     ("GROQ_API_KEY", "Primary Groq key for model inference"),
 ]
 OPTIONAL = [
+    ("GROQ_VISION_API_KEY", "Dedicated Groq key for vision (Maverick) - falls back to GROQ_API_KEY"),
     ("GROQ_MEMORY_API_KEY", "Secondary Groq key (falls back to GROQ_API_KEY)"),
     ("API_AUTH_TOKEN", "Protects write endpoints (fact approval, memory clear)"),
     ("AZURE_SPEECH_KEY", "Azure TTS key"),
     ("AZURE_SPEECH_REGION", "Azure region for TTS"),
+    ("SERPER_API_KEY", "Serper API key for custom web search"),
 ]
 FLAGS = [
-    "ENABLE_ENSEMBLE","ENABLE_EXPERIMENTAL_MODELS","ENABLE_COMPOUND_MODELS",
-    "ENABLE_FACT_APPROVAL","FACT_AUTO_APPROVE","VERIFY_FACTS_SECOND_PASS",
-    "ENABLE_PROMPT_CACHING"
-]
-ENSEMBLE = [
-    "ENSEMBLE_MODE","ENSEMBLE_CANDIDATES","ENSEMBLE_REFINE_EXPANSION","ENSEMBLE_REFINE_HARD_CAP"
+    "ENABLE_KNOWLEDGE_GRAPH",
+    "ENABLE_FACT_EXTRACTION",
+    "ENABLE_TOOL_CALLING",
+    "ENABLE_VISION",
+    "ENABLE_COMPOUND",
+    "ENABLE_AUTO_TOOLS",
 ]
 
 def present(name: str) -> bool:
     return bool(os.getenv(name))
 
 def main():
-    report = {"required": {}, "optional": {}, "flags": {}, "ensemble": {}}
+    report = {"required": {}, "optional": {}, "flags": {}}
     missing_required = []
     for k, desc in REQUIRED:
         val = os.getenv(k)
@@ -44,10 +46,15 @@ def main():
     for f in FLAGS:
         v = os.getenv(f)
         report['flags'][f] = {"set": v is not None, "value": v}
-    for e in ENSEMBLE:
-        v = os.getenv(e)
-        report['ensemble'][e] = {"set": v is not None, "value": v}
     print("=== Companion AI Environment Check ===")
+    print("=== Simplified 4-Model Architecture ===")
+    print()
+    print("Models:")
+    print("  - PRIMARY (120B): openai/gpt-oss-120b")
+    print("  - TOOLS (Scout): meta-llama/llama-4-scout-17b-16e-instruct")
+    print("  - VISION (Maverick): meta-llama/llama-4-maverick-17b-128e-instruct")
+    print("  - COMPOUND: compound-beta")
+    print()
     if missing_required:
         print("Missing required variables:", ", ".join(missing_required))
     else:
@@ -57,8 +64,8 @@ def main():
     print()
     print(textwrap.dedent("""
     Notes:
-      - Use .env (loaded via python-dotenv) OR system environment; .env.example just documents fields.
-      - If you already centrally manage env vars (e.g., shell profile, CI, secrets manager) you can delete .env.example if undesired.
+      - Use .env (loaded via python-dotenv) OR system environment
+      - GROQ_VISION_API_KEY is optional - if not set, uses GROQ_API_KEY for vision
       - This script is for quick sanity before running `run_companion.py`.
     """))
 

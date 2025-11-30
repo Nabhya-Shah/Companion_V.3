@@ -5,15 +5,23 @@ __pycache__/
 *.log
 *.sqlite
 *.db*
-*.env
-.env
-.env.local
 
-# Runtime data & logs
-data/chat_logs/
-data/logs/
-data/eval_reports/
-data/companion_ai.db
+# Environment files - NEVER commit these
+.env
+.env.*
+*.env
+.env.local
+.env.production
+.env.development
+
+# Runtime data & logs - may contain personal conversations
+data/
+!data/.gitkeep
+
+# Memory exports - contain personal data
+memory_export_*.txt
+memory_export_*.json
+*.memory_export
 
 venv/
 .venv/

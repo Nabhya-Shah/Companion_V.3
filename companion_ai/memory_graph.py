@@ -539,7 +539,7 @@ Return JSON only:"""
 
     try:
         response = groq_memory_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             max_tokens=500
