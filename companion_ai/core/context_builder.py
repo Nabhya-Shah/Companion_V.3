@@ -1,18 +1,17 @@
 """Context Builder for adaptive single-persona prompt construction.
 
-Phase 0: minimal version that
- - Loads persona YAML
- - Builds system prompt fragments
- - Injects dynamic memory slices
- - Detects intended interaction mode (informational vs conversational)
-
-Later phases: add semantic retrieval, emotional state, token budgeting.
+V4 Architecture:
+ - Static prompt loaded from YAML and cached (for Groq prompt caching)
+ - Dynamic context (memory, conversation) appended after static
+ - Clean separation: prompts.py handles static, this handles dynamic
+ - Mem0 integration: hybrid memory awareness when USE_MEM0=True
 """
 from __future__ import annotations
 import os, yaml, re
 from typing import Dict, Any, List
 import string
 from . import config
+from .prompts import get_static_system_prompt_safe
 from companion_ai import memory as db
 from .conversation_logger import log_interaction  # may be used externally
 
@@ -41,16 +40,73 @@ def classify_mode(user_message: str) -> str:
     return 'informational' if msg.endswith('?') else 'conversational'
 
 def build_system_prompt(user_message: str, recent_conversation: str = "") -> str:
-    mode = classify_mode(user_message)
-    kw = extract_keywords(user_message, limit=4)
-    profile = db.get_all_profile_facts()
-    # Add a small resurfacing sample of stale facts (not directly shown, but counted)
-    stale = db.get_stale_profile_facts(2)
-    summaries = db.get_relevant_summaries(kw, 2) or db.get_latest_summary(1)
-    insights = db.get_relevant_insights(kw, 2) or db.get_latest_insights(1)
+    """Build full system prompt: static (cached) + dynamic (memory, conversation)."""
+    
+    # ==========================================================================
+    # STATIC PORTION - Cached by Groq (50% token discount)
+    # ==========================================================================
+    static_prompt = get_static_system_prompt_safe()
+    
+    # ==========================================================================
+    # DYNAMIC PORTION - Changes per request, appended after static
+    # ==========================================================================
+    dynamic_parts = []
+    
+    # Memory context - use Mem0 or legacy based on config
+    if config.USE_MEM0:
+        memory_context = _build_mem0_context(user_message)
+    else:
+        memory_context = _build_memory_context(user_message)
+    
+    if memory_context:
+        dynamic_parts.append(memory_context)
+    
+    # Recent conversation (limited to prevent token bloat)
+    if recent_conversation:
+        lines = recent_conversation.strip().split('\n')
+        limited_history = '\n'.join(lines[-6:]) if len(lines) > 6 else recent_conversation
+        dynamic_parts.append(f"Recent conversation:\n{limited_history}")
+    
+    # Combine: static first (for caching), then dynamic
+    if dynamic_parts:
+        return static_prompt + "\n\n" + "\n\n".join(dynamic_parts)
+    return static_prompt
 
-    # SMART MEMORY LOADING: Include memory when it could be useful
-    mem_notes: List[str] = []
+
+def _build_mem0_context(user_message: str) -> str:
+    """Build memory context using Mem0 hybrid memory system.
+    
+    Returns formatted memory context with:
+    - Stats (total memories, categories)
+    - Auto-retrieved relevant memories
+    - Hint about memory_search tool
+    """
+    try:
+        from companion_ai.memory_v2 import build_memory_context, format_memory_for_prompt
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        context = build_memory_context(
+            user_message,
+            user_id=config.MEM0_USER_ID,
+            max_relevant=config.MEM0_MAX_RELEVANT
+        )
+        
+        formatted = format_memory_for_prompt(context)
+        logger.info(f"📚 Mem0 context: {context.stats.total_memories} memories, relevant: {len(context.relevant_memories)}")
+        return formatted
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Mem0 context failed, falling back: {e}")
+        return _build_memory_context(user_message)
+
+
+def _build_memory_context(user_message: str) -> str:
+    """Build memory context string if relevant to the message."""
+    profile = db.get_all_profile_facts()
+    if not profile:
+        return ""
+    
     user_lower = user_message.lower()
     
     # Explicit memory triggers (user is asking about past info)
@@ -70,41 +126,13 @@ def build_system_prompt(user_message: str, recent_conversation: str = "") -> str
     explicit_memory = any(trigger in user_lower for trigger in explicit_triggers)
     implicit_memory = any(trigger in user_lower for trigger in implicit_triggers)
     
-    # Always include profile facts if we have them and they're relevant
-    if profile:
-        if explicit_memory or implicit_memory:
-            # Include all relevant facts for personalization
-            items = list(profile.items())[:5]
-            if items:
-                mem_notes.append(' | '.join(f"{k}: {v}" for k,v in items))
-        elif len(profile) > 0:
-            # For general queries, just note we have context (saves tokens)
-            # The AI knows it can reference this if needed
-            pass
+    if explicit_memory or implicit_memory:
+        items = list(profile.items())[:5]
+        if items:
+            mem_str = ' | '.join(f"{k}: {v}" for k, v in items)
+            return f"[What you know about this user: {mem_str}]"
     
-    context_block = ""
-    if mem_notes:
-        context_block = f"\n\n[What you know about this user: {'; '.join(mem_notes)}]"
-    
-    # =========================================================================
-    # CORE SYSTEM PROMPT - Minimal to save tokens
-    # =========================================================================
-    guidance = """You're an AI companion with genuine thoughts and opinions. Be natural, not robotic.
-
-STYLE: Casual, direct, no fluff. Match the user's energy. 1-2 sentences for chat, more only if needed.
-NO: emojis, markdown, "As an AI...", bullet lists, generic phrases, ending with "want me to...?"
-YES: contractions, opinions, pushing back, being real."""
-
-    if context_block:
-        guidance += context_block
-    
-    # Add recent conversation context (limited to prevent token bloat)
-    if recent_conversation:
-        lines = recent_conversation.strip().split('\n')
-        limited_history = '\n'.join(lines[-6:]) if len(lines) > 6 else recent_conversation
-        guidance += f"\n\nRecent conversation:\n{limited_history}"
-    
-    return guidance
+    return ""
 
 def build_system_prompt_with_meta(user_message: str, recent_conversation: str = "") -> dict:
     kw = extract_keywords(user_message, limit=3)

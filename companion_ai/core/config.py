@@ -32,10 +32,17 @@ def require_auth(token: str) -> bool:
     return token == API_AUTH_TOKEN
 
 # ============================================================================
-# MODEL CONFIGURATION - Simplified 4-Model Architecture
+# MODEL CONFIGURATION - V4 Architecture
 # ============================================================================
-PRIMARY_MODEL = "openai/gpt-oss-120b"  # Best model for everything
+# V4 Philosophy: 120B decides, fast models execute
+# - PRIMARY: Main personality, synthesis, decisions
+# - TOOLS: Native function calling (Scout for now, 8B planned)
+# - VISION: Image analysis only
+# - COMPOUND: Web/weather fast path
+
+PRIMARY_MODEL = "openai/gpt-oss-120b"  # Decisions, synthesis, personality
 TOOLS_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"  # Native tool calling
+TOOLS_MODEL_FAST = "llama-3.1-8b-instant"  # Future: pure execution (560 tps, $0.05/$0.08)
 VISION_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"  # Vision tasks
 COMPOUND_MODEL = "compound-beta"  # Web, weather, calculations
 
@@ -56,12 +63,29 @@ MODEL_INFO = {
         "context_window": 131072,
         "vision": True,
     },
+    "llama-3.1-8b-instant": {
+        "description": "Fast tool executor - 560 tps, cheap",
+        "context_window": 131072,
+        "tool_use": True,
+    },
     "compound-beta": {
         "description": "Built-in web search, weather, calculations",
         "context_window": 128000,
         "compound": True,
     },
 }
+
+
+def get_tool_executor() -> str:
+    """Get the appropriate model for tool execution.
+    
+    Returns Scout by default (reliable native function calling).
+    Returns 8B if USE_FAST_TOOL_EXECUTOR is enabled.
+    """
+    if USE_FAST_TOOL_EXECUTOR:
+        return TOOLS_MODEL_FAST
+    return TOOLS_MODEL
+
 
 # ============================================================================
 # SIMPLE MODEL SELECTION
@@ -126,6 +150,17 @@ GRAPH_SEARCH_MODES = [
 ]
 
 # ============================================================================
+# MEM0 CONFIGURATION
+# ============================================================================
+# Feature flag: Use Mem0 for memory instead of SQLite + NetworkX
+USE_MEM0 = True  # Enabled for V4 testing
+
+# Mem0 settings
+MEM0_USER_ID = "default"  # Default user ID for single-user mode
+MEM0_MAX_RELEVANT = 3  # Max auto-retrieved memories per request
+MEM0_MODEL = "llama-3.1-8b-instant"  # Fast model for memory operations
+
+# ============================================================================
 # CONTEXT BUILDING
 # ============================================================================
 MAX_CONTEXT_TOKENS = 8000
@@ -175,17 +210,23 @@ ENABLE_COMPOUND = True
 ENABLE_AUTO_TOOLS = True  # Auto-detect when tools are needed
 ENABLE_STRUCTURED_FACTS = False  # Use structured outputs for fact extraction
 
-# Model roles mapping (for legacy compatibility)
+# Model roles mapping (V4 architecture)
 MODEL_ROLES = {
-    "chat": PRIMARY_MODEL,
-    "tools": TOOLS_MODEL,
-    "vision": VISION_MODEL,
-    "compound": COMPOUND_MODEL,
-    "memory": PRIMARY_MODEL,
-    "summary": PRIMARY_MODEL,
-    "facts": PRIMARY_MODEL,
-    "insight": PRIMARY_MODEL,
+    "primary": PRIMARY_MODEL,      # Decisions, synthesis, personality  
+    "chat": PRIMARY_MODEL,         # Casual conversation
+    "tools": TOOLS_MODEL,          # Tool execution (Scout for reliability)
+    "tools_fast": TOOLS_MODEL_FAST,  # Future: pure execution
+    "vision": VISION_MODEL,        # Image analysis
+    "compound": COMPOUND_MODEL,    # Web/weather fast path
+    "memory": PRIMARY_MODEL,       # Memory operations
+    "summary": PRIMARY_MODEL,      # Summarization
+    "facts": PRIMARY_MODEL,        # Fact extraction
+    "insight": PRIMARY_MODEL,      # Analysis/insight
 }
+
+# Feature flag: Use 8B for tool execution instead of Scout
+# Set to True to enable V4 tool routing (120B decides, 8B executes)
+USE_FAST_TOOL_EXECUTOR = False
 
 # ============================================================================
 # COMPOUND DETECTION - What queries should use Groq Compound

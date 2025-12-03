@@ -93,15 +93,16 @@ if GROQ_MEMORY_API_KEY:
         groq_memory_client = None
 
 # --- Core Generation Functions ---
-def build_aether_prompt(profile_str: str = "") -> str:
-    """Build Aether persona system prompt - minimal version to save tokens"""
-    base = """You're an AI companion with genuine thoughts and opinions. Be natural, not robotic.
+# NOTE: Prompt building now handled by companion_ai/core/prompts.py and context_builder.py
+# These legacy functions kept for backward compatibility but should be phased out
 
-STYLE: Casual, direct, no fluff. Match the user's energy. 1-2 sentences for chat, more only if needed.
-NO: emojis, markdown, "As an AI...", bullet lists, generic phrases, ending with "want me to...?"
-YES: contractions, opinions, pushing back, being real."""
+def build_aether_prompt(profile_str: str = "") -> str:
+    """DEPRECATED: Use get_static_system_prompt_safe() from prompts.py instead.
+    Kept for backward compatibility."""
+    from companion_ai.core.prompts import get_static_system_prompt_safe
+    base = get_static_system_prompt_safe()
     
-    # Only add profile context if provided (saves ~50-100 tokens when not needed)
+    # Only add profile context if provided
     if profile_str:
         base += f"\n\n[What you know about this user: {profile_str}]"
     
@@ -123,13 +124,15 @@ def should_include_profile(user_message: str) -> bool:
     return any(t in msg for t in explicit + personal)
 
 def build_system_prompt(memory_context: dict, persona: str = "Aether", user_message: str = "") -> str:
-    """Build system prompt based on persona and memory context - token optimized"""
+    """DEPRECATED: Use context_builder.build_system_prompt() instead.
+    Kept for backward compatibility with non-Companion personas."""
+    from companion_ai.core.prompts import get_static_system_prompt_safe
     profile_str = ""
     
     # Only include profile if relevant to save tokens
     if memory_context.get("profile") and should_include_profile(user_message):
         profile_items = [f"{k}: {v}" for k, v in list(memory_context["profile"].items())[:5]]
-        profile_str = " | ".join(profile_items)  # Compact format
+        profile_str = " | ".join(profile_items)
     
     return build_aether_prompt(profile_str)
 
@@ -194,7 +197,7 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
             
             if first_output is None and should_check_tools:
                 # Use dedicated tool model with parallel tool support
-                tool_model = core_config.MODEL_ROLES.get('tools', chosen_model)
+                tool_model = core_config.get_tool_executor()
                 # IMPORTANT: Don't pass full conversation history to tool execution
                 # Only use it for final synthesis to save massive tokens
                 first_output, tool_used, tool_result = generate_model_response_with_tools(
@@ -279,7 +282,7 @@ def generate_response_streaming(user_message: str, memory_context: dict, model: 
         
         if should_check_tools:
             # Tool query - run tools first, then stream synthesis
-            tool_model = core_config.MODEL_ROLES.get('tools', chosen_model)
+            tool_model = core_config.get_tool_executor()
             result, tool_used, tool_result = generate_model_response_with_tools(
                 user_message, system_prompt, tool_model, conversation_model=chosen_model,
                 memory_context=memory_context
@@ -409,10 +412,23 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
             if all_tool_results:
                 tool_summary = "\n".join([f"{name}: {res[:300]}" for name, res in all_tool_results])
                 
+                # Check if Mem0 memories should be included
+                mem0_context = ""
+                if core_config.USE_MEM0:
+                    try:
+                        from companion_ai.memory_v2 import get_all_memories
+                        memories = get_all_memories(user_id=core_config.MEM0_USER_ID)
+                        if memories:
+                            mem_list = [m.get('memory', '') for m in memories[:5]]
+                            mem0_context = f"\n\n[Personal memories about this user: {', '.join(mem_list)}]"
+                            logger.info(f"📚 Added {len(mem_list)} Mem0 memories to synthesis")
+                    except Exception as e:
+                        logger.warning(f"Failed to get Mem0 memories for synthesis: {e}")
+                
                 # Use MINIMAL synthesis prompt - no need to rebuild full context
                 synthesis_prompt = (
                     f"User asked: {user_message}\n"
-                    f"Tool results:\n{tool_summary}\n\n"
+                    f"Tool results:\n{tool_summary}{mem0_context}\n\n"
                     "Give a natural 1-2 sentence response. Be concise."
                 )
                 

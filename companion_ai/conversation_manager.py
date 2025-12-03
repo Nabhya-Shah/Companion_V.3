@@ -2,6 +2,8 @@
 """
 Conversation Manager - Handles the new separated architecture
 Memory AI processes context BEFORE conversation AI responds
+
+V4: Mem0 integration for automatic memory storage from conversations.
 """
 
 import logging
@@ -11,6 +13,16 @@ from companion_ai import memory as db
 from companion_ai.llm_interface import generate_response, generate_response_streaming, groq_memory_client
 from companion_ai.memory_ai import analyze_conversation_importance, extract_smart_profile_facts, generate_smart_summary, generate_contextual_insight, categorize_insight
 from companion_ai.core import config as core_config
+
+# Import Mem0 if enabled
+if core_config.USE_MEM0:
+    try:
+        from companion_ai.memory_v2 import add_memory as mem0_add_memory
+        MEM0_AVAILABLE = True
+    except ImportError:
+        MEM0_AVAILABLE = False
+else:
+    MEM0_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +99,18 @@ class ConversationSession:
             "timestamp": db.datetime.now().isoformat()
         })
         
+        # Step 5: Add to Mem0 immediately (V4 hybrid memory)
+        if MEM0_AVAILABLE:
+            try:
+                messages = [
+                    {"role": "user", "content": user_message},
+                    {"role": "assistant", "content": ai_response}
+                ]
+                mem0_add_memory(messages, user_id=core_config.MEM0_USER_ID)
+                logger.info("📝 Mem0: Stored conversation exchange")
+            except Exception as e:
+                logger.warning(f"Mem0 storage failed: {e}")
+        
         logger.info(f"Conversation exchange stored. Session length: {len(self.conversation_history)}")
         
         return ai_response
@@ -120,6 +144,18 @@ class ConversationSession:
             "ai": full_response,
             "timestamp": db.datetime.now().isoformat()
         })
+        
+        # Step 5: Add to Mem0 immediately (V4 hybrid memory)
+        if MEM0_AVAILABLE:
+            try:
+                messages = [
+                    {"role": "user", "content": user_message},
+                    {"role": "assistant", "content": full_response}
+                ]
+                mem0_add_memory(messages, user_id=core_config.MEM0_USER_ID)
+                logger.info("📝 Mem0: Stored conversation exchange (streaming)")
+            except Exception as e:
+                logger.warning(f"Mem0 storage failed: {e}")
         
         logger.info(f"Streaming complete. Session length: {len(self.conversation_history)}")
     

@@ -27,7 +27,11 @@ mss>=9.0.1              # Fast screen capture
 
 # Knowledge Graph & Embeddings
 networkx>=3.1           # Graph operations for knowledge graph
-sentence-transformers>=2.2.0  # Lightweight embeddings (optional, for future semantic search)
+sentence-transformers>=2.2.0  # Embeddings for Mem0 and semantic search
+
+# Memory (V4)
+mem0ai>=0.1.0           # Mem0 memory framework
+qdrant-client>=1.0.0    # Vector store for Mem0
 
 # Development/Testing
 pytest>=7.0.0
