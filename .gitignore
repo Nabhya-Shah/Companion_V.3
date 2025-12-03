@@ -217,3 +217,7 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# Planning docs - internal only, may contain sensitive discussion
+V4_PLANNING.md
+*_PLANNING.md
