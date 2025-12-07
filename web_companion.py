@@ -20,6 +20,7 @@ from companion_ai.vision_manager import vision_manager
 from companion_ai.tools import run_tool, list_tools
 from companion_ai.core import metrics
 from companion_ai import memory as mem
+from companion_ai import memory_v2
 import json, glob
 
 # Configure logging with both console and file output
@@ -136,11 +137,16 @@ def chat():
         if ai_response.startswith("Chat:") or ai_response.startswith("CHAT:"):
             ai_response = ai_response[5:].strip()
         
+        # Get token usage for this specific request
+        from companion_ai.llm_interface import get_last_token_usage
+        token_usage = get_last_token_usage()
+        
         entry = {
             'user': user_message,
             'ai': ai_response,
             'timestamp': datetime.now().isoformat(),
-            'persona': persona
+            'persona': persona,
+            'tokens': token_usage
         }
         conversation_history.append(entry)
         global history_version
@@ -162,7 +168,12 @@ def chat():
                 tts_manager.speak_text(ai_response, blocking=False)
             except Exception as tts_error:
                 logger.warning(f"TTS error: {tts_error}")
-        return jsonify({'response': ai_response, 'timestamp': entry['timestamp']})
+        
+        return jsonify({
+            'response': ai_response, 
+            'timestamp': entry['timestamp'],
+            'tokens': token_usage
+        })
     except Exception as e:
         logger.error(f"Chat error: {e}")
         return jsonify({'error': str(e)}), 500
@@ -191,15 +202,20 @@ def chat_streaming():
                     # Send chunk as SSE event
                     yield f"data: {json.dumps({'chunk': chunk})}\n\n"
                 
+                # Get token usage
+                from companion_ai.llm_interface import get_last_token_usage
+                token_usage = get_last_token_usage()
+                
                 # Signal completion and update history
-                yield f"data: {json.dumps({'done': True, 'full_response': full_response})}\n\n"
+                yield f"data: {json.dumps({'done': True, 'full_response': full_response, 'tokens': token_usage})}\n\n"
                 
                 # Store in history
                 entry = {
                     'user': user_message,
                     'ai': full_response,
                     'timestamp': datetime.now().isoformat(),
-                    'persona': 'Companion'
+                    'persona': 'Companion',
+                    'tokens': token_usage
                 }
                 conversation_history.append(entry)
                 
@@ -269,11 +285,16 @@ def debug_chat():
             except Exception as mem_err:
                 logger.warning(f"Memory processing error: {mem_err}")
         
+        # Get token usage
+        from companion_ai.llm_interface import get_last_token_usage
+        token_usage = get_last_token_usage()
+        
         return jsonify({
             'user': user_message,
             'ai': ai_response,
             'timestamp': entry['timestamp'],
-            'history_length': len(conversation_history)
+            'history_length': len(conversation_history),
+            'tokens': token_usage
         })
         
     except Exception as e:
@@ -339,6 +360,52 @@ def chat_history_stream():
 def get_memory():
     try:
         detailed = request.args.get('detailed', 'false').lower() in ('1','true','yes')
+        
+        # --- SWITCH TO MEM0 AS PRIMARY SOURCE ---
+        if core_config.USE_MEM0:
+            try:
+                # Fetch all memories from Mem0
+                mem0_memories = memory_v2.get_all_memories(user_id=core_config.MEM0_USER_ID)
+                
+                # Convert to format expected by frontend
+                # Frontend expects: { key, value, confidence_label, reaffirmations }
+                # Mem0 returns: { id, memory, metadata, ... }
+                
+                profile_detailed = []
+                for m in mem0_memories:
+                    # Extract text
+                    text = m.get('memory', m.get('text', ''))
+                    if not text: continue
+                    
+                    # Extract metadata
+                    meta = m.get('metadata') or {}
+                    
+                    profile_detailed.append({
+                        'key': m.get('id'),  # Use ID as key for deletion
+                        'value': text,
+                        'confidence': 1.0,   # Mem0 doesn't have confidence, assume high
+                        'confidence_label': 'high',
+                        'reaffirmations': meta.get('frequency', 0), # Use frequency if available
+                        'source': 'mem0'
+                    })
+                
+                # Sort by most recent (if created_at exists) or just reverse
+                # Mem0 usually returns most relevant or recent. Let's just use as is.
+                
+                resp = {
+                    'profile': {m['key']: m['value'] for m in profile_detailed}, # Simple dict
+                    'profile_detailed': profile_detailed,
+                    'summaries': [], # Mem0 handles summaries internally or we don't have them separate
+                    'insights': []   # Same
+                }
+                return jsonify(resp)
+                
+            except Exception as mem0_err:
+                logger.error(f"Failed to fetch Mem0 memories: {mem0_err}")
+                # Fallback to SQLite if Mem0 fails? Or just return error?
+                # Let's fallback for safety but log it.
+        
+        # --- FALLBACK TO SQLITE (Legacy) ---
         profile = db.get_all_profile_facts()
         summaries = db.get_latest_summary(10)
         insights = db.get_latest_insights(10)
@@ -399,7 +466,26 @@ def clear_memory():
         token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
         if not core_config.require_auth(token):
             return jsonify({'error': 'Unauthorized'}), 401
+        
+        # Clear SQLite memory
         db.clear_all_memory()
+        
+        # Clear Mem0 vector memory
+        if core_config.USE_MEM0:
+            try:
+                memory_v2.clear_all_memories(user_id=core_config.MEM0_USER_ID)
+                logger.info("Cleared Mem0 vector memory")
+            except Exception as mem0_err:
+                logger.error(f"Failed to clear Mem0: {mem0_err}")
+        
+        # Clear Knowledge Graph
+        try:
+            from companion_ai.memory_graph import clear_graph
+            clear_graph()
+            logger.info("Cleared Knowledge Graph")
+        except Exception as kg_err:
+            logger.error(f"Failed to clear Knowledge Graph: {kg_err}")
+        
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"Clear memory error: {e}")
@@ -407,14 +493,40 @@ def clear_memory():
 
 @app.route('/api/memory/fact/<key>', methods=['DELETE'])
 def delete_fact(key: str):
+    # Ensure logger is available
+    local_logger = logging.getLogger(__name__)
     try:
         token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
         if not core_config.require_auth(token):
             return jsonify({'error': 'Unauthorized'}), 401
-        deleted = db.delete_profile_fact(key)
+            
+        deleted = False
+        
+        # 1. Try deleting from Mem0 (Primary)
+        if core_config.USE_MEM0:
+            try:
+                # Try deleting by ID (key is likely a UUID from Mem0)
+                mem0_deleted = memory_v2.delete_memory(key)
+                if mem0_deleted:
+                    deleted = True
+                    local_logger.info(f"Deleted Mem0 memory for key: {key}")
+                else:
+                    # Fallback: Try deleting from SQLite if ID not found in Mem0
+                    # (This handles legacy facts or if key was actually a SQLite key)
+                    sqlite_deleted = db.delete_profile_fact(key)
+                    if sqlite_deleted:
+                        deleted = True
+                        local_logger.info(f"Deleted SQLite memory for key: {key}")
+                        
+            except Exception as mem0_err:
+                local_logger.error(f"Failed to delete Mem0 fact: {mem0_err}")
+        else:
+            # 2. Fallback to SQLite only
+            deleted = db.delete_profile_fact(key)
+                
         return jsonify({'deleted': deleted, 'key': key})
     except Exception as e:
-        logger.error(f"Delete fact error: {e}")
+        local_logger.error(f"Delete fact error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/tts/toggle', methods=['POST'])
@@ -527,6 +639,8 @@ def change_voice():
     except Exception as e:
         logger.error(f"Voice change error: {e}")
         return jsonify({'error': str(e)}), 500
+
+
 
 @app.route('/api/search')
 def search():
@@ -686,15 +800,44 @@ def get_graph():
     
     Returns nodes and edges in a format suitable for D3.js or other graph libs.
     """
+    # Prevent caching
+    response = None
     try:
-        from companion_ai.memory_graph import export_graph
-        graph_json = export_graph()
-        return graph_json, 200, {'Content-Type': 'application/json'}
+        # --- SWITCH TO MEM0 AS SOURCE ---
+        if core_config.USE_MEM0:
+            try:
+                # Fetch all memories from Mem0
+                mem0_memories = memory_v2.get_all_memories(user_id=core_config.MEM0_USER_ID)
+                
+                # Use the new semantic graph builder
+                from companion_ai.memory_graph import build_semantic_graph_from_memories
+                graph_data = build_semantic_graph_from_memories(mem0_memories, threshold=0.6)
+                
+                response = jsonify(graph_data)
+                
+            except Exception as mem0_err:
+                logger.error(f"Failed to build graph from Mem0: {mem0_err}")
+                # Fallback to legacy graph
+
+        if not response:
+            from companion_ai.memory_graph import export_graph
+            graph_json = export_graph()
+            response = make_response(graph_json, 200)
+            response.headers['Content-Type'] = 'application/json'
+            
     except ImportError:
         return jsonify({'error': 'Knowledge graph not available. Install networkx.'}), 503
     except Exception as e:
         logger.error(f"Graph export error: {e}")
         return jsonify({'error': str(e)}), 500
+        
+    # Add cache control headers
+    if response:
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        
+    return response
 
 @app.route('/api/graph/stats')
 def get_graph_stats():

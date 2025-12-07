@@ -33,16 +33,16 @@ class AzureTTSManager:
         self.is_enabled = False
         self.current_synthesis = None  # Track current synthesis for interruption
         
-        # Check if Azure SDK is available
-        if not AZURE_AVAILABLE:
-            logger.warning("Azure Speech SDK not installed. TTS disabled.")
-            return
-        
-        # Voice settings - Jenny Neural (warm and friendly, perfect for Aether)
+        # Default settings (initialized even if Azure is not available)
         self.current_voice = "en-US-JennyNeural"  # Warm, friendly, natural
         self.speech_rate = "+5%"   # Just slightly faster, not rushed
         self.speech_pitch = "+0%"  # No pitch changes - keep natural
         self.speech_volume = "+0%" # Normal volume
+
+        # Check if Azure SDK is available
+        if not AZURE_AVAILABLE:
+            logger.warning("Azure Speech SDK not installed. TTS disabled.")
+            return
         
         self._initialize_tts()
     

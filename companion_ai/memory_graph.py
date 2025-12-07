@@ -494,6 +494,26 @@ def get_knowledge_graph() -> KnowledgeGraph:
     return _knowledge_graph
 
 
+def clear_graph():
+    """Clear the knowledge graph from memory and disk"""
+    global _knowledge_graph
+    
+    # 1. Clear in-memory instance
+    if _knowledge_graph:
+        _knowledge_graph.graph = nx.DiGraph()
+        _knowledge_graph.embeddings = {}
+    
+    # 2. Delete file
+    if os.path.exists(GRAPH_PATH):
+        try:
+            os.remove(GRAPH_PATH)
+            logger.info(f"🗑️ Deleted knowledge graph file: {GRAPH_PATH}")
+        except Exception as e:
+            logger.error(f"Failed to delete graph file: {e}")
+            
+    logger.info("🧹 Knowledge graph cleared")
+
+
 def extract_entities_and_relationships(user_message: str, ai_response: str) -> Tuple[List[Entity], List[Relationship]]:
     """
     Extract entities and relationships from conversation
@@ -681,6 +701,90 @@ def export_graph() -> str:
     """Export knowledge graph as JSON"""
     kg = get_knowledge_graph()
     return kg.export_graph_json()
+
+
+def build_semantic_graph_from_memories(memories: List[Dict], threshold: float = 0.5) -> Dict:
+    """
+    Build a semantic graph from a list of Mem0 memories.
+    
+    Nodes: Memories
+    Edges: Semantic similarity > threshold
+    """
+    if not memories:
+        return {'nodes': [], 'links': []}
+        
+    nodes = []
+    texts = []
+    
+    # 1. Create Nodes
+    for m in memories:
+        text = m.get('memory', m.get('text', ''))
+        if not text: continue
+        
+        texts.append(text)
+        nodes.append({
+            'id': m.get('id'),
+            'label': text[:30] + '...' if len(text) > 30 else text,
+            'full_text': text,
+            'type': 'memory',
+            'val': 1
+        })
+    
+    links = []
+    
+    # 2. Calculate Similarity & Create Edges
+    try:
+        # Try using sentence-transformers for high quality embeddings
+        if SEMANTIC_MATCHING_AVAILABLE:
+            # We need a model instance. We can reuse the one from KnowledgeGraph if initialized,
+            # or create a new one (expensive).
+            # Let's try to get the global one.
+            kg = get_knowledge_graph()
+            model = kg.semantic_model
+            
+            if model:
+                embeddings = model.encode(texts)
+                from sentence_transformers import util
+                # Compute cosine similarity matrix
+                cos_sim = util.cos_sim(embeddings, embeddings)
+                
+                # Iterate upper triangle
+                for i in range(len(nodes)):
+                    for j in range(i + 1, len(nodes)):
+                        score = float(cos_sim[i][j])
+                        if score > threshold:
+                            links.append({
+                                'source': nodes[i]['id'],
+                                'target': nodes[j]['id'],
+                                'value': score,
+                                'type': 'semantic_similarity'
+                            })
+            else:
+                raise ImportError("Model not loaded")
+        else:
+            raise ImportError("Sentence Transformers not available")
+            
+    except Exception as e:
+        logger.warning(f"Semantic linking failed ({e}), falling back to text overlap")
+        # Fallback: Jaccard similarity on words
+        for i in range(len(nodes)):
+            set_i = set(texts[i].lower().split())
+            for j in range(i + 1, len(nodes)):
+                set_j = set(texts[j].lower().split())
+                intersection = len(set_i.intersection(set_j))
+                union = len(set_i.union(set_j))
+                if union > 0:
+                    score = intersection / union
+                    if score > 0.3: # Lower threshold for Jaccard
+                        links.append({
+                            'source': nodes[i]['id'],
+                            'target': nodes[j]['id'],
+                            'value': score,
+                            'type': 'text_overlap'
+                        })
+
+    logger.info(f"🔗 Built semantic graph: {len(nodes)} nodes, {len(links)} links")
+    return {'nodes': nodes, 'links': links}
 
 
 # Initialize on import

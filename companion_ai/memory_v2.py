@@ -10,11 +10,20 @@ Uses Groq as LLM backend (no extra API key needed).
 """
 from __future__ import annotations
 import os
+import re
 import logging
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 
+from companion_ai.core import config as core_config
+
 logger = logging.getLogger(__name__)
+
+# Primary / fallback Mem0 LLMs (override with MEM0_LLM_MODEL / MEM0_FALLBACK_LLM_MODEL env vars)
+# Use a supported model by default to avoid decommission errors.
+PRIMARY_MEM0_LLM = os.getenv("MEM0_LLM_MODEL", "llama-3.1-8b-instant")
+FALLBACK_MEM0_LLM = os.getenv("MEM0_FALLBACK_LLM_MODEL", PRIMARY_MEM0_LLM)
+ACTIVE_MEM0_LLM = PRIMARY_MEM0_LLM
 
 # Lazy import - only load Mem0 when actually used
 _memory_instance = None
@@ -35,22 +44,25 @@ class MemoryContext:
     has_memories: bool
 
 
-def _get_mem0_config() -> dict:
+def _get_mem0_config(llm_model: Optional[str] = None) -> dict:
     """Build Mem0 configuration with Groq backend and local embeddings."""
-    from companion_ai.core import config as core_config
-    import os
-    
+    model = llm_model or ACTIVE_MEM0_LLM
+
     # Use a dedicated path in the data folder for Qdrant storage
     qdrant_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "mem0_qdrant")
-    
+
+    # Use the first available key for Mem0 (Mem0 doesn't support rotation natively yet)
+    api_key = core_config.GROQ_API_KEYS[0] if core_config.GROQ_API_KEYS else core_config.GROQ_API_KEY
+
     return {
         "llm": {
             "provider": "groq",
             "config": {
-                "model": "llama-3.1-8b-instant",
+                # Higher-quality merge model to reduce bad UPDATE/DELETEs
+                "model": model,
                 "temperature": 0.1,
                 "max_tokens": 1000,
-                "api_key": core_config.GROQ_API_KEY,
+                "api_key": api_key,
             }
         },
         "embedder": {
@@ -73,16 +85,27 @@ def _get_mem0_config() -> dict:
     }
 
 
+def _reset_memory(llm_model: Optional[str] = None):
+    """(Re)initialize Mem0 with the given model."""
+    global _memory_instance, ACTIVE_MEM0_LLM
+
+    from mem0 import Memory
+
+    target_model = llm_model or PRIMARY_MEM0_LLM
+    ACTIVE_MEM0_LLM = target_model
+    config = _get_mem0_config(target_model)
+    logger.info(f"🧠 Creating Mem0 instance with model: {target_model}")
+    _memory_instance = Memory.from_config(config)
+    return _memory_instance
+
+
 def get_memory() -> Any:
     """Get or create the Mem0 memory instance."""
     global _memory_instance
     
     if _memory_instance is None:
         try:
-            from mem0 import Memory
-            config = _get_mem0_config()
-            logger.info(f"🧠 Creating NEW Mem0 instance with config: {config}")
-            _memory_instance = Memory.from_config(config)
+            _reset_memory()
             logger.info("✅ Mem0 initialized with Groq backend")
         except ImportError:
             logger.error("Mem0 not installed. Run: pip install mem0ai")
@@ -103,6 +126,10 @@ def add_memory(
 ) -> Dict[str, Any]:
     """Add memories from a conversation.
     
+    We strongly prefer to feed only the user's words to Mem0 so the
+    merge model doesn't try to "fix" facts based on assistant phrasing.
+    If no user-only content is found, we fall back to the full messages.
+    
     Args:
         messages: List of {"role": "user/assistant", "content": "..."}
         user_id: User identifier
@@ -113,7 +140,77 @@ def add_memory(
     """
     try:
         memory = get_memory()
-        result = memory.add(messages, user_id=user_id, metadata=metadata or {})
+
+        # Snapshot current memories to guard against unsafe UPDATE/DELETE decisions.
+        pre_memories = {m.get("id"): m.get("memory", m.get("text")) for m in get_all_memories(user_id)}
+        logger.info(f"🧠 Mem0 add start: {len(pre_memories)} existing items for user {user_id}")
+
+        # Add timestamp to metadata
+        from datetime import datetime
+        if metadata is None:
+            metadata = {}
+        metadata['created_at'] = datetime.now().isoformat()
+
+        # Keep only user messages to reduce accidental UPDATE/DELETE events.
+        user_msgs = [m.get("content", "") for m in messages if m.get("role") == "user" and m.get("content")]
+        payload = [{"role": "user", "content": "\n".join(user_msgs)}] if user_msgs else messages
+        
+        # Pass metadata to Mem0 (it will be attached to new memories)
+        # Note: Mem0's add() might not propagate metadata to all items if extracting multiple facts,
+        # but it's the best we can do at this level.
+        result = memory.add(payload, user_id=user_id, metadata=metadata)
+        
+        logger.info(f"🧠 Mem0 add raw result: {result}")
+
+        try:
+            result = memory.add(payload, user_id=user_id, metadata=metadata or {})
+            logger.info(f"🧠 Mem0 add raw result: {result}")
+        except Exception as e:
+            error_text = str(e)
+            if "model_decommissioned" in error_text or "has been decommissioned" in error_text:
+                logger.warning(f"🧠 Mem0 add failed due to decommissioned model '{ACTIVE_MEM0_LLM}'. Falling back to {FALLBACK_MEM0_LLM}.")
+                memory = _reset_memory(FALLBACK_MEM0_LLM)
+                result = memory.add(payload, user_id=user_id, metadata=metadata or {})
+                logger.info(f"🧠 Mem0 add raw result (fallback): {result}")
+            else:
+                logger.error(f"🧠 Mem0 add failed: {e}")
+                raise
+
+        # Guardrails: allow at most 1 delete, and only when texts clearly overlap; allow updates only with overlap.
+        restored = []
+        delete_budget = 1
+
+        def tokenize(text: str) -> set:
+            tokens = re.findall(r"[A-Za-z]+", text.lower())
+            return {t for t in tokens if len(t) > 2}
+
+        for item in result.get("results", []) if isinstance(result, dict) else []:
+            event = item.get("event")
+            mem_id = item.get("id")
+            new_text = item.get("text") or item.get("memory") or ""
+            original_text = pre_memories.get(mem_id)
+
+            if event in {"DELETE", "UPDATE"} and original_text:
+                overlap = tokenize(original_text) & tokenize(new_text)
+                allow_update = bool(overlap)
+                allow_delete = bool(overlap) and delete_budget > 0
+
+                if event == "DELETE" and allow_delete:
+                    delete_budget -= 1
+                    continue  # permit this delete
+
+                if event == "UPDATE" and allow_update:
+                    continue  # permit this update
+
+                # Otherwise, restore the original fact (convert to NONE behavior)
+                memory.add([
+                    {"role": "user", "content": original_text}
+                ], user_id=user_id, metadata=metadata or {})
+                restored.append({"id": mem_id, "text": original_text, "event": event, "overlap": len(overlap)})
+
+        if restored:
+            logger.warning(f"🔒 Guarded {len(restored)} unsafe DELETE/UPDATE events; restored originals: {restored}")
+
         logger.info(f"📝 Added memories for user {user_id}: {result}")
         return result
     except Exception as e:
@@ -222,7 +319,23 @@ def build_memory_context(
         relevant = []
         if stats.total_memories > 0:
             results = search_memories(user_message, user_id, limit=max_relevant)
-            relevant = [r.get("memory", r.get("text", str(r))) for r in results]
+            # Format with timestamp if available
+            for r in results:
+                text = r.get("memory", r.get("text", str(r)))
+                meta = r.get("metadata") or {}
+                created_at = meta.get("created_at")
+                
+                if created_at:
+                    # Try to format nicely if it's ISO
+                    try:
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(created_at)
+                        ts_str = dt.strftime("%Y-%m-%d %H:%M")
+                        relevant.append(f"[{ts_str}] {text}")
+                    except:
+                        relevant.append(f"[{created_at}] {text}")
+                else:
+                    relevant.append(text)
         
         return MemoryContext(
             stats=stats,
@@ -264,7 +377,7 @@ def format_memory_for_prompt(context: MemoryContext) -> str:
             lines.append(f"• {mem}")
     
     lines.append("")
-    lines.append("[Use memory_search(topic) for more]")
+    lines.append("[Use memory_search(query) to find specific facts in vector DB]")
     
     return "\n".join(lines)
 

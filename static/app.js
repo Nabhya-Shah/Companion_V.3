@@ -23,6 +23,7 @@ const clearChatBtn = document.getElementById('clearChatBtn');
 // ============================================
 let API_TOKEN = localStorage.getItem('companion_api_token') || '';
 let ttsEnabled = localStorage.getItem('companion_tts_enabled') === 'true';
+let showTokens = localStorage.getItem('companion_show_tokens') === 'true';
 let currentConversation = [];
 let lastHistoryLength = -1; // Start at -1 to force initial render
 let eventSource = null;
@@ -102,7 +103,7 @@ function addCopyButtons(container) {
 // ============================================
 // Message Rendering
 // ============================================
-function createMessageElement(role, text, timestamp) {
+function createMessageElement(role, text, timestamp, tokens) {
   const wrapper = document.createElement('div');
   wrapper.className = 'message-wrapper';
   
@@ -118,7 +119,16 @@ function createMessageElement(role, text, timestamp) {
   
   const roleLabel = document.createElement('div');
   roleLabel.className = 'message-role';
-  roleLabel.textContent = role === 'user' ? 'You' : 'Companion';
+  
+  // Role label with optional token stats
+  const roleName = role === 'user' ? 'You' : 'Companion';
+  let tokenHtml = '';
+  if (role === 'ai' && tokens && showTokens) {
+    const total = (tokens.input || 0) + (tokens.output || 0);
+    tokenHtml = `<span class="token-badge" title="Input: ${tokens.input} | Output: ${tokens.output}">(${total} tokens)</span>`;
+  }
+  
+  roleLabel.innerHTML = `${roleName} ${tokenHtml}`;
   
   const textDiv = document.createElement('div');
   textDiv.className = 'message-text';
@@ -188,13 +198,13 @@ function createLoadingMessage() {
   return wrapper;
 }
 
-function addMessage(role, text, timestamp) {
+function addMessage(role, text, timestamp, tokens) {
   // Hide welcome screen on first message
   if (welcomeScreen && welcomeScreen.parentNode) {
     welcomeScreen.remove();
   }
   
-  const messageEl = createMessageElement(role, text, timestamp);
+  const messageEl = createMessageElement(role, text, timestamp, tokens);
   chatPane.appendChild(messageEl);
   scrollToBottom();
 }
@@ -338,6 +348,17 @@ async function sendMessage(retry = false) {
               queueText(data.chunk);
             }
             
+            if (data.done && data.tokens && showTokens) {
+              const roleLabel = wrapper.querySelector('.message-role');
+              if (roleLabel) {
+                const total = (data.tokens.input || 0) + (data.tokens.output || 0);
+                const tokenHtml = `<span class="token-badge" title="Input: ${data.tokens.input} | Output: ${data.tokens.output}">(${total} tokens)</span>`;
+                roleLabel.innerHTML = `Companion ${tokenHtml}`;
+              }
+              // Refresh global token stats automatically
+              loadTokenStats();
+            }
+            
             if (data.error) {
               throw new Error(data.error);
             }
@@ -361,6 +382,8 @@ async function sendMessage(retry = false) {
           // Re-enable SSE updates now that streaming is done
           isStreaming = false;
           lastHistoryLength++; // Prevent immediate re-render
+          // Ensure token stats are refreshed even if streaming logic missed it
+          loadTokenStats();
         }, 300);
       }
     };
@@ -448,7 +471,10 @@ clearMemoryBtn?.addEventListener('click', async (e) => {
   if (!confirm('Are you sure you want to clear all memory? This cannot be undone.')) return;
   
   try {
-    // Reset conversation history
+    // 1. Clear actual memory (SQLite + Mem0)
+    await fetch('/api/memory/clear', { method: 'POST', headers: authHeaders() });
+
+    // 2. Reset conversation history
     await fetch('/api/debug/reset', { method: 'POST', headers: authHeaders() });
     
     // Clear UI
@@ -567,7 +593,8 @@ async function loadMemory(retry = false) {
     const profileDiv = document.getElementById('profileList');
     if (profileDiv) {
       profileDiv.innerHTML = '';
-      detailed.slice(0, 10).forEach(row => {
+      // Show ALL facts, not just first 10, since Mem0 might have many
+      detailed.forEach(row => {
         const card = document.createElement('div');
         card.className = 'fact-card';
         card.dataset.key = row.key;
@@ -576,7 +603,7 @@ async function loadMemory(retry = false) {
         const confLabel = row.confidence_label || (row.confidence >= 0.8 ? 'high' : row.confidence >= 0.5 ? 'medium' : 'low');
         
         card.innerHTML = `
-          <div class="fact-key">${row.key.replace(/_/g, ' ')}</div>
+          <div class="fact-key" style="display:none">${row.key}</div>
           <div class="fact-value">${row.value}</div>
           <div class="fact-meta">
             <span class="fact-confidence ${confLabel}">${confLabel}</span>
@@ -613,7 +640,10 @@ async function loadMemory(retry = false) {
 
 // Delete a single fact
 async function deleteFact(key, cardElement) {
-  if (!confirm(`Delete "${key.replace(/_/g, ' ')}"?`)) return;
+  // For Mem0, the key is a UUID which isn't user friendly.
+  // We'll show the text content in the confirmation dialog instead.
+  const text = cardElement.querySelector('.fact-value').textContent;
+  if (!confirm(`Delete memory: "${text}"?`)) return;
   
   try {
     const r = await fetch(`/api/memory/fact/${encodeURIComponent(key)}`, {
@@ -631,7 +661,9 @@ async function deleteFact(key, cardElement) {
         if (countEl) countEl.textContent = parseInt(countEl.textContent) - 1;
       }, 200);
     } else {
-      alert('Failed to delete fact');
+      const errText = await r.text();
+      console.error('Delete failed:', r.status, errText);
+      alert(`Failed to delete fact: ${r.status} ${errText}`);
     }
   } catch (e) {
     console.error('Delete fact failed:', e);
@@ -840,6 +872,18 @@ async function loadSettings() {
   const rateSelect = document.getElementById('rateSelect');
   const visionToggle = document.getElementById('visionToggle');
   const visionStatus = document.getElementById('visionStatus');
+  const showTokensToggle = document.getElementById('showTokensToggle');
+  
+  // Show Tokens toggle
+  if (showTokensToggle) {
+    showTokensToggle.checked = showTokens;
+    showTokensToggle.addEventListener('change', (e) => {
+      showTokens = e.target.checked;
+      localStorage.setItem('companion_show_tokens', showTokens);
+      // Re-render chat to show/hide tokens
+      renderHistory(currentConversation);
+    });
+  }
   
   // TTS toggle
   if (ttsToggle) {
@@ -944,7 +988,7 @@ function renderHistory(history) {
   
   history.forEach(entry => {
     if (entry.user) addMessage('user', entry.user);
-    if (entry.ai) addMessage('ai', entry.ai);
+    if (entry.ai) addMessage('ai', entry.ai, null, entry.tokens);
   });
 }
 

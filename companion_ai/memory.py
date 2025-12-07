@@ -430,6 +430,15 @@ def add_summary(summary_text: str, relevance_score: float = 1.0):
     conn.close()
     print(f"📝 New summary added (relevance: {relevance_score:.2f})")
 
+def get_profile_fact(key: str) -> str | None:
+    """Get the value of a specific profile fact by key."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT value FROM user_profile WHERE key = ?", (key,))
+    row = cursor.fetchone()
+    conn.close()
+    return row['value'] if row else None
+
 def get_latest_summary(n: int = 1) -> list[dict]:
     conn = get_db_connection()
     cursor = conn.cursor()

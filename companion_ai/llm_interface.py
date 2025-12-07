@@ -29,8 +29,31 @@ _token_stats = {
     'by_model': {}
 }
 
+# Track tokens for the most recent request/interaction
+_last_request_tokens = {
+    'input': 0,
+    'output': 0,
+    'total': 0,
+    'models': []
+}
+
+def reset_last_request_tokens():
+    """Reset the token counter for the current request."""
+    global _last_request_tokens
+    _last_request_tokens = {
+        'input': 0,
+        'output': 0,
+        'total': 0,
+        'models': []
+    }
+
+def get_last_token_usage() -> dict:
+    """Get token usage for the last request."""
+    return _last_request_tokens.copy()
+
 def log_tokens(model: str, input_tokens: int, output_tokens: int, context: str = ""):
     """Log token usage for a request."""
+    # Update global stats
     _token_stats['total_input'] += input_tokens
     _token_stats['total_output'] += output_tokens
     _token_stats['requests'] += 1
@@ -40,6 +63,13 @@ def log_tokens(model: str, input_tokens: int, output_tokens: int, context: str =
     _token_stats['by_model'][model]['input'] += input_tokens
     _token_stats['by_model'][model]['output'] += output_tokens
     _token_stats['by_model'][model]['count'] += 1
+    
+    # Update last request stats
+    _last_request_tokens['input'] += input_tokens
+    _last_request_tokens['output'] += output_tokens
+    _last_request_tokens['total'] += (input_tokens + output_tokens)
+    if model not in _last_request_tokens['models']:
+        _last_request_tokens['models'].append(model)
     
     total = input_tokens + output_tokens
     logger.info(f"📊 TOKENS [{model}] in={input_tokens} out={output_tokens} total={total} | {context}")
@@ -69,20 +99,69 @@ except ImportError:
     
 
 # --- Configuration ---
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_API_KEY = core_config.GROQ_API_KEY
+GROQ_TOOL_API_KEY = core_config.GROQ_TOOL_API_KEY
 GROQ_MEMORY_API_KEY = os.getenv("GROQ_MEMORY_API_KEY")
 
 # --- Client Setup ---
 groq_client = None
+groq_tool_client = None
 groq_memory_client = None
+_groq_clients = []  # Pool of clients for rotation
+_current_client_index = 0
 
+def _initialize_clients():
+    """Initialize pool of Groq clients from available keys."""
+    global groq_client, _groq_clients, groq_tool_client
+    
+    keys = core_config.GROQ_API_KEYS
+    if not keys:
+        logger.warning("No GROQ_API_KEY found in environment")
+        return
+
+    for key in keys:
+        try:
+            client = Groq(api_key=key)
+            _groq_clients.append(client)
+        except Exception as e:
+            logger.error(f"Failed to initialize Groq client with key ending in ...{key[-4:]}: {e}")
+    
+    if _groq_clients:
+        groq_client = _groq_clients[0]
+        logger.info(f"Initialized {len(_groq_clients)} Groq clients for rotation")
+    else:
+        logger.error("No valid Groq clients could be initialized")
+
+    # Initialize dedicated tool client if key exists
+    if GROQ_TOOL_API_KEY:
+        try:
+            groq_tool_client = Groq(api_key=GROQ_TOOL_API_KEY)
+            logger.info("✅ Dedicated Groq TOOL client initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize Groq TOOL client: {e}")
+
+def get_groq_client(for_tools: bool = False):
+    """Get the next Groq client in rotation.
+    
+    Args:
+        for_tools: If True, try to use the dedicated tool client first.
+    """
+    global _current_client_index
+    
+    # Use dedicated tool client if requested and available
+    if for_tools and groq_tool_client:
+        return groq_tool_client
+        
+    if not _groq_clients:
+        return None
+    
+    client = _groq_clients[_current_client_index]
+    _current_client_index = (_current_client_index + 1) % len(_groq_clients)
+    return client
+
+# Initialize immediately
 if GROQ_API_KEY:
-    try:
-        groq_client = Groq(api_key=GROQ_API_KEY)
-        logger.info("Groq conversation client initialized successfully")
-    except Exception as e:
-        logger.error(f"Groq conversation client initialization failed: {str(e)}")
-        groq_client = None
+    _initialize_clients()
 
 if GROQ_MEMORY_API_KEY:
     try:
@@ -142,7 +221,11 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
     If persona == 'Companion' (adaptive single persona), use new context builder.
     Otherwise fallback to legacy persona prompt builder.
     """
-    if not groq_client:
+    # Reset token counter for this new interaction
+    reset_last_request_tokens()
+    
+    client = get_groq_client()
+    if not client:
         return "I'm offline (LLM client unavailable)."
     try:
         complexity = core_config.classify_complexity(user_message)
@@ -170,29 +253,29 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
         
         # Generate response with native function calling
         if first_output is None:
-            # Check if query should use Groq Compound system (web/weather/calc)
+            # V4.1 ARCHITECTURE: Compound-as-Context
+            # If query is weather/search/calc, run Compound FIRST and inject result into 120B context.
+            # This avoids the expensive tool loop (12k tokens) and ensures 120B sees memory + real-time info.
+            compound_result = None
             if core_config.should_use_compound(user_message):
                 try:
-                    logger.info("Routing to Compound system (built-in tools)")
-                    first_output, executed_tools = generate_compound_response(user_message, system_prompt)
-                    # Log Compound tool usage
-                    if executed_tools:
-                        for tool_info in executed_tools:
-                            if isinstance(tool_info, dict):
-                                tool_name = tool_info.get('name', 'unknown')
-                                core_metrics.record_tool(tool_name, success=True, blocked=False, decision_type='compound_builtin')
-                    final_output = first_output
+                    logger.info("🚀 Fast Path: Pre-fetching Compound data...")
+                    compound_text, _ = generate_compound_response(user_message, "")
+                    if compound_text and "No response" not in compound_text:
+                        compound_result = compound_text
+                        # Inject into system prompt
+                        system_prompt += f"\n\n[REAL-TIME INFORMATION]\n{compound_result}\n[Use this information to answer the user's question naturally]"
+                        logger.info(f"✅ Injected Compound result: {compound_result[:50]}...")
                 except Exception as e:
-                    logger.error(f"Compound system failed, falling back to custom tools: {e}")
-                    # Fall through to custom tools
-                    first_output = None
-            
-            # Use custom tools if Compound not used or failed
+                    logger.warning(f"Compound pre-fetch failed: {e}")
+
             # OPTIMIZATION: Skip tool checking for casual chat (complexity 0) to save tokens
             # Tool schemas add ~8-10K tokens per request!
+            # We check tools if complexity > 0 AND we haven't already solved it with Compound
             should_check_tools = (
                 core_config.ENABLE_AUTO_TOOLS and 
-                (complexity > 0 or core_config.should_use_compound(user_message))
+                complexity > 0 and 
+                compound_result is None  # Skip tools if we already got Compound data
             )
             
             if first_output is None and should_check_tools:
@@ -247,6 +330,9 @@ def generate_response_streaming(user_message: str, memory_context: dict, model: 
     Yields chunks of text as they're generated.
     For tool calls, runs tools first (non-streaming) then streams final synthesis.
     """
+    # Reset token counter for this new interaction
+    reset_last_request_tokens()
+    
     if not groq_client:
         yield "I'm offline (LLM client unavailable)."
         return
@@ -332,7 +418,8 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
     Returns:
         tuple: (response_text, tool_name_used, tool_result)
     """
-    if not groq_client:
+    client = get_groq_client(for_tools=True)
+    if not client:
         raise Exception("Groq client not available")
     
     if conversation_model is None:
@@ -340,15 +427,18 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
     
     # Use a simple tool-focused system prompt for tool decision
     tool_system_prompt = (
-        "You are a helpful assistant with access to tools. "
-        "When the user asks for information that requires real-time data (weather, time, calculations, web search, etc.), "
-        "YOU MUST use the appropriate tool. Do not say you don't have access - you DO have tools available. "
-        "Use them proactively whenever they can help answer the question accurately.\n\n"
-        "For file-related requests:\n"
-        "- If user gives a general file description (e.g., 'the PDF about X'), use find_file to search for it\n"
-        "- Once you have the file path, use read_pdf, read_document, or read_image_text to read it\n"
-        "- You can use multiple tools in sequence if needed\n"
-        "Be smart about combining tools to fully answer the user's question."
+        "You are a decision-making agent. Your ONLY job is to decide if a tool is STRICTLY NECESSARY.\n"
+        "Groq built-in tools are available (web/code/browse) AND custom tools are available. Prefer built-ins for general web/search/code; use custom tools for memory (Mem0/graph), file ops, or screen/vision.\n"
+        "DO NOT use tools for:\n"
+        "- Casual conversation, greetings, or jokes\n"
+        "- Opinions or subjective questions (e.g., 'what is better?')\n"
+        "- Follow-up questions where the context is in the chat history\n"
+        "- Vague queries without specific entities\n\n"
+        "ONLY use tools for:\n"
+        "- Explicit requests for facts, search, weather, time, or calculations\n"
+        "- File operations (find/read) when specifically requested\n"
+        "- Questions about specific, objective data you cannot know\n\n"
+        "If no tool is needed, respond with normal text."
     )
     
     messages = [
@@ -371,7 +461,7 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
     try:
         # First API call with function calling enabled
         logger.info(f"Calling {model} with {len(function_schemas)} tools available for: {user_message[:50]}")
-        response = groq_client.chat.completions.create(
+        response = client.chat.completions.create(
             model=model,
             messages=messages,
             tools=function_schemas,
@@ -477,7 +567,7 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
                 
                 # Generate response with PRIMARY model (120B) for personality
                 try:
-                    personality_response = groq_client.chat.completions.create(
+                    personality_response = client.chat.completions.create(
                         model=conversation_model,
                         messages=[
                             {"role": "system", "content": full_system_prompt},
@@ -583,7 +673,8 @@ def generate_compound_response(user_message: str, system_prompt: str) -> tuple[s
     Compound handles web search, weather, calculations, Wolfram Alpha server-side.
     Returns: (response_text, executed_tools_list)
     """
-    if not groq_client:
+    client = get_groq_client()
+    if not client:
         raise Exception("Groq client not available")
     
     compound_model = core_config.get_compound_model()
@@ -602,7 +693,7 @@ Search: 1-2 sentences max summarizing the key finding. No bullet points, no sour
     ]
     
     try:
-        response = groq_client.chat.completions.create(
+        response = client.chat.completions.create(
             model=compound_model,
             messages=messages,
             temperature=0.8,
@@ -632,7 +723,8 @@ Search: 1-2 sentences max summarizing the key finding. No bullet points, no sour
 
 def generate_model_response(user_message: str, system_prompt: str, model: str) -> str:
     """Generate response using specified model through Groq with optional prompt caching."""
-    if not groq_client:
+    client = get_groq_client()
+    if not client:
         raise Exception("Groq client not available")
     messages = [
         {"role": "system", "content": system_prompt},
@@ -640,7 +732,7 @@ def generate_model_response(user_message: str, system_prompt: str, model: str) -
     ]
     extra = _maybe_cache_opts(system_prompt)
     try:
-        response = groq_client.chat.completions.create(
+        response = client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=0.8,
@@ -651,7 +743,7 @@ def generate_model_response(user_message: str, system_prompt: str, model: str) -
         )
     except TypeError:
         # SDK might not yet support cache params; retry without extras
-        response = groq_client.chat.completions.create(
+        response = client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=0.8,
@@ -679,7 +771,8 @@ def generate_model_response_streaming(user_message: str, system_prompt: str, mod
     
     Yields chunks of text as they arrive from the API.
     """
-    if not groq_client:
+    client = get_groq_client()
+    if not client:
         yield "I'm offline (LLM client unavailable)."
         return
     
@@ -689,7 +782,7 @@ def generate_model_response_streaming(user_message: str, system_prompt: str, mod
     ]
     
     try:
-        response = groq_client.chat.completions.create(
+        response = client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=0.8,
@@ -825,40 +918,32 @@ def extract_profile_facts(user_msg: str, ai_msg: str) -> dict:
     # Structured outputs attempt
     if core_config.ENABLE_STRUCTURED_FACTS:
         try:
-            # Some Groq SDK versions expose `responses.create` with json_schema / structured mode.
-            if hasattr(groq_client, 'responses'):
-                schema = {
-                    "type": "object",
-                    "additionalProperties": {"type": "string"}
-                }
-                # Minimal prompt so model returns only explicit facts
-                prompt = (
-                    "Return ONLY a JSON object of explicit self-facts user stated this turn."\
-                    " No inferences. If none, return {}. Keys should mirror literal user phrasing."\
-                    f"\nUser: {user_msg}\nAssistant (ignore for extraction): {ai_msg}"
-                )
-                try:
-                    resp = groq_client.responses.create(
-                        model=model,
-                        input=[{"role": "user", "content": prompt}],
-                        structured_output=schema,
-                    )
-                    # Expected: resp.output / or resp.output_text / or resp.response depending on SDK;
-                    # we defensively extract JSON string.
-                    raw_json = None
-                    for part in getattr(resp, 'output', []) or []:
-                        if getattr(part, 'type', None) == 'output_text':
-                            raw_json = getattr(part, 'text', None)
-                    if not raw_json and hasattr(resp, 'output_text'):
-                        raw_json = resp.output_text
-                    if isinstance(raw_json, str):
-                        parsed = json.loads(raw_json)
-                        if isinstance(parsed, dict):
-                            return _filter_fact_dict(parsed, user_msg)
-                except Exception as se:
-                    logger.debug(f"Structured fact extraction failed: {se}; falling back")
-        except Exception:
-            pass
+            # Use standard JSON mode which is supported by 120B and others
+            # This is more robust than regex but less strict than json_schema
+            prompt = (
+                "Extract explicit user facts into a JSON object. Keys should be fact types (name, age, hobby, etc), values should be the fact.\n"
+                "Return ONLY the JSON object. If no facts, return {}.\n"
+                f"User: {user_msg}\nAssistant: {ai_msg}"
+            )
+            
+            resp = groq_client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You are a JSON extractor. Output valid JSON only."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.1
+            )
+            
+            raw_json = resp.choices[0].message.content
+            if raw_json:
+                parsed = json.loads(raw_json)
+                if isinstance(parsed, dict):
+                    return _filter_fact_dict(parsed, user_msg)
+                    
+        except Exception as se:
+            logger.debug(f"Structured fact extraction failed: {se}; falling back")
 
     # Legacy fallback path with improved prompt
     prompt = (

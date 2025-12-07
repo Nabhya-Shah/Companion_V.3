@@ -7,6 +7,10 @@ from __future__ import annotations
 import datetime, re, os, json
 from typing import Callable, Dict, Any
 from companion_ai import memory as mem
+try:
+    from companion_ai.memory_v2 import search_memories
+except ImportError:
+    search_memories = None
 
 # Graceful imports for optional dependencies
 try:
@@ -104,10 +108,12 @@ def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
         return f'Unknown function: {function_name}'
     
     # Handle different function signatures
-    if function_name == 'get_current_time':
+    elif function_name == 'get_current_time':
         return tool_fn("")
+    elif function_name == 'memory_search':
+        return tool_fn(arguments.get('query', ''))
     elif function_name == 'memory_insight':
-        return tool_fn("")
+        return tool_fn(arguments.get('query', ''), arguments.get('mode', 'GRAPH_COMPLETION'))
     elif function_name == 'wikipedia_lookup':
         return tool_fn(arguments.get('query', ''))
     elif function_name == 'read_pdf':
@@ -126,6 +132,45 @@ def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
         # Fallback: pass first argument or empty string
         first_arg = next(iter(arguments.values()), '') if arguments else ''
         return tool_fn(str(first_arg))
+
+@tool('memory_search', schema={
+    "type": "function",
+    "function": {
+        "name": "memory_search",
+        "description": "Search the user's long-term memory (vector database) for specific facts, preferences, or past conversations. Use this when you need to recall something specific that isn't in the immediate context.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query to find relevant memories."
+                }
+            },
+            "required": ["query"]
+        }
+    }
+})
+def tool_memory_search(query: str) -> str:
+    """Search Mem0 vector database for relevant memories."""
+    if not search_memories:
+        return "Memory search unavailable (Mem0 not loaded)."
+    
+    try:
+        results = search_memories(query, limit=5)
+        if not results:
+            return f"No memories found for '{query}'."
+        
+        output = [f"🧠 Memory Search Results for '{query}':"]
+        for i, res in enumerate(results, 1):
+            # Handle both dict (Mem0 v2) and object return types if any
+            text = res.get('memory', res.get('text', str(res)))
+            score = res.get('score', 0)
+            date = res.get('created_at', '')[:10] if res.get('created_at') else 'Unknown date'
+            output.append(f"{i}. {text} (Date: {date}, Relevance: {score:.2f})")
+            
+        return "\n".join(output)
+    except Exception as e:
+        return f"Error searching memory: {str(e)}"
 
 @tool('memory_insight', schema={
     "type": "function",
@@ -637,5 +682,35 @@ def tool_look_at_screen(prompt: str = "What is on the screen?") -> str:
         return vision_manager.analyze_current_screen(prompt)
     except Exception as e:
         return f"Error analyzing screen: {e}"
+
+@tool('consult_compound_system', schema={
+    "type": "function",
+    "function": {
+        "name": "consult_compound_system",
+        "description": "Consult the Compound System for real-time information. Use this for: 1) Weather forecasts, 2) Web searches (current events, facts), 3) Complex calculations. \nIMPORTANT: This tool is expensive and slow. Combine all your questions into a SINGLE comprehensive query. Do not call this tool multiple times in a row.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The specific query to send to the Compound System (e.g., 'weather in Tokyo', 'search for latest AI news', 'calculate 25 * 48')"
+                }
+            },
+            "required": ["query"]
+        }
+    }
+})
+def tool_consult_compound(query: str) -> str:
+    """Consult the Compound System (Groq Compound) for real-time info."""
+    try:
+        # Import here to avoid circular imports
+        from companion_ai.llm_interface import generate_compound_response
+        
+        # We need a dummy system prompt for the function signature, 
+        # but generate_compound_response uses its own internal prompt anyway.
+        response_text, _ = generate_compound_response(query, "")
+        return f"Compound System Result: {response_text}"
+    except Exception as e:
+        return f"Error consulting Compound System: {str(e)}"
 
 __all__ = ['list_tools', 'run_tool', 'get_function_schemas', 'execute_function_call']

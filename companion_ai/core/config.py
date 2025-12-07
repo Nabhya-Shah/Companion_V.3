@@ -17,7 +17,16 @@ load_dotenv()
 # API KEYS
 # ============================================================================
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_TOOL_API_KEY = os.getenv("GROQ_TOOL_API_KEY")  # Dedicated key for tool planner
 GROQ_VISION_API_KEY = os.getenv("GROQ_VISION_API_KEY", GROQ_API_KEY)  # Falls back to main key
+
+# Key Rotation Support
+# Load additional keys if present (GROQ_API_KEY_2, GROQ_API_KEY_3, etc.)
+GROQ_API_KEYS = [GROQ_API_KEY] if GROQ_API_KEY else []
+for i in range(2, 10):
+    key = os.getenv(f"GROQ_API_KEY_{i}")
+    if key:
+        GROQ_API_KEYS.append(key)
 
 # External service keys
 SERPER_API_KEY = os.getenv("SERPER_API_KEY")  # For custom web search if needed
@@ -41,12 +50,18 @@ def require_auth(token: str) -> bool:
 # - COMPOUND: Web/weather fast path
 
 PRIMARY_MODEL = "openai/gpt-oss-120b"  # Decisions, synthesis, personality
-TOOLS_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"  # Native tool calling
-TOOLS_MODEL_FAST = "llama-3.1-8b-instant"  # Future: pure execution (560 tps, $0.05/$0.08)
-VISION_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"  # Vision tasks
-COMPOUND_MODEL = "compound-beta"  # Web, weather, calculations
+TOOLS_MODEL = "openai/gpt-oss-120b"  # Planner: Uses cached prompt to decide tools
+TOOLS_MODEL_FAST = "llama-3.1-8b-instant"  # Backup / Fast execution if needed
+VISION_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"  # Vision tasks (Maverick)
+COMPOUND_MODEL = "compound-beta"  # Disabled
+
+# Feature flag: Use fast tool executor by default
+USE_FAST_TOOL_EXECUTOR = False
 
 # Model capabilities reference (for documentation)
+# - 120B: 128k context, high intelligence, expensive
+# - 8B: 8k context, fast, cheap, good for tools
+# - Compound: Built-in tools (web/calc) - DISABLED in favor of native tools
 MODEL_INFO = {
     "openai/gpt-oss-120b": {
         "description": "Primary model - handles all chat, reasoning, analysis",
@@ -157,7 +172,7 @@ USE_MEM0 = True  # Enabled for V4 testing
 
 # Mem0 settings
 MEM0_USER_ID = "default"  # Default user ID for single-user mode
-MEM0_MAX_RELEVANT = 3  # Max auto-retrieved memories per request
+MEM0_MAX_RELEVANT = 10  # Max auto-retrieved memories per request (Increased for better recall)
 MEM0_MODEL = "llama-3.1-8b-instant"  # Fast model for memory operations
 
 # ============================================================================
@@ -206,9 +221,10 @@ ENABLE_KNOWLEDGE_GRAPH = True
 ENABLE_FACT_EXTRACTION = True
 ENABLE_TOOL_CALLING = True
 ENABLE_VISION = True
-ENABLE_COMPOUND = True
+ENABLE_COMPOUND = False  # Disabled: User prefers native tool calling
 ENABLE_AUTO_TOOLS = True  # Auto-detect when tools are needed
-ENABLE_STRUCTURED_FACTS = False  # Use structured outputs for fact extraction
+ENABLE_STRUCTURED_FACTS = True  # Use structured outputs for fact extraction
+ENABLE_GROQ_BUILTINS = True  # Allow 120B built-in tools (web/code/browse) alongside custom tools
 
 # Model roles mapping (V4 architecture)
 MODEL_ROLES = {
@@ -226,7 +242,7 @@ MODEL_ROLES = {
 
 # Feature flag: Use 8B for tool execution instead of Scout
 # Set to True to enable V4 tool routing (120B decides, 8B executes)
-USE_FAST_TOOL_EXECUTOR = False
+# USE_FAST_TOOL_EXECUTOR = False  # REMOVED DUPLICATE DEFINITION
 
 # ============================================================================
 # COMPOUND DETECTION - What queries should use Groq Compound
@@ -284,9 +300,18 @@ def classify_complexity(query: str) -> int:
         return 1
     
     # Casual indicators
-    casual_patterns = ["hi", "hello", "hey", "sup", "yo", "what's up", "how are you", "thanks", "ok", "yeah", "yep", "nope", "lol", "haha"]
-    if any(query_lower.strip() == p or query_lower.startswith(p + " ") for p in casual_patterns):
+    # Normalize punctuation for better matching
+    clean_query = query_lower.replace(',', ' ').replace('.', ' ').replace('!', ' ').strip()
+    casual_patterns = ["hi", "hello", "hey", "sup", "yo", "what's up", "how are you", "thanks", "ok", "yeah", "yep", "nope", "lol", "haha", "test", "testing"]
+    
+    # Check for exact matches or starts-with
+    if any(clean_query == p or clean_query.startswith(p + " ") for p in casual_patterns):
         return 0
+        
+    # Check for "test message" specifically
+    if "test message" in query_lower or "verify the server" in query_lower:
+        return 0
+        
     if len(query) < 20:
         return 0
     

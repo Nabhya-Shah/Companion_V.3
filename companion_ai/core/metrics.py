@@ -104,7 +104,11 @@ def should_allow_tool(name: str, min_uses: int = 5, threshold: float = 0.3) -> b
             return True
         return entry.get('score', 0.5) >= threshold
 
-__all__ = ['update', 'snapshot', 'record_tool', 'get_tool_skill', 'should_allow_tool']
+def get_metrics() -> Dict[str, Any]:
+    """Public alias for snapshot() to match web_companion usage."""
+    return snapshot()
+
+__all__ = ['update', 'snapshot', 'record_tool', 'get_tool_skill', 'should_allow_tool', 'get_metrics']
 
 def _pct(values: list[float], p: float) -> float:
     if not values:

@@ -550,6 +550,14 @@
                             <div class="legend-color" style="background: #ec4899;"></div>
                             <span>Event</span>
                         </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #6366f1;"></div>
+                            <span>Memory</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #94a3b8;"></div>
+                            <span>Semantic Link</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -620,6 +628,7 @@
             'weather condition': '#0ea5e9',
             'weather prediction': '#6366f1',
             'document': '#a855f7',
+            'memory': '#6366f1', // New color for Mem0 memories
             'unknown': '#6b7280'
         };
 
@@ -637,22 +646,24 @@
         function initializeGraph(graphData) {
             // Update stats
             document.getElementById('entityCount').textContent = graphData.nodes.length;
-            document.getElementById('relationshipCount').textContent = graphData.edges.length;
+            document.getElementById('relationshipCount').textContent = (graphData.links || graphData.edges || []).length;
 
             // Prepare data
             nodes = graphData.nodes.map(n => ({
                 id: n.id,
                 label: n.label,
-                type: n.entity_type || 'unknown',
+                type: n.type || n.entity_type || 'unknown',
                 attributes: n.attributes || {},
                 mentions: n.mentions || 1,
                 importance: n.importance || 0.5
             }));
 
-            links = graphData.edges.map(e => ({
+            links = (graphData.links || graphData.edges || []).map(e => ({
                 source: e.source,
                 target: e.target,
-                type: e.relation_type,
+                type: e.type || e.relation_type || 'related',
+                value: e.value || 0.5
+            }));
                 strength: e.strength || 0.5,
                 context: e.context || ''
             }));
@@ -735,6 +746,12 @@
                 linkElements.attr("d", d => {
                     const dx = d.target.x - d.source.x;
                     const dy = d.target.y - d.source.y;
+                    
+                    // Straight lines for semantic links, curved for others
+                    if (d.type === 'semantic_similarity' || d.type === 'text_overlap') {
+                        return `M${d.source.x},${d.source.y}L${d.target.x},${d.target.y}`;
+                    }
+                    
                     const dr = Math.sqrt(dx * dx + dy * dy);
                     return `M${d.source.x},${d.source.y}A${dr},${dr} 0 0,1 ${d.target.x},${d.target.y}`;
                 });
@@ -769,8 +786,12 @@
 
         function getNodeRadius(node) {
             const base = 12;
-            const mentionsFactor = Math.min(node.mentions * 1.5, 8);
-            const importanceFactor = node.importance * 10;
+            // Handle Mem0 nodes which might not have mentions/importance
+            const mentions = node.mentions || 1;
+            const importance = node.importance || 0.5;
+            
+            const mentionsFactor = Math.min(mentions * 1.5, 8);
+            const importanceFactor = importance * 10;
             return base + mentionsFactor + importanceFactor;
         }
 

@@ -89,7 +89,7 @@ def _build_mem0_context(user_message: str) -> str:
         context = build_memory_context(
             user_message,
             user_id=config.MEM0_USER_ID,
-            max_relevant=config.MEM0_MAX_RELEVANT
+            max_relevant=10  # Increased from config default to ensure better coverage
         )
         
         formatted = format_memory_for_prompt(context)

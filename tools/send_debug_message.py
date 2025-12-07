@@ -24,6 +24,9 @@ def send_message(message: str, base_url='http://localhost:5000'):
         
         print(f"You: {data['user']}")
         print(f"AI: {data['ai']}")
+        if 'tokens' in data:
+            t = data['tokens']
+            print(f"[Tokens: In={t.get('input',0)} Out={t.get('output',0)} Total={t.get('total',0)}]")
         print(f"[History: {data['history_length']} messages]")
         print()
         
