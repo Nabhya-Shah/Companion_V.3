@@ -1,16 +1,20 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <title>Companion AI</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="stylesheet" href="/static/app.css" />
+  <link rel="stylesheet" href="/static/toast.css" />
+  <link rel="stylesheet" href="/static/computer-control.css" />
   <!-- Marked.js for Markdown rendering -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <!-- Highlight.js for code syntax highlighting -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
   <script src="https://cdn.jsdelivr.net/npm/highlight.js@11"></script>
 </head>
+
 <body>
   <div id="app-root">
     <!-- Main Content Area -->
@@ -25,7 +29,7 @@
           <button id="toggleMemoryBtn" class="icon-btn" title="Memory & Debug">🧠</button>
         </div>
       </header>
-      
+
       <main class="chat-container" id="chatPane">
         <!-- Welcome Screen -->
         <div class="welcome-screen" id="welcomeScreen">
@@ -33,25 +37,28 @@
           <h1>Hey there</h1>
           <p>What's on your mind?</p>
           <div class="suggestion-chips">
-            <button class="chip" data-prompt="Recommend me something to watch tonight">🎬 Recommend something to watch</button>
-            <button class="chip" data-prompt="Help me brainstorm ideas for a project">💡 Brainstorm project ideas</button>
+            <button class="chip" data-prompt="Recommend me something to watch tonight">🎬 Recommend something to
+              watch</button>
+            <button class="chip" data-prompt="Help me brainstorm ideas for a project">💡 Brainstorm project
+              ideas</button>
             <button class="chip" data-prompt="Explain something complex simply">📚 Explain something simply</button>
             <button class="chip" data-prompt="What's the weather like today?">🌤️ Check the weather</button>
           </div>
         </div>
-        
+
         <!-- Messages will be inserted here -->
       </main>
-      
+
       <footer class="composer">
         <div class="composer-wrapper">
           <div class="composer-box">
-            <textarea id="userInput" rows="1" placeholder="Message Companion..." spellcheck="false" autofocus></textarea>
+            <textarea id="userInput" rows="1" placeholder="Message Companion..." spellcheck="false"
+              autofocus></textarea>
             <div class="composer-tools">
               <span class="hint">Shift+Enter for new line</span>
               <button id="sendBtn" class="send-btn" disabled>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13"/>
+                  <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13" />
                 </svg>
               </button>
             </div>
@@ -59,6 +66,9 @@
         </div>
       </footer>
     </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
 
     <!-- Right Sidebar - Memory & Debug -->
     <aside class="memory-sidebar" id="memorySidebar">
@@ -136,7 +146,8 @@
             <div id="tokenByModel" class="token-by-model"></div>
           </div>
           <button id="refreshTokensBtn" class="refresh-btn">↻ Refresh</button>
-          <button id="resetTokensBtn" class="refresh-btn" style="margin-top: 8px; background: var(--error);">Reset Stats</button>
+          <button id="resetTokensBtn" class="refresh-btn" style="margin-top: 8px; background: var(--error);">Reset
+            Stats</button>
         </div>
         <div class="pane" id="pane-models">
           <div class="stats-card">
@@ -228,7 +239,7 @@
               </select>
             </div>
           </div>
-          
+
           <!-- Vision Section -->
           <div class="setting-section">
             <div class="setting-section-header">👁️ Vision</div>
@@ -240,7 +251,7 @@
               <p class="setting-hint" id="visionStatus">Companion can see and analyze your screen when asked</p>
             </div>
           </div>
-          
+
           <!-- Data Management Section -->
           <div class="setting-section">
             <div class="setting-section-header">💾 Data</div>
@@ -257,7 +268,7 @@
               </a>
             </div>
           </div>
-          
+
           <!-- Danger Zone -->
           <div class="setting-section danger-zone">
             <div class="setting-section-header">⚠️ Danger Zone</div>
@@ -278,7 +289,10 @@
       </div>
     </div>
   </div>
-  
+
+  <script src="/static/toast.js"></script>
+  <script src="/static/computer-control.js"></script>
   <script src="/static/app.js"></script>
 </body>
+
 </html>

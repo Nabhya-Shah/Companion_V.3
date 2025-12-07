@@ -1,5 +1,9 @@
 /* Modern Chat UI - Inspired by GPT/Gemini/Claude */
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
 :root {
   /* Dark theme */
@@ -10,37 +14,38 @@
   --bg-message-user: #2a2a2a;
   --bg-message-ai: transparent;
   --bg-input: #1a1a1a;
-  
+
   --border: #333;
   --border-light: #2a2a2a;
-  
+
   --text-primary: #ececec;
   --text-secondary: #9a9a9a;
   --text-muted: #666;
-  
+
   --accent: #7c3aed;
   --accent-hover: #8b5cf6;
   --accent-subtle: rgba(124, 58, 237, 0.1);
-  
+
   --success: #22c55e;
   --warning: #f59e0b;
   --error: #ef4444;
-  
+
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 20px;
   --radius-full: 9999px;
-  
+
   --sidebar-width: 260px;
   --topbar-height: 56px;
-  
+
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-  
+
   --transition: 0.2s ease;
 }
 
-html, body {
+html,
+body {
   height: 100%;
   overflow: hidden;
 }
@@ -81,7 +86,8 @@ body {
   flex-shrink: 0;
 }
 
-.topbar-left, .topbar-right {
+.topbar-left,
+.topbar-right {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -147,8 +153,15 @@ body {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .welcome-icon {
@@ -158,8 +171,15 @@ body {
 }
 
 @keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-8px); }
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-8px);
+  }
 }
 
 .welcome-screen h1 {
@@ -214,8 +234,15 @@ body {
 }
 
 @keyframes messageIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .message {
@@ -262,8 +289,15 @@ body {
 }
 
 @keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
 }
 
 .message-role {
@@ -335,7 +369,8 @@ body {
 }
 
 /* Lists in messages */
-.message-text ul, .message-text ol {
+.message-text ul,
+.message-text ol {
   margin: 12px 0;
   padding-left: 24px;
 }
@@ -390,17 +425,31 @@ body {
 .loading-dot {
   width: 8px;
   height: 8px;
-  background: var(--text-muted);
+  background: linear-gradient(135deg, var(--accent), #a855f7);
   border-radius: 50%;
-  animation: loadingPulse 1.4s ease-in-out infinite;
+  animation: loadingBounce 1.2s ease-in-out infinite;
 }
 
-.loading-dot:nth-child(2) { animation-delay: 0.2s; }
-.loading-dot:nth-child(3) { animation-delay: 0.4s; }
+.loading-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
 
-@keyframes loadingPulse {
-  0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
-  40% { transform: scale(1); opacity: 1; }
+.loading-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes loadingBounce {
+
+  0%,
+  100% {
+    transform: translateY(0) scale(0.8);
+    opacity: 0.6;
+  }
+
+  50% {
+    transform: translateY(-6px) scale(1);
+    opacity: 1;
+  }
 }
 
 /* ============================================
@@ -586,11 +635,15 @@ body {
   margin-bottom: 12px;
 }
 
-.profile-list, .insight-list, .summary-list {
+.profile-list,
+.insight-list,
+.summary-list {
   list-style: none;
 }
 
-.profile-list li, .insight-list li, .summary-list li {
+.profile-list li,
+.insight-list li,
+.summary-list li {
   padding: 10px 12px;
   background: var(--bg-tertiary);
   border-radius: var(--radius-sm);
@@ -1089,8 +1142,15 @@ body {
 }
 
 @keyframes modalIn {
-  from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .modal-header {
@@ -1285,12 +1345,12 @@ body {
   .suggestion-chips {
     flex-direction: column;
   }
-  
+
   .chip {
     width: 100%;
     text-align: left;
   }
-  
+
   .composer {
     padding: 12px 16px 16px;
   }

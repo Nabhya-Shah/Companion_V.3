@@ -23,6 +23,10 @@ memory_export_*.txt
 memory_export_*.json
 *.memory_export
 
+# Test/debug artifacts
+tools/test_*.png
+tools/*.log
+
 venv/
 .venv/
 env/

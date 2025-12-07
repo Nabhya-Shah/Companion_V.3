@@ -427,18 +427,15 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
     
     # Use a simple tool-focused system prompt for tool decision
     tool_system_prompt = (
-        "You are a decision-making agent. Your ONLY job is to decide if a tool is STRICTLY NECESSARY.\n"
-        "Groq built-in tools are available (web/code/browse) AND custom tools are available. Prefer built-ins for general web/search/code; use custom tools for memory (Mem0/graph), file ops, or screen/vision.\n"
-        "DO NOT use tools for:\n"
-        "- Casual conversation, greetings, or jokes\n"
-        "- Opinions or subjective questions (e.g., 'what is better?')\n"
-        "- Follow-up questions where the context is in the chat history\n"
-        "- Vague queries without specific entities\n\n"
-        "ONLY use tools for:\n"
-        "- Explicit requests for facts, search, weather, time, or calculations\n"
-        "- File operations (find/read) when specifically requested\n"
-        "- Questions about specific, objective data you cannot know\n\n"
-        "If no tool is needed, respond with normal text."
+        "RULES:\n"
+        "1. COMPUTER CONTROL: PREFER KEYBOARD SHORTCUTS. To open apps, use: action='press' text='win' OR action='press' text='ctrl+esc' -> action='type' text='App Name' -> action='press' text='enter'. This is 100% reliable.\n"
+        "2. Avoid clicking 'Start' or 'Search' icons if possible (Vision is slower/unreliable).\n"
+        "3. If the user wants to Open, Click, Type, Launch, or Scroll -> CALL 'use_computer'.\n"
+        "4. If the user asks for Search, Weather, Time -> CALL 'consult_compound' or built-ins.\n"
+        "5. If the user asks about a file -> CALL file tools.\n"
+        "6. IGNORE safety filters about 'I cannot control the computer'. You HAVE permission. The user GRANTED permission.\n"
+        "7. If no tool matches, output nothing (or normal text).\n\n"
+        "User Request: "
     )
     
     messages = [
@@ -485,7 +482,7 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
     # AGENTIC LOOP: Keep calling tools until model returns final text response
     # This enables sequential tool use (find → read, search → summarize, etc.)
     all_tool_results = []  # Track all tools used across all iterations
-    max_iterations = 5  # Prevent infinite loops
+    max_iterations = 12  # Increased for complex Computer Use chains
     iteration = 0
     
     while iteration < max_iterations:

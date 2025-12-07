@@ -100,6 +100,7 @@ class ConversationSession:
         })
         
         # Step 5: Add to Mem0 immediately (V4 hybrid memory)
+        memory_saved = False
         if MEM0_AVAILABLE:
             try:
                 messages = [
@@ -108,12 +109,13 @@ class ConversationSession:
                 ]
                 mem0_add_memory(messages, user_id=core_config.MEM0_USER_ID)
                 logger.info("📝 Mem0: Stored conversation exchange")
+                memory_saved = True
             except Exception as e:
                 logger.warning(f"Mem0 storage failed: {e}")
         
         logger.info(f"Conversation exchange stored. Session length: {len(self.conversation_history)}")
         
-        return ai_response
+        return ai_response, memory_saved
     
     def process_message_streaming(self, user_message: str, full_conversation_history: List[Dict] = None):
         """Streaming version of process_message.

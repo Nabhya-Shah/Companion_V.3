@@ -112,7 +112,7 @@ def chat():
             # Feed the vision result back into the conversation as context
             context_msg = f"[SYSTEM: The user asked you to look at their screen. Here is what you see:\n{vision_result}]"
             # Now generate response based on this visual context
-            ai_response = conversation_session.process_message(f"{context_msg}\n\nUser: {user_message}", conversation_history)
+            ai_response, memory_saved = conversation_session.process_message(f"{context_msg}\n\nUser: {user_message}", conversation_history)
         else:
             # Use conversation session with FULL conversation history
             # Inject visual context if watcher is enabled
@@ -126,7 +126,7 @@ def chat():
                 # Let's keep it simple for now:
                 pass 
             
-            ai_response = conversation_session.process_message(user_message, conversation_history)
+            ai_response, memory_saved = conversation_session.process_message(user_message, conversation_history)
         
         # Guard against empty responses
         if not ai_response or not ai_response.strip():
@@ -171,8 +171,10 @@ def chat():
         
         return jsonify({
             'response': ai_response, 
+            'response': ai_response, 
             'timestamp': entry['timestamp'],
-            'tokens': token_usage
+            'tokens': token_usage,
+            'memory_saved': memory_saved
         })
     except Exception as e:
         logger.error(f"Chat error: {e}")
@@ -207,7 +209,8 @@ def chat_streaming():
                 token_usage = get_last_token_usage()
                 
                 # Signal completion and update history
-                yield f"data: {json.dumps({'done': True, 'full_response': full_response, 'tokens': token_usage})}\n\n"
+                memory_saved = core_config.USE_MEM0
+                yield f"data: {json.dumps({'done': True, 'full_response': full_response, 'tokens': token_usage, 'memory_saved': memory_saved})}\n\n"
                 
                 # Store in history
                 entry = {
@@ -252,7 +255,7 @@ def debug_chat():
             return jsonify({'error': 'Empty message'}), 400
         
         # Use conversation session with FULL conversation history
-        ai_response = conversation_session.process_message(user_message, conversation_history)
+        ai_response, memory_saved = conversation_session.process_message(user_message, conversation_history)
         
         # Guard against empty responses
         if not ai_response or not ai_response.strip():
@@ -603,6 +606,25 @@ def vision_status():
         'log_count': len(vision_manager.visual_log),
         'last_update': vision_manager.visual_log[-1]['timestamp'] if vision_manager.visual_log else None
     })
+
+# --- Computer Control Endpoints ---
+@app.route('/api/computer/status', methods=['GET'])
+def computer_status():
+    """Return current computer control status for UI banner."""
+    from companion_ai.computer_agent import computer_agent
+    return jsonify({
+        'active': computer_agent.enabled and not computer_agent.safe_mode,
+        'safe_mode': computer_agent.safe_mode,
+        'screen': f"{computer_agent.screen_width}x{computer_agent.screen_height}"
+    })
+
+@app.route('/api/computer/stop', methods=['POST'])
+def computer_stop():
+    """Emergency stop for computer control."""
+    from companion_ai.computer_agent import computer_agent
+    computer_agent.safe_mode = True
+    logger.warning("Computer control STOPPED via API")
+    return jsonify({'success': True, 'message': 'Computer control disabled'})
 
 @app.route('/api/vision/analyze', methods=['POST'])
 def vision_analyze():

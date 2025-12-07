@@ -128,6 +128,8 @@ def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
         return tool_fn(arguments.get('filename', ''), arguments.get('file_type'))
     elif function_name == 'look_at_screen':
         return tool_fn(arguments.get('prompt', 'What is on the screen?'))
+    elif function_name == 'use_computer':
+        return tool_fn(action=arguments.get('action'), text=arguments.get('text'))
     else:
         # Fallback: pass first argument or empty string
         first_arg = next(iter(arguments.values()), '') if arguments else ''
@@ -712,5 +714,62 @@ def tool_consult_compound(query: str) -> str:
         return f"Compound System Result: {response_text}"
     except Exception as e:
         return f"Error consulting Compound System: {str(e)}"
+
+@tool('use_computer', schema={
+    "type": "function",
+    "function": {
+        "name": "use_computer",
+        "description": "DIRECTLY CONTROL the computer. Use this to OPEN applications, CLICK buttons, TYPE text, or navigate the UI. Do not just advise the user to do it—DO IT yourself. Example: to open Notepad, click the 'Start' button or type 'Notepad'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "Action to perform: 'click' (click element), 'type' (text), 'press' (key), 'launch' (open app via Run), 'scroll_up', 'scroll_down'",
+                    "enum": ["click", "type", "press", "launch", "scroll_up", "scroll_down"]
+                },
+                "text": {
+                    "type": "string",
+                    "description": "If action='click', the description of the element (e.g., 'Submit Button', 'File Menu'). If action='type', the text to type."
+                }
+            },
+            "required": ["action"]
+        }
+    }
+})
+def tool_use_computer(action: str, text: str = "") -> str:
+    """Execute computer control actions."""
+    from companion_ai.core import config as core_config
+    if not core_config.ENABLE_COMPUTER_USE:
+        return "Computer Use is disabled in configuration."
+
+    try:
+        from companion_ai.computer_agent import computer_agent
+        
+        if action == "click":
+            if not text: return "Error: 'text' (element description) is required for click action."
+            return computer_agent.click_element(text)
+            
+        elif action == "type":
+            if not text: return "Error: 'text' (content to type) is required for type action."
+            return computer_agent.type_text(text, enter=True)
+            
+        elif action == "press":
+            return computer_agent.press_key(text)
+            
+        elif action == "launch":
+            return computer_agent.launch_app(text)
+            
+        elif action == "scroll_up":
+            return computer_agent.scroll("up")
+            
+        elif action == "scroll_down":
+            return computer_agent.scroll("down")
+            
+        else:
+            return f"Unknown action: {action}"
+            
+    except Exception as e:
+        return f"Computer Use Error: {e}"
 
 __all__ = ['list_tools', 'run_tool', 'get_function_schemas', 'execute_function_call']

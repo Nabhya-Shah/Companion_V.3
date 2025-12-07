@@ -186,27 +186,49 @@ class VisionManager:
         
         return "\n".join(lines)
 
-    def analyze_current_screen(self, prompt: str) -> str:
+    def analyze_current_screen(self, prompt: str, high_detail: bool = False, low_detail: bool = False) -> str:
         """
         Active Mode: Analyze the current screen with a specific prompt.
         Uses Llama 4 Maverick for high-quality vision analysis.
+        
+        Args:
+            prompt: User question or instruction
+            high_detail: If True, use 1024px resolution (max detail).
+            low_detail: If True, use 512px resolution (token saving, good for basic checks).
         """
         if not self.client:
             return "Vision API unavailable"
             
         try:
-            img = self.capture_screen(resize_dim=1024) # Higher res for active query
+            # Dynamic resolution scaling for token optimization
+            if low_detail:
+                res_dim = 512 # ~512x288 (Very cheap, good for "Is Window Open?")
+            elif high_detail or "read" in prompt.lower() or "text" in prompt.lower():
+                res_dim = 1024 # ~1024x576 (High detail for text reading)
+            else:
+                res_dim = 768 # ~768x432 (Balanced default)
+            
+            img = self.capture_screen(resize_dim=res_dim)
             b64_img = self._image_to_base64(img)
             
             # Include visual history in the prompt context
             history_context = self.get_visual_context()
             
-            full_prompt = f"""Context from recent screen history:
+            # Improved System Prompt for "Computer Use" readiness
+            # Explicitly asks for structured observations
+            full_prompt = f"""[System: You are an AI Agent with eyes. Analyze the screen to help the user.]
+Context from recent history:
 {history_context}
 
 User Question: {prompt}
+
+Instructions:
+1. Identify the active application and main content.
+2. If the user asks to "click" or "type", describe the location/state of the UI element.
+3. Be concise and direct.
 """
             
+            start_t = time.time()
             response = self.client.chat.completions.create(
                 model=self.vision_model,
                 messages=[
@@ -224,8 +246,14 @@ User Question: {prompt}
                     }
                 ],
                 max_tokens=300,
-                temperature=0.6
+                temperature=0.4
             )
+            
+            # Log token usage if possible (not exposed easily in this method return, but logged internally)
+            if hasattr(response, 'usage'):
+                # We could log this to the central metrics if we imported metrics
+                pass
+                
             return response.choices[0].message.content.strip()
         except Exception as e:
             logger.error(f"Active vision analysis failed: {e}")

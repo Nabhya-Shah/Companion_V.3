@@ -63,21 +63,21 @@ function renderMarkdown(text) {
     // Fallback if marked.js not loaded
     return escapeHtml(text).replace(/\n/g, '<br>');
   }
-  
+
   // Configure marked
   marked.setOptions({
-    highlight: function(code, lang) {
+    highlight: function (code, lang) {
       if (typeof hljs !== 'undefined' && lang && hljs.getLanguage(lang)) {
         try {
           return hljs.highlight(code, { language: lang }).value;
-        } catch (e) {}
+        } catch (e) { }
       }
       return code;
     },
     breaks: true,
     gfm: true
   });
-  
+
   return marked.parse(text);
 }
 
@@ -85,7 +85,7 @@ function renderMarkdown(text) {
 function addCopyButtons(container) {
   container.querySelectorAll('pre').forEach(pre => {
     if (pre.querySelector('.code-copy-btn')) return;
-    
+
     const btn = document.createElement('button');
     btn.className = 'code-copy-btn';
     btn.textContent = 'Copy';
@@ -106,20 +106,20 @@ function addCopyButtons(container) {
 function createMessageElement(role, text, timestamp, tokens) {
   const wrapper = document.createElement('div');
   wrapper.className = 'message-wrapper';
-  
+
   const message = document.createElement('div');
   message.className = `message ${role}`;
-  
+
   const avatar = document.createElement('div');
   avatar.className = 'message-avatar';
   avatar.textContent = role === 'user' ? '👤' : '✨';
-  
+
   const content = document.createElement('div');
   content.className = 'message-content';
-  
+
   const roleLabel = document.createElement('div');
   roleLabel.className = 'message-role';
-  
+
   // Role label with optional token stats
   const roleName = role === 'user' ? 'You' : 'Companion';
   let tokenHtml = '';
@@ -127,26 +127,26 @@ function createMessageElement(role, text, timestamp, tokens) {
     const total = (tokens.input || 0) + (tokens.output || 0);
     tokenHtml = `<span class="token-badge" title="Input: ${tokens.input} | Output: ${tokens.output}">(${total} tokens)</span>`;
   }
-  
+
   roleLabel.innerHTML = `${roleName} ${tokenHtml}`;
-  
+
   const textDiv = document.createElement('div');
   textDiv.className = 'message-text';
-  
+
   if (role === 'ai') {
     textDiv.innerHTML = renderMarkdown(text);
     setTimeout(() => addCopyButtons(textDiv), 0);
   } else {
     textDiv.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
   }
-  
+
   content.appendChild(roleLabel);
   content.appendChild(textDiv);
-  
+
   // Action buttons
   const actions = document.createElement('div');
   actions.className = 'message-actions';
-  
+
   const copyBtn = document.createElement('button');
   copyBtn.className = 'action-btn';
   copyBtn.innerHTML = '📋 Copy';
@@ -156,13 +156,13 @@ function createMessageElement(role, text, timestamp, tokens) {
     setTimeout(() => copyBtn.innerHTML = '📋 Copy', 2000);
   };
   actions.appendChild(copyBtn);
-  
+
   content.appendChild(actions);
-  
+
   message.appendChild(avatar);
   message.appendChild(content);
   wrapper.appendChild(message);
-  
+
   return wrapper;
 }
 
@@ -170,31 +170,31 @@ function createLoadingMessage() {
   const wrapper = document.createElement('div');
   wrapper.className = 'message-wrapper';
   wrapper.id = 'loading-message';
-  
+
   const message = document.createElement('div');
   message.className = 'message ai loading';
-  
+
   const avatar = document.createElement('div');
   avatar.className = 'message-avatar';
   avatar.textContent = '✨';
-  
+
   const content = document.createElement('div');
   content.className = 'message-content';
-  
+
   const roleLabel = document.createElement('div');
   roleLabel.className = 'message-role';
   roleLabel.textContent = 'Companion';
-  
+
   const textDiv = document.createElement('div');
   textDiv.className = 'message-text';
   textDiv.innerHTML = '<span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span>';
-  
+
   content.appendChild(roleLabel);
   content.appendChild(textDiv);
   message.appendChild(avatar);
   message.appendChild(content);
   wrapper.appendChild(message);
-  
+
   return wrapper;
 }
 
@@ -203,15 +203,18 @@ function addMessage(role, text, timestamp, tokens) {
   if (welcomeScreen && welcomeScreen.parentNode) {
     welcomeScreen.remove();
   }
-  
+
   const messageEl = createMessageElement(role, text, timestamp, tokens);
   chatPane.appendChild(messageEl);
   scrollToBottom();
 }
 
-function scrollToBottom() {
+function scrollToBottom(instant = false) {
   setTimeout(() => {
-    chatPane.scrollTop = chatPane.scrollHeight;
+    chatPane.scrollTo({
+      top: chatPane.scrollHeight,
+      behavior: instant ? 'auto' : 'smooth'
+    });
   }, 50);
 }
 
@@ -221,35 +224,35 @@ function scrollToBottom() {
 async function sendMessage(retry = false) {
   const message = userInput.value.trim();
   if (!message) return;
-  
+
   // Add user message
   addMessage('user', message);
   userInput.value = '';
   resizeTextarea();
   updateSendButton();
-  
+
   // Create streaming AI message with proper structure (matching createMessageElement)
   const wrapper = document.createElement('div');
   wrapper.className = 'message-wrapper';
-  
+
   const aiMsgEl = document.createElement('div');
   aiMsgEl.className = 'message ai';
-  
+
   const avatar = document.createElement('div');
   avatar.className = 'message-avatar';
   avatar.textContent = '✨';
-  
+
   const content = document.createElement('div');
   content.className = 'message-content';
-  
+
   const roleLabel = document.createElement('div');
   roleLabel.className = 'message-role';
   roleLabel.textContent = 'Companion';
-  
+
   const textDiv = document.createElement('div');
   textDiv.className = 'message-text';
   textDiv.innerHTML = '<span class="text-content"></span><span class="streaming-cursor">▋</span>';
-  
+
   content.appendChild(roleLabel);
   content.appendChild(textDiv);
   aiMsgEl.appendChild(avatar);
@@ -257,18 +260,18 @@ async function sendMessage(retry = false) {
   wrapper.appendChild(aiMsgEl);
   chatPane.appendChild(wrapper);
   scrollToBottom();
-  
+
   const textEl = textDiv.querySelector('.text-content');
   const cursorEl = textDiv.querySelector('.streaming-cursor');
-  
+
   // Set streaming flag to prevent SSE overwrites
   isStreaming = true;
-  
+
   // Typewriter state
   let displayedText = '';
   let pendingText = '';
   let isTyping = false;
-  
+
   // Smooth typewriter effect - types out pending text char by char
   async function typeNextChar() {
     if (pendingText.length === 0) {
@@ -276,16 +279,16 @@ async function sendMessage(retry = false) {
       return;
     }
     isTyping = true;
-    
+
     // Type 1-3 chars at a time for natural feel
     const charsToType = Math.min(pendingText.length, Math.random() > 0.7 ? 2 : 1);
     const chars = pendingText.slice(0, charsToType);
     pendingText = pendingText.slice(charsToType);
     displayedText += chars;
-    
+
     textEl.textContent = displayedText;
     scrollToBottom();
-    
+
     // Variable delay for natural rhythm (faster for spaces, slower for punctuation)
     let delay = 15 + Math.random() * 10;
     if (chars.includes('.') || chars.includes('!') || chars.includes('?')) {
@@ -293,10 +296,10 @@ async function sendMessage(retry = false) {
     } else if (chars.includes(',')) {
       delay = 40 + Math.random() * 20; // Brief pause at commas
     }
-    
+
     setTimeout(typeNextChar, delay);
   }
-  
+
   // Add text to pending queue and start typing if not already
   function queueText(text) {
     pendingText += text;
@@ -304,14 +307,14 @@ async function sendMessage(retry = false) {
       typeNextChar();
     }
   }
-  
+
   try {
     const resp = await fetch('/api/chat/send', {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({ message, tts_enabled: ttsEnabled })
     });
-    
+
     if (resp.status === 401 && !retry) {
       const tok = prompt('API token required. Enter token:');
       if (tok) {
@@ -320,34 +323,34 @@ async function sendMessage(retry = false) {
         return sendMessage(true);
       }
     }
-    
+
     if (!resp.ok) {
       const data = await resp.json();
       throw new Error(data.error || 'Error');
     }
-    
+
     // Read streaming response
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let fullResponse = '';
-    
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      
+
       const text = decoder.decode(value);
       const lines = text.split('\n');
-      
+
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           try {
             const data = JSON.parse(line.slice(6));
-            
+
             if (data.chunk) {
               fullResponse += data.chunk;
               queueText(data.chunk);
             }
-            
+
             if (data.done && data.tokens && showTokens) {
               const roleLabel = wrapper.querySelector('.message-role');
               if (roleLabel) {
@@ -358,7 +361,11 @@ async function sendMessage(retry = false) {
               // Refresh global token stats automatically
               loadTokenStats();
             }
-            
+
+            if (data.done && data.memory_saved) {
+              if (window.showToast) showToast("Memory Updated ✨", "success");
+            }
+
             if (data.error) {
               throw new Error(data.error);
             }
@@ -368,7 +375,7 @@ async function sendMessage(retry = false) {
         }
       }
     }
-    
+
     // Wait for typing to finish, then remove cursor smoothly
     const waitForTyping = () => {
       if (pendingText.length > 0 || isTyping) {
@@ -388,7 +395,7 @@ async function sendMessage(retry = false) {
       }
     };
     waitForTyping();
-    
+
   } catch (e) {
     isStreaming = false; // Clear flag on error too
     wrapper.remove();
@@ -438,17 +445,17 @@ exportChatBtn?.addEventListener('click', async (e) => {
     const resp = await fetch('/api/chat/history', { headers: authHeaders() });
     if (!resp.ok) throw new Error('Failed to fetch history');
     const data = await resp.json();
-    
+
     // Format as readable text
     let text = 'Companion AI - Chat History\n';
-    text += '=' .repeat(40) + '\n\n';
-    
+    text += '='.repeat(40) + '\n\n';
+
     (data.history || []).forEach(entry => {
       if (entry.user) text += `You: ${entry.user}\n\n`;
       if (entry.ai) text += `Companion: ${entry.ai}\n\n`;
       text += '---\n\n';
     });
-    
+
     // Download as file
     const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -457,7 +464,7 @@ exportChatBtn?.addEventListener('click', async (e) => {
     a.download = `companion-chat-${new Date().toISOString().split('T')[0]}.txt`;
     a.click();
     URL.revokeObjectURL(url);
-    
+
     settingsModal.classList.remove('visible');
   } catch (err) {
     console.error('Export failed:', err);
@@ -469,14 +476,14 @@ exportChatBtn?.addEventListener('click', async (e) => {
 clearMemoryBtn?.addEventListener('click', async (e) => {
   e.preventDefault();
   if (!confirm('Are you sure you want to clear all memory? This cannot be undone.')) return;
-  
+
   try {
     // 1. Clear actual memory (SQLite + Mem0)
     await fetch('/api/memory/clear', { method: 'POST', headers: authHeaders() });
 
     // 2. Reset conversation history
     await fetch('/api/debug/reset', { method: 'POST', headers: authHeaders() });
-    
+
     // Clear UI
     chatPane.innerHTML = '';
     const welcome = document.createElement('div');
@@ -493,7 +500,7 @@ clearMemoryBtn?.addEventListener('click', async (e) => {
     `;
     chatPane.appendChild(welcome);
     attachChipListeners();
-    
+
     lastHistoryLength = 0;
     settingsModal.classList.remove('visible');
     loadMemory(); // Refresh memory panel
@@ -507,11 +514,11 @@ clearMemoryBtn?.addEventListener('click', async (e) => {
 clearChatBtn?.addEventListener('click', async (e) => {
   e.preventDefault();
   if (!confirm('Clear chat history? Your memory (facts about you) will be preserved.')) return;
-  
+
   try {
     // Just reset conversation, not memory
     await fetch('/api/debug/reset', { method: 'POST', headers: authHeaders() });
-    
+
     // Clear UI
     chatPane.innerHTML = '';
     const welcome = document.createElement('div');
@@ -528,7 +535,7 @@ clearChatBtn?.addEventListener('click', async (e) => {
     `;
     chatPane.appendChild(welcome);
     attachChipListeners();
-    
+
     lastHistoryLength = 0;
     settingsModal.classList.remove('visible');
   } catch (err) {
@@ -576,19 +583,19 @@ async function loadMemory(retry = false) {
       if (tok) { setApiToken(tok); return loadMemory(true); }
       return;
     }
-    
+
     const data = await r.json();
     if (data.error) return;
-    
+
     const detailed = data.profile_detailed || [];
     const insights = data.insights || [];
     const summaries = data.summaries || [];
-    
+
     // Update stats
     document.getElementById('memFactCount').textContent = detailed.length;
     document.getElementById('memInsightCount').textContent = insights.length;
     document.getElementById('memSummaryCount').textContent = summaries.length;
-    
+
     // Profile facts as cards with delete capability
     const profileDiv = document.getElementById('profileList');
     if (profileDiv) {
@@ -599,9 +606,9 @@ async function loadMemory(retry = false) {
         card.className = 'fact-card';
         card.dataset.key = row.key;
         card.title = 'Click to delete this fact';
-        
+
         const confLabel = row.confidence_label || (row.confidence >= 0.8 ? 'high' : row.confidence >= 0.5 ? 'medium' : 'low');
-        
+
         card.innerHTML = `
           <div class="fact-key" style="display:none">${row.key}</div>
           <div class="fact-value">${row.value}</div>
@@ -610,7 +617,7 @@ async function loadMemory(retry = false) {
             ${row.reaffirmations ? `<span>×${row.reaffirmations} confirmed</span>` : ''}
           </div>
         `;
-        
+
         card.addEventListener('click', () => deleteFact(row.key, card));
         profileDiv.appendChild(card);
       });
@@ -618,7 +625,7 @@ async function loadMemory(retry = false) {
         profileDiv.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 12px;">No facts stored yet. Chat with me so I can learn about you!</div>';
       }
     }
-    
+
     // Insights as cards
     const insightDiv = document.getElementById('insightList');
     if (insightDiv) {
@@ -644,13 +651,13 @@ async function deleteFact(key, cardElement) {
   // We'll show the text content in the confirmation dialog instead.
   const text = cardElement.querySelector('.fact-value').textContent;
   if (!confirm(`Delete memory: "${text}"?`)) return;
-  
+
   try {
     const r = await fetch(`/api/memory/fact/${encodeURIComponent(key)}`, {
       method: 'DELETE',
       headers: authHeaders()
     });
-    
+
     if (r.ok) {
       cardElement.style.opacity = '0';
       cardElement.style.transform = 'translateX(-20px)';
@@ -680,7 +687,7 @@ async function loadModelsPanel(retry = false) {
   const modelCards = document.getElementById('modelCards');
   const featureFlags = document.getElementById('featureFlags');
   if (!modelCards) return;
-  
+
   try {
     const r = await fetch('/api/models', { headers: authHeaders() });
     if (r.status === 401 && !retry) {
@@ -688,10 +695,10 @@ async function loadModelsPanel(retry = false) {
       if (tok) { setApiToken(tok); return loadModelsPanel(true); }
       return;
     }
-    
+
     const d = await r.json();
     if (d.error) return;
-    
+
     // Model cards
     modelCards.innerHTML = '';
     if (d.models) {
@@ -712,7 +719,7 @@ async function loadModelsPanel(retry = false) {
         modelCards.appendChild(card);
       });
     }
-    
+
     // Feature flags
     if (featureFlags) {
       featureFlags.innerHTML = '';
@@ -742,46 +749,46 @@ async function loadMetrics(retry = false) {
       if (tok) { setApiToken(tok); return loadMetrics(true); }
       return;
     }
-    
+
     const data = await r.json();
-    
+
     // Update summary stats
     const interactions = data.metrics?.total_interactions || 0;
     const toolCalls = data.metrics?.tools?.total_invocations || 0;
-    
+
     const interactionsEl = document.getElementById('metricInteractions');
     const latencyEl = document.getElementById('metricAvgLatency');
     const toolsEl = document.getElementById('metricToolCalls');
-    
+
     if (interactionsEl) interactionsEl.textContent = interactions;
     if (toolsEl) toolsEl.textContent = toolCalls;
-    
+
     // Calculate overall average latency
     let totalLatency = 0;
     let modelCount = 0;
     const models = data.metrics?.models || {};
-    
+
     Object.values(models).forEach(info => {
       if (info.avg_latency_ms) {
         totalLatency += info.avg_latency_ms;
         modelCount++;
       }
     });
-    
+
     const avgLatency = modelCount > 0 ? Math.round(totalLatency / modelCount) : 0;
     if (latencyEl) latencyEl.textContent = avgLatency + 'ms';
-    
+
     // Build latency bars
     const latencyBars = document.getElementById('latencyBars');
     if (latencyBars) {
       const maxLatency = Math.max(...Object.values(models).map(m => m.avg_latency_ms || 0), 1);
-      
+
       let barsHtml = '';
       Object.entries(models).forEach(([name, info]) => {
         const shortName = name.split('/').pop().substring(0, 12);
         const pct = Math.round((info.avg_latency_ms || 0) / maxLatency * 100);
         const color = pct > 66 ? 'var(--danger)' : pct > 33 ? 'var(--warning)' : 'var(--success)';
-        
+
         barsHtml += `
           <div class="latency-row">
             <span class="latency-name">${shortName}</span>
@@ -791,11 +798,11 @@ async function loadMetrics(retry = false) {
             <span class="latency-value">${info.avg_latency_ms || 0}ms</span>
           </div>`;
       });
-      
+
       if (barsHtml === '') {
         barsHtml = '<div class="empty-state">No latency data yet</div>';
       }
-      
+
       latencyBars.innerHTML = barsHtml;
     }
   } catch (e) {
@@ -816,16 +823,16 @@ async function loadTokenStats(retry = false) {
       if (tok) { setApiToken(tok); return loadTokenStats(true); }
       return;
     }
-    
+
     const data = await r.json();
-    
+
     // Update totals
     const total = (data.total_input || 0) + (data.total_output || 0);
     document.getElementById('tokenTotal').textContent = total.toLocaleString();
     document.getElementById('tokenInput').textContent = (data.total_input || 0).toLocaleString();
     document.getElementById('tokenOutput').textContent = (data.total_output || 0).toLocaleString();
     document.getElementById('tokenRequests').textContent = data.requests || 0;
-    
+
     // Update by-model breakdown
     const byModelDiv = document.getElementById('tokenByModel');
     if (byModelDiv && data.by_model) {
@@ -842,7 +849,7 @@ async function loadTokenStats(retry = false) {
         `;
         byModelDiv.appendChild(row);
       });
-      
+
       if (Object.keys(data.by_model).length === 0) {
         byModelDiv.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">No requests yet</div>';
       }
@@ -873,7 +880,7 @@ async function loadSettings() {
   const visionToggle = document.getElementById('visionToggle');
   const visionStatus = document.getElementById('visionStatus');
   const showTokensToggle = document.getElementById('showTokensToggle');
-  
+
   // Show Tokens toggle
   if (showTokensToggle) {
     showTokensToggle.checked = showTokens;
@@ -884,7 +891,7 @@ async function loadSettings() {
       renderHistory(currentConversation);
     });
   }
-  
+
   // TTS toggle
   if (ttsToggle) {
     ttsToggle.checked = ttsEnabled;
@@ -893,12 +900,12 @@ async function loadSettings() {
       localStorage.setItem('companion_tts_enabled', ttsEnabled);
     });
   }
-  
+
   try {
     // Load voices
     const vResp = await fetch('/api/tts/voices', { headers: authHeaders() });
     const vData = await vResp.json();
-    
+
     if (vData.voices && voiceSelect) {
       voiceSelect.innerHTML = '';
       vData.voices.forEach(v => {
@@ -908,14 +915,14 @@ async function loadSettings() {
         voiceSelect.appendChild(opt);
       });
     }
-    
+
     // Load current config
     const cResp = await fetch('/api/tts/config', { headers: authHeaders() });
     const cData = await cResp.json();
-    
+
     if (cData.voice && voiceSelect) voiceSelect.value = cData.voice;
     if (cData.rate && rateSelect) rateSelect.value = cData.rate;
-    
+
     // Voice change handler
     voiceSelect?.addEventListener('change', async () => {
       await fetch('/api/tts/config', {
@@ -924,7 +931,7 @@ async function loadSettings() {
         body: JSON.stringify({ voice: voiceSelect.value })
       });
     });
-    
+
     rateSelect?.addEventListener('change', async () => {
       await fetch('/api/tts/config', {
         method: 'POST',
@@ -932,7 +939,7 @@ async function loadSettings() {
         body: JSON.stringify({ rate: rateSelect.value })
       });
     });
-    
+
     // Vision toggle
     if (visionToggle) {
       const visResp = await fetch('/api/vision/status', { headers: authHeaders() });
@@ -941,7 +948,7 @@ async function loadSettings() {
       if (visionStatus) {
         visionStatus.textContent = visData.enabled ? 'Status: Active' : 'Status: Off';
       }
-      
+
       visionToggle.addEventListener('change', async () => {
         const resp = await fetch('/api/vision/toggle', {
           method: 'POST',
@@ -963,29 +970,29 @@ async function loadSettings() {
 // ============================================
 function renderHistory(history) {
   if (!history || history.length === 0) return;
-  
+
   // Don't overwrite while streaming - let the typewriter finish
   if (isStreaming) return;
-  
+
   const totalMessages = history.reduce((n, e) => n + (e.user ? 1 : 0) + (e.ai ? 1 : 0), 0);
-  
+
   // Skip if no change
   if (totalMessages === lastHistoryLength) return;
   lastHistoryLength = totalMessages;
-  
+
   // Remove welcome screen
   const welcome = document.getElementById('welcomeScreen');
   if (welcome && welcome.parentNode) {
     welcome.remove();
   }
-  
+
   // Remove loading indicator if present
   const loading = document.getElementById('loading-message');
   if (loading) loading.remove();
-  
+
   // Clear and re-render
   chatPane.querySelectorAll('.message-wrapper').forEach(el => el.remove());
-  
+
   history.forEach(entry => {
     if (entry.user) addMessage('user', entry.user);
     if (entry.ai) addMessage('ai', entry.ai, null, entry.tokens);
@@ -996,7 +1003,7 @@ async function syncChatHistory() {
   try {
     const resp = await fetch('/api/chat/history', { headers: authHeaders() });
     if (!resp.ok) return;
-    
+
     const data = await resp.json();
     renderHistory(data.history || []);
   } catch (e) {
@@ -1006,9 +1013,9 @@ async function syncChatHistory() {
 
 function startSSE() {
   if (eventSource) return;
-  
+
   eventSource = new EventSource('/api/chat/stream');
-  
+
   eventSource.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
@@ -1017,7 +1024,7 @@ function startSSE() {
       console.error('SSE parse error:', e);
     }
   };
-  
+
   eventSource.onerror = (e) => {
     console.warn('SSE connection error, will auto-reconnect');
     // EventSource auto-reconnects, no action needed
@@ -1061,7 +1068,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadTokenStats();
   loadSettings();
   updateSendButton();
-  
+
   // Use SSE for real-time updates (only pushes when messages change)
   startSSE();
 });

@@ -50,13 +50,13 @@ def require_auth(token: str) -> bool:
 # - COMPOUND: Web/weather fast path
 
 PRIMARY_MODEL = "openai/gpt-oss-120b"  # Decisions, synthesis, personality
-TOOLS_MODEL = "openai/gpt-oss-120b"  # Planner: Uses cached prompt to decide tools
+TOOLS_MODEL = "llama-3.1-8b-instant"  # Planner: Uses cached prompt to decide tools (Was 120B - causing token spikes!)
 TOOLS_MODEL_FAST = "llama-3.1-8b-instant"  # Backup / Fast execution if needed
 VISION_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"  # Vision tasks (Maverick)
 COMPOUND_MODEL = "compound-beta"  # Disabled
 
 # Feature flag: Use fast tool executor by default
-USE_FAST_TOOL_EXECUTOR = False
+USE_FAST_TOOL_EXECUTOR = True
 
 # Model capabilities reference (for documentation)
 # - 120B: 128k context, high intelligence, expensive
@@ -225,15 +225,16 @@ ENABLE_COMPOUND = False  # Disabled: User prefers native tool calling
 ENABLE_AUTO_TOOLS = True  # Auto-detect when tools are needed
 ENABLE_STRUCTURED_FACTS = True  # Use structured outputs for fact extraction
 ENABLE_GROQ_BUILTINS = True  # Allow 120B built-in tools (web/code/browse) alongside custom tools
+ENABLE_COMPUTER_USE = True   # Enable ComputerAgent (PyAutoGUI + Vision)
 
 # Model roles mapping (V4 architecture)
 MODEL_ROLES = {
     "primary": PRIMARY_MODEL,      # Decisions, synthesis, personality  
     "chat": PRIMARY_MODEL,         # Casual conversation
-    "tools": TOOLS_MODEL,          # Tool execution (Scout for reliability)
+    "tools": TOOLS_MODEL,          # Tool execution (Scout for now; Planner uses 120B)
     "tools_fast": TOOLS_MODEL_FAST,  # Future: pure execution
     "vision": VISION_MODEL,        # Image analysis
-    "compound": COMPOUND_MODEL,    # Web/weather fast path
+    "compound": "DISABLED",        # Explicitly disabled
     "memory": PRIMARY_MODEL,       # Memory operations
     "summary": PRIMARY_MODEL,      # Summarization
     "facts": PRIMARY_MODEL,        # Fact extraction
@@ -278,6 +279,7 @@ TOOL_TRIGGERS = [
     "time", "weather", "calculate", "search", "find", "look up",
     "what is", "who is", "where is", "wikipedia", "read", "file",
     "screen", "look at", "pdf", "document",
+    "open", "launch", "click", "type", "scroll", "press",
 ]
 
 def needs_tools(query: str) -> bool:

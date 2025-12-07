@@ -24,6 +24,7 @@ openai-whisper>=20231117
 
 # Vision
 mss>=9.0.1              # Fast screen capture
+pyautogui>=0.9.53       # UI automation (mouse/keyboard)
 
 # Knowledge Graph & Embeddings
 networkx>=3.1           # Graph operations for knowledge graph
