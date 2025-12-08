@@ -25,8 +25,8 @@ FLAGS = [
     "ENABLE_FACT_EXTRACTION",
     "ENABLE_TOOL_CALLING",
     "ENABLE_VISION",
-    "ENABLE_COMPOUND",
     "ENABLE_AUTO_TOOLS",
+    # ENABLE_COMPOUND removed - V5 uses 120B built-in search
 ]
 
 def present(name: str) -> bool:
@@ -47,13 +47,15 @@ def main():
         v = os.getenv(f)
         report['flags'][f] = {"set": v is not None, "value": v}
     print("=== Companion AI Environment Check ===")
-    print("=== Simplified 4-Model Architecture ===")
+    print("=== V5 Architecture ===")
     print()
-    print("Models:")
+    print("Cloud Models (Groq):")
     print("  - PRIMARY (120B): openai/gpt-oss-120b")
-    print("  - TOOLS (Scout): meta-llama/llama-4-scout-17b-16e-instruct")
+    print("  - TOOLS (8B): llama-3.1-8b-instant")
     print("  - VISION (Maverick): meta-llama/llama-4-maverick-17b-128e-instruct")
-    print("  - COMPOUND: compound-beta")
+    print()
+    print("Local Models (Ollama):")
+    print("  - llama3.2, minicpm-v, qwen2.5-coder")
     print()
     if missing_required:
         print("Missing required variables:", ", ".join(missing_required))

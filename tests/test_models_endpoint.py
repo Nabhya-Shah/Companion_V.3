@@ -15,7 +15,7 @@ def test_models_endpoint_structure():
     assert models.get('PRIMARY_MODEL') == core_config.PRIMARY_MODEL
     assert models.get('TOOLS_MODEL') == core_config.TOOLS_MODEL
     assert models.get('VISION_MODEL') == core_config.VISION_MODEL
-    assert models.get('COMPOUND_MODEL') == core_config.COMPOUND_MODEL
+    # COMPOUND_MODEL removed in V5
     
     # Check flags
     assert 'flags' in data

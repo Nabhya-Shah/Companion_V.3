@@ -46,4 +46,4 @@ def test_model_roles_mapping():
     assert config.MODEL_ROLES['chat'] == config.PRIMARY_MODEL
     assert config.MODEL_ROLES['tools'] == config.TOOLS_MODEL
     assert config.MODEL_ROLES['vision'] == config.VISION_MODEL
-    assert config.MODEL_ROLES['compound'] == config.COMPOUND_MODEL
+    assert config.MODEL_ROLES['compound'] == "DISABLED"  # V5: Compound removed

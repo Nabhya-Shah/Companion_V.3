@@ -119,10 +119,9 @@ def choose_model(task: str = 'chat', complexity: int = 1, importance: float = 0.
         model = TOOLS_MODEL
     elif task in ('vision', 'image', 'screen'):
         model = VISION_MODEL
-    elif task in ('web_search', 'weather', 'calculate', 'compound'):
-        model = COMPOUND_MODEL
+    # V5: compound/web_search now use PRIMARY_MODEL (120B has built-in search)
     else:
-        # Everything else uses PRIMARY_MODEL (chat, summary, facts, insight, memory, reasoning)
+        # Everything else uses PRIMARY_MODEL (chat, summary, facts, insight, memory, reasoning, web_search)
         model = PRIMARY_MODEL
     
     if return_reason:
@@ -241,10 +240,7 @@ MODEL_ROLES = {
 # Set to True to enable V4 tool routing (120B decides, 8B executes)
 # USE_FAST_TOOL_EXECUTOR = False  # REMOVED DUPLICATE DEFINITION
 
-# ============================================================================
-# COMPOUND DETECTION - What queries should use Groq Compound
-# COMPOUND_TRIGGERS, should_use_compound(), get_compound_model() removed - V5 cleanup
-# 120B has built-in search capabilities
+# V5: Compound disabled - 120B has built-in search
 
 # ============================================================================
 # COMPLEXITY CLASSIFICATION - Simplified (no escalation)

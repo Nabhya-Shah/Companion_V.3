@@ -741,7 +741,7 @@ def models_info():
                 'PRIMARY_MODEL': core_config.PRIMARY_MODEL,
                 'TOOLS_MODEL': core_config.TOOLS_MODEL,
                 'VISION_MODEL': core_config.VISION_MODEL,
-                'COMPOUND_MODEL': core_config.COMPOUND_MODEL,
+                # COMPOUND_MODEL removed - V5 cleanup
             },
             'model_info': core_config.MODEL_INFO,
             'flags': {
@@ -749,7 +749,6 @@ def models_info():
                 'fact_extraction': core_config.ENABLE_FACT_EXTRACTION,
                 'tool_calling': core_config.ENABLE_TOOL_CALLING,
                 'vision': core_config.ENABLE_VISION,
-                'compound': core_config.ENABLE_COMPOUND,
                 'auto_tools': core_config.ENABLE_AUTO_TOOLS,
             },
             # Legacy fields for backward compatibility
