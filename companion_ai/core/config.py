@@ -53,7 +53,7 @@ PRIMARY_MODEL = "openai/gpt-oss-120b"  # Decisions, synthesis, personality
 TOOLS_MODEL = "llama-3.1-8b-instant"  # Planner: Uses cached prompt to decide tools (Was 120B - causing token spikes!)
 TOOLS_MODEL_FAST = "llama-3.1-8b-instant"  # Backup / Fast execution if needed
 VISION_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"  # Vision tasks (Maverick)
-COMPOUND_MODEL = "compound-beta"  # Disabled
+# COMPOUND_MODEL removed - V5 cleanup
 
 # Feature flag: Use fast tool executor by default
 USE_FAST_TOOL_EXECUTOR = True
@@ -83,11 +83,7 @@ MODEL_INFO = {
         "context_window": 131072,
         "tool_use": True,
     },
-    "compound-beta": {
-        "description": "Built-in web search, weather, calculations",
-        "context_window": 128000,
-        "compound": True,
-    },
+    # compound-beta removed - V5 cleanup
 }
 
 
@@ -247,29 +243,8 @@ MODEL_ROLES = {
 
 # ============================================================================
 # COMPOUND DETECTION - What queries should use Groq Compound
-# ============================================================================
-# Be specific to avoid false positives on casual conversation
-COMPOUND_TRIGGERS = [
-    # Weather (specific phrases)
-    "weather in", "weather like", "temperature in", "forecast for",
-    "is it raining", "will it rain", "is it sunny",
-    # Search (explicit requests)
-    "search for", "look up", "google", "find information",
-    # Calculations (explicit)
-    "calculate", "compute", "what is", "how much is",
-    # Current info (specific)
-    "current time", "what time", "current date", "today's date",
-    "latest news", "recent news",
-]
-
-def should_use_compound(query: str) -> bool:
-    """Check if query should use Groq Compound for built-in tools."""
-    query_lower = query.lower()
-    return any(trigger in query_lower for trigger in COMPOUND_TRIGGERS)
-
-def get_compound_model() -> str:
-    """Get the Compound model name."""
-    return COMPOUND_MODEL
+# COMPOUND_TRIGGERS, should_use_compound(), get_compound_model() removed - V5 cleanup
+# 120B has built-in search capabilities
 
 # ============================================================================
 # COMPLEXITY CLASSIFICATION - Simplified (no escalation)

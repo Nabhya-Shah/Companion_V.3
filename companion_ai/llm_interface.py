@@ -253,29 +253,13 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
         
         # Generate response with native function calling
         if first_output is None:
-            # V4.1 ARCHITECTURE: Compound-as-Context
-            # If query is weather/search/calc, run Compound FIRST and inject result into 120B context.
-            # This avoids the expensive tool loop (12k tokens) and ensures 120B sees memory + real-time info.
-            compound_result = None
-            if core_config.should_use_compound(user_message):
-                try:
-                    logger.info("🚀 Fast Path: Pre-fetching Compound data...")
-                    compound_text, _ = generate_compound_response(user_message, "")
-                    if compound_text and "No response" not in compound_text:
-                        compound_result = compound_text
-                        # Inject into system prompt
-                        system_prompt += f"\n\n[REAL-TIME INFORMATION]\n{compound_result}\n[Use this information to answer the user's question naturally]"
-                        logger.info(f"✅ Injected Compound result: {compound_result[:50]}...")
-                except Exception as e:
-                    logger.warning(f"Compound pre-fetch failed: {e}")
-
+            # V5: Compound removed - 120B has built-in search capabilities
+            
             # OPTIMIZATION: Skip tool checking for casual chat (complexity 0) to save tokens
             # Tool schemas add ~8-10K tokens per request!
-            # We check tools if complexity > 0 AND we haven't already solved it with Compound
             should_check_tools = (
                 core_config.ENABLE_AUTO_TOOLS and 
-                complexity > 0 and 
-                compound_result is None  # Skip tools if we already got Compound data
+                complexity > 0
             )
             
             if first_output is None and should_check_tools:
@@ -353,18 +337,10 @@ def generate_response_streaming(user_message: str, memory_context: dict, model: 
         # Check if we need tools (non-streaming for tool execution)
         should_check_tools = (
             core_config.ENABLE_AUTO_TOOLS and 
-            (complexity > 0 or core_config.should_use_compound(user_message))
+            complexity > 0
         )
         
-        if core_config.should_use_compound(user_message):
-            # Compound queries (web/weather) - run non-streaming, yield result
-            try:
-                result, _ = generate_compound_response(user_message, system_prompt)
-                for word in result.split(' '):
-                    yield word + ' '
-                return
-            except Exception as e:
-                logger.error(f"Compound failed, falling back: {e}")
+        # V5: Compound streaming removed - 120B has built-in search
         
         if should_check_tools:
             # Tool query - run tools first, then stream synthesis
@@ -664,59 +640,7 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
     
     return "I reached my iteration limit without completing the task.", None, None
 
-def generate_compound_response(user_message: str, system_prompt: str) -> tuple[str, list]:
-    """Generate response using Groq Compound system with built-in tools.
-    
-    Compound handles web search, weather, calculations, Wolfram Alpha server-side.
-    Returns: (response_text, executed_tools_list)
-    """
-    client = get_groq_client()
-    if not client:
-        raise Exception("Groq client not available")
-    
-    compound_model = core_config.get_compound_model()
-    logger.info(f"Using Compound system: {compound_model} for query: {user_message[:50]}")
-    
-    # Use a SHORT, focused prompt for Compound - it works better with minimal instructions
-    # The full personality prompt confuses it and makes responses verbose
-    compound_prompt = """Give extremely brief answers.
-Weather: State the city AND conditions. "Tokyo: 15°C and sunny." Always mention the location.
-Calculations: Just the number. "625" or "887,112". Nothing else.
-Search: 1-2 sentences max summarizing the key finding. No bullet points, no source citations."""
-    
-    messages = [
-        {"role": "system", "content": compound_prompt},
-        {"role": "user", "content": user_message}
-    ]
-    
-    try:
-        response = client.chat.completions.create(
-            model=compound_model,
-            messages=messages,
-            temperature=0.8,
-            max_tokens=1024,
-            stream=False
-        )
-        
-        # Log token usage
-        usage = getattr(response, 'usage', None)
-        if usage:
-            log_tokens(compound_model, usage.prompt_tokens, usage.completion_tokens, "compound")
-        
-        # Extract response and executed tools
-        message = response.choices[0].message
-        response_text = message.content.strip() if message.content else "No response generated"
-        
-        # Log executed tools if available
-        executed_tools = getattr(message, 'executed_tools', [])
-        if executed_tools:
-            logger.info(f"Compound executed tools: {[t.get('name') for t in executed_tools if isinstance(t, dict)]}")
-        
-        return sanitize_output(response_text), executed_tools
-        
-    except Exception as e:
-        logger.error(f"Compound system error: {e}")
-        raise
+# generate_compound_response removed - V5 cleanup (120B has built-in search)
 
 def generate_model_response(user_message: str, system_prompt: str, model: str) -> str:
     """Generate response using specified model through Groq with optional prompt caching."""

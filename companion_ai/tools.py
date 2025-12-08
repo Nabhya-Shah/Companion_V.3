@@ -112,8 +112,7 @@ def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
         return tool_fn("")
     elif function_name == 'memory_search':
         return tool_fn(arguments.get('query', ''))
-    elif function_name == 'memory_insight':
-        return tool_fn(arguments.get('query', ''), arguments.get('mode', 'GRAPH_COMPLETION'))
+    # memory_insight removed - V5 cleanup
     elif function_name == 'wikipedia_lookup':
         return tool_fn(arguments.get('query', ''))
     elif function_name == 'read_pdf':
@@ -174,115 +173,7 @@ def tool_memory_search(query: str) -> str:
     except Exception as e:
         return f"Error searching memory: {str(e)}"
 
-@tool('memory_insight', schema={
-    "type": "function",
-    "function": {
-        "name": "memory_insight",
-        "description": "Search and analyze user memories using knowledge graph. Can find entities, relationships, patterns, and temporal information. Use when user asks 'what do you know about X' or 'how are X and Y related' or 'what have we discussed about Z'.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "What to search for in memory (entity name, topic, relationship, etc.)"
-                },
-                "mode": {
-                    "type": "string",
-                    "description": "Search mode: GRAPH_COMPLETION (entity+neighbors), KEYWORD (simple search), RELATIONSHIPS (connections), TEMPORAL (recent), IMPORTANT (most significant)",
-                    "enum": ["GRAPH_COMPLETION", "KEYWORD", "RELATIONSHIPS", "TEMPORAL", "IMPORTANT"]
-                }
-            },
-            "required": ["query"]
-        }
-    }
-})
-def tool_memory_insight(query: str = "", mode: str = "GRAPH_COMPLETION") -> str:
-    """
-    Search memory using knowledge graph with multiple retrieval modes.
-    
-    Falls back to legacy search if knowledge graph not available.
-    """
-    try:
-        # Try knowledge graph first
-        try:
-            from companion_ai.memory_graph import search_graph, get_graph_stats
-            
-            # Search using knowledge graph
-            results = search_graph(query, mode=mode, limit=10)
-            
-            if not results:
-                return f"No memories found for '{query}' in knowledge graph. Try a different query or mode."
-            
-            # Format results nicely
-            output = [f"🧠 Memory Search (mode: {mode}): '{query}'", ""]
-            
-            for i, result in enumerate(results[:8], 1):
-                result_type = result.get('type', 'unknown')
-                
-                if result_type == 'entity':
-                    name = result.get('name')
-                    entity_type = result.get('entity_type', 'unknown')
-                    mentions = result.get('mention_count', 0)
-                    attrs = result.get('attributes', {})
-                    
-                    output.append(f"{i}. 🏷️ {name} ({entity_type})")
-                    if attrs:
-                        output.append(f"   Attributes: {', '.join(f'{k}={v}' for k, v in list(attrs.items())[:3])}")
-                    output.append(f"   Mentioned {mentions} time(s)")
-                    
-                elif result_type == 'relationship':
-                    source = result.get('source')
-                    target = result.get('target')
-                    rel_type = result.get('relation_type', 'related_to')
-                    context = result.get('context', '')
-                    
-                    output.append(f"{i}. 🔗 {source} -{rel_type}→ {target}")
-                    if context:
-                        output.append(f"   Context: {context[:100]}")
-                    
-                elif result_type == 'related_entity':
-                    name = result.get('name')
-                    entity_type = result.get('entity_type', 'unknown')
-                    output.append(f"{i}. 📍 Related: {name} ({entity_type})")
-                
-                output.append("")
-            
-            # Add graph stats
-            stats = get_graph_stats()
-            output.append(f"📊 Graph: {stats.get('total_entities', 0)} entities, {stats.get('total_relationships', 0)} relationships")
-            
-            return "\n".join(output)
-            
-        except ImportError:
-            # Fall back to legacy memory search
-            mem_results = mem.search_memory(query, limit=10)
-            
-            if not mem_results:
-                # Fall back to insight generation
-                from companion_ai.llm_interface import generate_groq_response
-                summaries = mem.get_latest_summary(3)
-                insights = mem.get_latest_insights(3)
-                profile = mem.get_all_profile_facts()
-                prompt = (
-                    f"Generate a concise observation about the user based on: {query}\n"
-                    f"Profile: {profile}\nRecent summaries: {[s['summary_text'] for s in summaries]}\n"
-                    f"Insights: {[i['insight_text'] for i in insights]}\n\nObservation:"
-                )
-                text = generate_groq_response(prompt) or '(no insight)'
-                return text.strip()
-            
-            # Format legacy results
-            output = [f"📚 Memory Search: '{query}'", ""]
-            for i, result in enumerate(mem_results, 1):
-                result_type = result.get('type', 'unknown')
-                text = result.get('text', '')
-                score = result.get('score', 0)
-                output.append(f"{i}. [{result_type}] {text[:150]} (relevance: {score:.2f})")
-            
-            return "\n".join(output)
-            
-    except Exception as e:
-        return f"memory_insight error: {e}"
+# memory_insight tool removed - V5 cleanup (consolidated to memory_search)
 
 @tool('wikipedia_lookup', schema={
     "type": "function",
@@ -685,35 +576,7 @@ def tool_look_at_screen(prompt: str = "What is on the screen?") -> str:
     except Exception as e:
         return f"Error analyzing screen: {e}"
 
-@tool('consult_compound_system', schema={
-    "type": "function",
-    "function": {
-        "name": "consult_compound_system",
-        "description": "Consult the Compound System for real-time information. Use this for: 1) Weather forecasts, 2) Web searches (current events, facts), 3) Complex calculations. \nIMPORTANT: This tool is expensive and slow. Combine all your questions into a SINGLE comprehensive query. Do not call this tool multiple times in a row.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The specific query to send to the Compound System (e.g., 'weather in Tokyo', 'search for latest AI news', 'calculate 25 * 48')"
-                }
-            },
-            "required": ["query"]
-        }
-    }
-})
-def tool_consult_compound(query: str) -> str:
-    """Consult the Compound System (Groq Compound) for real-time info."""
-    try:
-        # Import here to avoid circular imports
-        from companion_ai.llm_interface import generate_compound_response
-        
-        # We need a dummy system prompt for the function signature, 
-        # but generate_compound_response uses its own internal prompt anyway.
-        response_text, _ = generate_compound_response(query, "")
-        return f"Compound System Result: {response_text}"
-    except Exception as e:
-        return f"Error consulting Compound System: {str(e)}"
+# consult_compound_system tool removed - V5 cleanup (120B has built-in search)
 
 @tool('use_computer', schema={
     "type": "function",
