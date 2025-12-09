@@ -173,53 +173,11 @@ if GROQ_MEMORY_API_KEY:
 
 # --- Core Generation Functions ---
 # NOTE: Prompt building now handled by companion_ai/core/prompts.py and context_builder.py
-# These legacy functions kept for backward compatibility but should be phased out
-
-def build_aether_prompt(profile_str: str = "") -> str:
-    """DEPRECATED: Use get_static_system_prompt_safe() from prompts.py instead.
-    Kept for backward compatibility."""
-    from companion_ai.core.prompts import get_static_system_prompt_safe
-    base = get_static_system_prompt_safe()
-    
-    # Only add profile context if provided
-    if profile_str:
-        base += f"\n\n[What you know about this user: {profile_str}]"
-    
-    return base
-
-def should_include_profile(user_message: str) -> bool:
-    """Determine if profile facts should be included in context (saves tokens when not needed)"""
-    msg = user_message.lower()
-    
-    # Explicit memory triggers
-    explicit = ['remember', 'know about me', 'told you', 'my favorite', 
-                'what do you know', 'we talked', 'i mentioned', 'i said',
-                'you know i', 'you know my', 'last time']
-    
-    # Personalization triggers
-    personal = ['recommend', 'suggest', 'for me', 'personalize', 
-                'based on', 'what should i', 'help me pick', 'my preferences']
-    
-    return any(t in msg for t in explicit + personal)
-
-def build_system_prompt(memory_context: dict, persona: str = "Aether", user_message: str = "") -> str:
-    """DEPRECATED: Use context_builder.build_system_prompt() instead.
-    Kept for backward compatibility with non-Companion personas."""
-    from companion_ai.core.prompts import get_static_system_prompt_safe
-    profile_str = ""
-    
-    # Only include profile if relevant to save tokens
-    if memory_context.get("profile") and should_include_profile(user_message):
-        profile_items = [f"{k}: {v}" for k, v in list(memory_context["profile"].items())[:5]]
-        profile_str = " | ".join(profile_items)
-    
-    return build_aether_prompt(profile_str)
 
 def generate_response(user_message: str, memory_context: dict, model: str | None = None, persona: str = "Companion") -> str:
     """Generate response using specified model.
-
-    If persona == 'Companion' (adaptive single persona), use new context builder.
-    Otherwise fallback to legacy persona prompt builder.
+    
+    Uses adaptive single-persona context builder.
     """
     # Reset token counter for this new interaction
     reset_last_request_tokens()
@@ -236,15 +194,12 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
         # Extract recent conversation from memory context if provided
         recent_conv = memory_context.get('recent_conversation', '')
         
-        if persona.lower() == 'companion':
-            meta = build_system_prompt_with_meta(user_message, recent_conv)
-            system_prompt = meta['system_prompt']
-            mode = meta['mode']
-            memory_meta = meta['memory_meta']
-        else:
-            system_prompt = build_system_prompt(memory_context, persona)
-            mode = 'legacy'
-            memory_meta = None
+        # Always use V4 context builder
+        meta = build_system_prompt_with_meta(user_message, recent_conv)
+        system_prompt = meta['system_prompt']
+        mode = meta['mode']
+        memory_meta = meta['memory_meta']
+
         start_t = time.perf_counter()
         # Initialize tool tracking variables
         first_output = None
@@ -328,11 +283,9 @@ def generate_response_streaming(user_message: str, memory_context: dict, model: 
         
         recent_conv = memory_context.get('recent_conversation', '')
         
-        if persona.lower() == 'companion':
-            meta = build_system_prompt_with_meta(user_message, recent_conv)
-            system_prompt = meta['system_prompt']
-        else:
-            system_prompt = build_system_prompt(memory_context, persona)
+        # Always use V4 context builder
+        meta = build_system_prompt_with_meta(user_message, recent_conv)
+        system_prompt = meta['system_prompt']
         
         # Check if we need tools (non-streaming for tool execution)
         should_check_tools = (

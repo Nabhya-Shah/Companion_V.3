@@ -50,10 +50,9 @@ def require_auth(token: str) -> bool:
 # - COMPOUND: Web/weather fast path
 
 PRIMARY_MODEL = "openai/gpt-oss-120b"  # Decisions, synthesis, personality
-TOOLS_MODEL = "llama-3.1-8b-instant"  # Planner: Uses cached prompt to decide tools (Was 120B - causing token spikes!)
+TOOLS_MODEL = "llama-3.1-8b-instant"  # Planner: Uses cached prompt to decide tools
 TOOLS_MODEL_FAST = "llama-3.1-8b-instant"  # Backup / Fast execution if needed
 VISION_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"  # Vision tasks (Maverick)
-# COMPOUND_MODEL removed - V5 cleanup
 
 # Feature flag: Use fast tool executor by default
 USE_FAST_TOOL_EXECUTOR = True
@@ -83,7 +82,6 @@ MODEL_INFO = {
         "context_window": 131072,
         "tool_use": True,
     },
-    # compound-beta removed - V5 cleanup
 }
 
 

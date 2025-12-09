@@ -1,7 +1,7 @@
 # Companion AI - Project Structure
 
-**Last Updated:** November 10, 2025  
-**Status:** Production-ready v0.3 - Knowledge Graph Integration Complete
+**Last Updated:** December 9, 2025  
+**Status:** Production-ready V4 - Mem0 & Tool Planner Integration Complete
 
 ---
 
@@ -32,87 +32,69 @@ Companion_V.3/
 │
 ├── 🤖 companion_ai/ (Core AI Package)
 │   ├── __init__.py
-│   ├── conversation_manager.py   # Orchestrates conversations
-│   ├── llm_interface.py          # LLM calls & fact extraction
-│   ├── memory.py                 # Memory storage & retrieval
-│   ├── memory_ai.py             # Dedicated memory AI client
-│   ├── memory_graph.py          # Knowledge graph system (NEW v0.3)
-│   ├── tools.py                  # Tool calling system (10 tools)
-│   ├── tts_manager.py           # Azure TTS integration
+│   ├── conversation_manager.py   # Orchestrates conversations (V4 Flow)
+│   ├── llm_interface.py          # LLM calls, Tool Planner, & Synthesis
+│   ├── memory_v2.py              # Mem0 (Qdrant) Integration (NEW V4)
+│   ├── memory.py                 # Legacy SQLite memory (being phased out)
+│   ├── memory_graph.py           # Knowledge graph system
+│   ├── tools.py                  # Tool registry & JSON Schemas
+│   ├── vision_manager.py         # Maverick Vision integration
+│   ├── computer_agent.py         # Computer control (PyAutoGUI)
 │   └── core/
-│       ├── config.py             # Central configuration & model routing
-│       ├── context_builder.py    # Context assembly & persona loading
+│       ├── config.py             # Central configuration & model roles
+│       ├── context_builder.py    # Dynamic context assembly (Mem0 + History)
+│       ├── prompts.py            # Static persona management
 │       ├── conversation_logger.py # Logging system
 │       └── metrics.py            # Performance tracking
 │
 ├── 🎨 Web Interface
 │   ├── static/
-│   │   ├── app.css              # Gemini-style UI design
-│   │   └── app.js               # Frontend JavaScript
+│   │   ├── app.css              # UI design
+│   │   ├── app.js               # Frontend JavaScript
+│   │   ├── computer-control.js  # Computer control UI
+│   │   └── toast.js             # Notifications
 │   └── templates/
 │       ├── index.html            # Main web template
-│       └── graph.html            # Knowledge graph visualization (NEW v0.3)
+│       └── graph.html            # Knowledge graph visualization
 │
-├── 🧪 tests/ (Unit Tests - 11 files)
+├── 🧪 tests/ (Unit Tests)
 │   ├── conftest.py
 │   ├── test_context_builder.py
-│   ├── test_fact_parser.py
-│   ├── test_logger.py
-│   ├── test_memory_dedup.py
-│   ├── test_memory_provenance.py
-│   ├── test_model_selection.py
-│   ├── test_models_endpoint.py
-│   ├── test_routing_recent_endpoint.py
-│   ├── test_search_and_sanitize.py
-│   └── test_tools.py
+│   ├── test_tools.py
+│   └── ... (various unit tests)
 │
-├── 🔧 tools/ (Development Tools - 14 files)
-│   ├── check_actual_memory.py    # View current memory contents
-│   ├── check_db_schema.py        # Inspect database schema
-│   ├── clean_memory_db.py        # Clean bad facts from DB
-│   ├── list_azure_voices.py      # List available TTS voices
-│   ├── reset_memory.py           # Wipe all memory (with backup)
-│   ├── run_feature_tests.py      # Automated feature testing (NEW v0.3)
-│   ├── send_debug_message.py     # Send test messages to web server (NEW v0.3)
-│   ├── test_graph_integration.py # Test knowledge graph integration (NEW v0.3)
-│   ├── test_knowledge_graph.py   # Test graph operations (NEW v0.3)
-│   ├── test_tts.py               # Test TTS voices
-│   ├── view_knowledge_graph.py   # Visualize knowledge graph in terminal (NEW v0.3)
-│   ├── view_test_log.py          # View test logs (NEW v0.3)
-│   └── watch_logs.py             # Watch web server logs in real-time (NEW v0.3)
+├── 🔧 tools/ (Development Tools)
+│   ├── check_schemas.py          # Verify tool schemas
+│   ├── debug_mem0_search.py      # Test Mem0 retrieval
+│   ├── memory_deep_dive.py       # Analyze memory contents
+│   ├── test_computer_use_e2e.py  # Test computer control
+│   ├── verify_vision.py          # Test Maverick vision
+│   └── watch_logs.py             # Watch web server logs
 │
-├── 📜 scripts/ (Utility Scripts - 4 files)
-│   ├── calibrate_mic.py          # Microphone calibration for STT
+├── 📜 scripts/
 │   ├── check_env.py              # Verify .env configuration
-│   ├── list_audio_devices.py     # List available audio devices
-│   └── view_memory.py            # Quick memory viewer
+│   └── safe_run_browser.ps1      # Browser automation helper
 │
 ├── 🎭 prompts/personas/
 │   ├── companion.yaml            # Default personality (active)
-│   └── aether.yaml               # Alternative persona
 │
 ├── 💾 data/
-│   ├── companion_ai.db           # SQLite memory database (active)
-│   ├── knowledge_graph.pkl       # NetworkX knowledge graph (NEW v0.3)
-│   ├── companion_ai_backup_*.db  # Latest backup
-│   ├── logs/
-│   │   ├── conv_YYYYMMDD.jsonl  # Daily conversation logs
-│   │   └── metrics_state.json    # Performance metrics
-│   └── chat_logs/                # (Empty - for new sessions)
+│   ├── mem0_qdrant/              # Mem0 Vector Database (NEW V4)
+│   ├── companion_ai.db           # SQLite memory database (Legacy)
+│   ├── knowledge_graph.pkl       # NetworkX knowledge graph
+│   ├── logs/                     # Conversation logs
+│   └── training_examples.jsonl   # For future fine-tuning
 │
 ├── ⚙️ Configuration
 │   ├── .env                      # Your API keys (DO NOT COMMIT)
-│   ├── .env.example              # Template for .env
 │   ├── requirements.txt          # Python dependencies
-│   ├── .gitignore               # Git ignore rules
-│   └── .gitattributes           # Git line ending config
+│   └── .gitignore               # Git ignore rules
 │
 └── 📖 Documentation
     ├── README.md                 # Main project documentation
-    ├── PROJECT_STRUCTURE.md      # This file - project organization
-    ├── KNOWLEDGE_GRAPH.md        # Knowledge graph technical docs (NEW v0.3)
-    ├── TOOL_SETUP_GUIDE.md       # Tool configuration guide
-    └── HOW_TO_RUN_AND_TEST.md    # Testing and usage guide
+    ├── PROJECT_STRUCTURE.md      # This file
+    ├── V4_PLANNING.md            # V4 Architecture details
+    └── KNOWLEDGE_GRAPH.md        # Knowledge graph docs
 ```
 
 ---
@@ -121,155 +103,77 @@ Companion_V.3/
 
 ### Entry Points
 
-**`web_companion.py`** (400+ lines)
+**`web_companion.py`**
 - Flask web server at http://127.0.0.1:5000
-- Main interface with chat, memory sidebar, and settings
-- API routes for chat, memory retrieval, and knowledge graph
-- Knowledge graph visualization at `/graph`
-- Graph API endpoints: `/api/graph`, `/api/graph/stats`, `/api/graph/search`
+- Manages `ConversationSession` persistence
+- Handles `/api/chat` requests and streams responses
 
-**`run_companion.py`**
-- Launcher script with CLI arguments
-- `--web` flag starts web interface
-- Default starts CLI interface
+### Core AI Logic (V4 Architecture)
 
-**`chat_cli.py`**
-- Simple command-line chat interface
-- Alternative to web UI for terminal users
+**`companion_ai/llm_interface.py`**
+- **Planner Pattern:** Uses 120B/8B to plan tool usage before synthesis.
+- **Token Optimization:** Uses minimal context for tool planning, full context for final response.
+- **Model Roles:**
+    - **Primary:** `openai/gpt-oss-120b` (Personality & Synthesis)
+    - **Tools:** `llama-3.1-8b-instant` (Fast execution)
+    - **Vision:** `llama-4-maverick-17b` (Screen analysis)
 
-### Core AI Logic
+**`companion_ai/memory_v2.py`** (NEW V4)
+- **Mem0 Integration:** Wraps Qdrant vector database.
+- **Auto-Retrieval:** Fetches relevant memories for every request.
+- **Hybrid Storage:** Stores facts, preferences, and conversation history.
 
-**`companion_ai/llm_interface.py`** (700+ lines)
-- LLM API calls to Groq/OpenRouter
-- Fact extraction with strict filtering (no inferences!)
-- Ensemble reasoning (3 candidate models)
-- Tool calling integration
-- Compound models support (built-in Groq tools)
-- Token optimization (60-70% reduction via fresh context)
-
-**`companion_ai/conversation_manager.py`**
-- Orchestrates conversations
-- Builds context with memory + history
-- Coordinates LLM, tools, and logging
-
-**`companion_ai/memory.py`**
-- SQLite database operations
-- Stores user profile facts, conversation summaries, AI insights
-- Retrieval and search functionality
-- Integrates with knowledge graph for entity-based memory
-
-**`companion_ai/memory_graph.py`** (NEW v0.3 - 565 lines)
-- Knowledge graph system using NetworkX
-- Entity extraction with llama-3.1-8b-instant
-- 12 entity types (person, place, concept, thing, etc.)
-- 5 search modes (GRAPH_COMPLETION, KEYWORD, RELATIONSHIPS, TEMPORAL, IMPORTANT)
-- Fuzzy deduplication (70% similarity threshold)
-- Automatic relationship inference
-- Pickle-based persistence at `data/knowledge_graph.pkl`
-
-**`companion_ai/tools.py`** (761 lines)
-- 10 registered tools for autonomous use
-- Built-in: calculate, get_current_time, read_pdf, read_image_text, read_document
-- Search: web_search (DuckDuckGo), wikipedia_lookup
-- File ops: list_files, find_file
-- Memory: memory_insight (enhanced with graph search)
-- Removed: Custom weather/Brave search (now using Compound models)
-
-**`companion_ai/core/config.py`** (400+ lines)
-- Model routing and selection logic
-- Feature flags (ensemble, auto-tools, compound models)
-- Model capabilities registry
-- Complexity classification
-- Token optimization settings
+**`companion_ai/tools.py`**
+- **Native Function Calling:** Defines JSON Schemas for Groq.
+- **Capabilities:**
+    - `memory_search`: Query Mem0.
+    - `use_computer`: Control mouse/keyboard.
+    - `look_at_screen`: Analyze screen content.
+    - `read_pdf`/`read_image`: File processing.
+    - `brain_*`: Self-modification (Experimental).
 
 **`companion_ai/core/context_builder.py`**
-- Loads persona YAML files
-- Assembles system prompts
-- Builds conversation context
+- Assembles the system prompt dynamically:
+    1. **Static Persona:** From `prompts.py` (Cached).
+    2. **Dynamic Memory:** From `memory_v2.py` (Mem0).
+    3. **Recent History:** Last 3 turns of conversation.
 
 ### Web Interface
 
-**`static/app.js`** (290 lines)
-- Frontend JavaScript for chat UI
-- Auto-scroll to latest message
-- Sidebar toggle for Memory/Settings
-- API communication
-- Graph visualization integration
-
-**`templates/graph.html`** (NEW v0.3 - 450 lines)
-- D3.js force-directed graph visualization
-- Interactive node dragging and zooming
-- Real-time entity/relationship display
-- Color-coded by entity type
-- Accessible at `/graph` endpoint
-
-**`static/app.css`** (450 lines)
-- Gemini-inspired design
-- Dark theme with smooth animations
-- Responsive layout
-
-### Configuration
-
-**`.env`** (Your actual secrets)
-```env
-GROQ_API_KEY=your_key_here
-AZURE_SPEECH_KEY=your_key_here
-AZURE_SPEECH_REGION=your_region_here
-ENABLE_ENSEMBLE=1
-ENABLE_COMPOUND_MODELS=1  # NEW v0.3 - Use Groq's built-in tools
-```
-
-**`.env.example`** (Template)
-- Shows all available configuration options
-- Copy to `.env` and fill in your values
-- **v0.3**: Weather/Brave API keys removed (using Compound instead)
+**`static/app.js`**
+- Handles chat UI, streaming responses, and tool output display.
+- Manages "Computer Control" overlay.
 
 ---
 
-## 🎯 Feature Status
+## 🎯 Feature Status (V4)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Web Interface | ✅ Active | Primary interface at localhost:5000 |
-| CLI Interface | ✅ Active | Alternative text-based interface |
-| Model Routing | ✅ Active | Automatic model selection by complexity |
-| Ensemble System | ✅ Active | 3 candidates (120B, 70B, Kimi) |
-| Memory System | ✅ Active | Fresh DB with strict fact filtering |
-| **Knowledge Graph** | ✅ **NEW v0.3** | NetworkX graph with 5 search modes |
-| **Graph Visualization** | ✅ **NEW v0.3** | D3.js interactive graph at `/graph` |
-| **Token Optimization** | ✅ **NEW v0.3** | 60-70% reduction (9-11K → 3-5K tokens) |
-| **Compound Models** | ✅ **NEW v0.3** | Groq built-in weather/search/calculator |
-| Fact Extraction | ✅ Fixed | Blocks all inferences, only explicit facts |
-| TTS (Azure) | ⚠️ Ready | Voice: Jenny Neural, needs UI toggle |
-| STT | ❌ Pending | To be tested with scripts/calibrate_mic.py |
-| Auto-Tools | ✅ Active | 10 autonomous tools enabled |
-| Prompt Caching | ✅ Active | Reduces API costs |
+| **Architecture** | ✅ **V4 Active** | 120B Planner + 8B Tools + Mem0 |
+| **Memory** | ✅ **Mem0** | Vector DB (Qdrant) active |
+| **Vision** | ✅ **Maverick** | `look_at_screen` tool enabled |
+| **Computer Use** | ✅ **Active** | PyAutoGUI integration working |
+| **Tool System** | ✅ **Native** | Groq JSON Schema function calling |
+| **Web Interface** | ✅ **Active** | Streaming chat + Graph view |
+| **Knowledge Graph** | ✅ **Active** | NetworkX integration |
+| **Legacy Memory** | ⚠️ Phasing Out | SQLite still present but secondary |
 
 ---
 
 ## 🗂️ Data Storage
 
-### Database: `data/companion_ai.db`
-- **user_profile**: User facts (name, age, preferences, etc.)
-- **conversation_summaries**: Conversation history summaries
-- **ai_insights**: AI observations and patterns
-- **pending_profile_facts**: Facts awaiting approval
-- **memory_consolidation**: Long-term memory consolidation
+### Mem0: `data/mem0_qdrant/`
+- **Vector Store:** Qdrant (Local)
+- **Embeddings:** `sentence-transformers/all-MiniLM-L6-v2`
+- **Content:** Long-term memories, facts, user preferences.
 
-### Knowledge Graph: `data/knowledge_graph.pkl` (NEW v0.3)
-- **NetworkX DiGraph**: Entity-relationship graph
-- **Entities**: 12 types (person, place, concept, thing, organization, event, etc.)
-- **Relationships**: Extracted from conversations with confidence scores
-- **Attributes**: Timestamps, mentions, importance, entity-specific metadata
-- **Growth**: ~5 entities per conversation, linear scaling
+### Knowledge Graph: `data/knowledge_graph.pkl`
+- **NetworkX DiGraph:** Entity-relationship graph.
+- **Entities:** People, places, concepts.
 
 ### Logs: `data/logs/`
-- **conv_YYYYMMDD.jsonl**: Daily conversation logs (1 file per day)
-- **metrics_state.json**: Performance metrics and stats
-
-### Backups
-- Automatic backups created before database resets
-- Keep latest backup, delete old ones
+- **conv_YYYYMMDD.jsonl**: Daily conversation logs.
 
 ---
 
@@ -280,92 +184,18 @@ ENABLE_COMPOUND_MODELS=1  # NEW v0.3 - Use Groq's built-in tools
 pytest -q
 ```
 
-### Development Tools (in `tools/` folder)
+### Development Tools (in `tools/`)
 ```bash
-# Check current memory
-python tools/check_actual_memory.py
+# Verify Mem0 integration
+python tools/verify_memory_integration.py
 
-# View knowledge graph
-python tools/view_knowledge_graph.py
+# Test Computer Use
+python tools/test_computer_use_e2e.py
 
-# Test graph integration
-python tools/test_knowledge_graph.py
-python tools/test_graph_integration.py
-
-# Run feature tests
-python tools/run_feature_tests.py
-
-# Send test messages to web server
-python tools/send_debug_message.py "What's the weather in Seattle?"
-
-# Watch web server logs in real-time
+# Watch logs
 python tools/watch_logs.py
-
-# Test TTS
-python tools/test_tts.py
-
-# Reset memory (with backup)
-python tools/reset_memory.py
-```
-
-### Utility Scripts (in `scripts/` folder)
-```bash
-# Verify environment setup
-python scripts/check_env.py
 ```
 
 ---
 
-## 📊 Project Stats (v0.3)
-
-- **Total Python Files:** ~65 (cleaned from 102)
-- **Lines of Code:** ~9,000+ (core functionality)
-- **Core Package:** 16 files in companion_ai/
-- **Unit Tests:** 11 test files
-- **Dev Tools:** 14 helper scripts
-- **Utilities:** 1 utility script
-- **v0.3 Additions:**
-  - memory_graph.py (565 lines)
-  - graph.html template (450 lines)
-  - 6 new development tools
-  - KNOWLEDGE_GRAPH.md documentation (500+ lines)
-
----
-
-## 🚦 Roadmap
-
-### ✅ Completed (v0.3)
-- Knowledge graph system with NetworkX
-- 5 search modes (GRAPH_COMPLETION, KEYWORD, RELATIONSHIPS, TEMPORAL, IMPORTANT)
-- Interactive D3.js graph visualization
-- Token optimization (60-70% reduction)
-- Compound models integration (Groq built-in tools)
-- Code cleanup (removed 159 lines, 12 outdated files)
-- Comprehensive documentation (README, KNOWLEDGE_GRAPH)
-
-### 🎯 Planned Features
-1. **Semantic Entity Matching** - Embeddings-based similarity for better deduplication
-2. **Graph Export** - Neo4j, GraphML, JSON-LD formats
-3. **Graph Analytics** - Centrality, communities, path finding
-4. **Automated Testing** - pytest suite for knowledge graph
-5. **Real-time Updates** - WebSocket graph visualization
-6. **TTS UI Toggle** - Frontend control for text-to-speech
-7. **STT Integration** - Speech-to-text input
-8. **Smart Home** - Final integration goal
-
----
-
-## 📝 Notes
-
-- **Primary Interface:** Use `web_companion.py` for best experience
-- **Personas:** Switch between companion/aether in settings (Lilith removed)
-- **Memory:** Clean slate with improved fact extraction (no inferences!)
-- **Knowledge Graph:** View at `/graph`, access via `/api/graph` endpoints
-- **Model:** Defaults to 120B model for best quality
-- **Ensemble:** Triggers on complex queries for better responses
-- **Compound Models:** Built-in Groq weather/search/calculator (no API keys needed)
-- **Token Optimization:** 60-70% reduction via fresh context rebuilding
-
----
-
-**Built with:** Python 3.x, Flask, SQLite, NetworkX, D3.js, Groq API, Azure Speech Services
+**Built with:** Python 3.x, Flask, Mem0 (Qdrant), Groq API (Llama 3/GPT-OSS), NetworkX
