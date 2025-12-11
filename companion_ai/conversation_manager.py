@@ -13,6 +13,7 @@ from companion_ai import memory as db
 from companion_ai.llm_interface import generate_response, generate_response_streaming, groq_memory_client
 from companion_ai.memory_ai import analyze_conversation_importance, extract_smart_profile_facts, generate_smart_summary, generate_contextual_insight, categorize_insight
 from companion_ai.core import config as core_config
+from companion_ai import persona_evolution
 
 # Import Mem0 if enabled
 if core_config.USE_MEM0:

@@ -52,6 +52,11 @@ def build_system_prompt(user_message: str, recent_conversation: str = "") -> str
     # ==========================================================================
     dynamic_parts = []
     
+    # 1. Dynamic Persona Traits (Evolution)
+    traits = _load_dynamic_traits()
+    if traits:
+        dynamic_parts.append(traits)
+    
     # Memory context - use Mem0 or legacy based on config
     if config.USE_MEM0:
         memory_context = _build_mem0_context(user_message)
@@ -64,7 +69,9 @@ def build_system_prompt(user_message: str, recent_conversation: str = "") -> str
     # Recent conversation (limited to prevent token bloat)
     if recent_conversation:
         lines = recent_conversation.strip().split('\n')
-        limited_history = '\n'.join(lines[-6:]) if len(lines) > 6 else recent_conversation
+        # Limit to last 10 lines (approx 5 turns) to save tokens
+        # The 8B model has 8k context, but we want to be safe and fast
+        limited_history = '\n'.join(lines[-10:]) if len(lines) > 10 else recent_conversation
         dynamic_parts.append(f"Recent conversation:\n{limited_history}")
     
     # Combine: static first (for caching), then dynamic
@@ -72,6 +79,23 @@ def build_system_prompt(user_message: str, recent_conversation: str = "") -> str
         return static_prompt + "\n\n" + "\n\n".join(dynamic_parts)
     return static_prompt
 
+def _load_dynamic_traits() -> str:
+    """Load evolved traits from YAML (Dynamic Persona Evolution)."""
+    try:
+        # Path relative to this file: ../../data/companion_brain/system/learned_traits.yaml
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        path = os.path.join(base_dir, 'data', 'companion_brain', 'system', 'learned_traits.yaml')
+        
+        if os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f)
+                if data and 'evolved_traits' in data:
+                    traits = data['evolved_traits']
+                    if traits and isinstance(traits, list):
+                        return f"[Adaptive Personality Traits]:\n- " + "\n- ".join(traits)
+    except Exception:
+        pass # Fail silently to avoid breaking chat
+    return ""
 
 def _build_mem0_context(user_message: str) -> str:
     """Build memory context using Mem0 hybrid memory system.

@@ -24,10 +24,23 @@ class ComputerAgent:
     Philosophy: "Maverick Sees, ComputerAgent Clicks."
     """
     def __init__(self):
-        self.enabled = False 
-        self.safe_mode = True # If True, only log actions, don't execute
+        self.enabled = True 
+        self.safe_mode = False # If True, only log actions, don't execute
+        # Tracks whether the agent has performed a recent computer action.
+        # The UI banner should reflect real activity, not mere availability.
+        self._last_action_ts = 0.0
         self.screen_width, self.screen_height = pyautogui.size()
         logger.info(f"ComputerAgent initialized. Screen: {self.screen_width}x{self.screen_height}. Safe Mode: {self.safe_mode}")
+
+    def mark_action(self):
+        """Mark that a computer-control action just occurred."""
+        self._last_action_ts = time.time()
+
+    def is_recently_active(self, window_seconds: float = 2.0) -> bool:
+        """True if the agent acted within the last window_seconds."""
+        if self.safe_mode or not self.enabled:
+            return False
+        return (time.time() - float(self._last_action_ts or 0.0)) <= float(window_seconds)
 
     def locate_element(self, element_description: str) -> Optional[Tuple[int, int]]:
         """

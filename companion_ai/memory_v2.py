@@ -51,8 +51,12 @@ def _get_mem0_config(llm_model: Optional[str] = None) -> dict:
     # Use a dedicated path in the data folder for Qdrant storage
     qdrant_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "mem0_qdrant")
 
-    # Use the first available key for Mem0 (Mem0 doesn't support rotation natively yet)
-    api_key = core_config.GROQ_API_KEYS[0] if core_config.GROQ_API_KEYS else core_config.GROQ_API_KEY
+    # Mem0 doesn't support key rotation natively; prefer a dedicated memory key if set.
+    api_key = (
+        os.getenv("GROQ_MEMORY_API_KEY")
+        or (core_config.GROQ_API_KEYS[0] if core_config.GROQ_API_KEYS else None)
+        or core_config.GROQ_API_KEY
+    )
 
     return {
         "llm": {

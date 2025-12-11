@@ -25,6 +25,81 @@ from abc import ABC, abstractmethod
 logger = logging.getLogger(__name__)
 
 
+class OllamaClientWrapper:
+    """
+    A wrapper for Ollama that mimics the OpenAI/Groq client interface.
+    Allows using Ollama with existing tool-calling logic.
+    """
+    def __init__(self, base_url="http://localhost:11434"):
+        self.base_url = base_url
+        self.chat = self.Chat(base_url)
+        
+    class Chat:
+        def __init__(self, base_url):
+            self.completions = self.Completions(base_url)
+            
+        class Completions:
+            def __init__(self, base_url):
+                self.base_url = base_url
+                
+            def create(self, model, messages, tools=None, tool_choice=None, **kwargs):
+                import requests
+                import json
+                
+                # Prepare payload for Ollama /v1/chat/completions
+                # NOTE: Ollama's OpenAI compatibility layer expects standard OpenAI params
+                # We map 'options' only if using the native /api/chat endpoint, but for /v1/ we use standard params
+                
+                payload = {
+                    "model": model,
+                    "messages": messages,
+                    "stream": False,
+                    "temperature": kwargs.get("temperature", 0.7),
+                    "max_tokens": kwargs.get("max_tokens", 1024),
+                    "top_p": kwargs.get("top_p", 0.9),
+                }
+                
+                if tools:
+                    # Ensure tools are in the correct format (list of dicts)
+                    # Some versions of Ollama are strict about the schema
+                    payload["tools"] = tools
+                    if tool_choice:
+                        payload["tool_choice"] = tool_choice
+                
+                try:
+                    response = requests.post(
+                        f"{self.base_url}/v1/chat/completions",
+                        json=payload,
+                        timeout=120
+                    )
+                    
+                    if response.status_code != 200:
+                        logger.error(f"Ollama Error {response.status_code}: {response.text}")
+                        
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    # Convert dict to object-like structure for compatibility
+                    return self._dict_to_obj(data)
+                    
+                except Exception as e:
+                    logger.error(f"Ollama client error: {e}")
+                    raise
+            
+            def _dict_to_obj(self, data):
+                """Convert dictionary to object with attribute access."""
+                if isinstance(data, dict):
+                    class Obj:
+                        pass
+                    obj = Obj()
+                    for k, v in data.items():
+                        setattr(obj, k, self._dict_to_obj(v))
+                    return obj
+                elif isinstance(data, list):
+                    return [self._dict_to_obj(i) for i in data]
+                else:
+                    return data
+
 class LocalLLMBackend(ABC):
     """Abstract base class for local LLM backends."""
     

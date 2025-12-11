@@ -9,6 +9,7 @@ const userInput = document.getElementById('userInput');
 const sendBtn = document.getElementById('sendBtn');
 const toggleMemoryBtn = document.getElementById('toggleMemoryBtn');
 const toggleSettingsBtn = document.getElementById('toggleSettingsBtn');
+const shutdownBtn = document.getElementById('shutdownBtn');
 const closeMemoryBtn = document.getElementById('closeMemoryBtn');
 const closeSettingsBtn = document.getElementById('closeSettingsBtn');
 const memorySidebar = document.getElementById('memorySidebar');
@@ -1041,6 +1042,30 @@ function stopSSE() {
 // ============================================
 // Event Listeners
 // ============================================
+if (shutdownBtn) {
+  shutdownBtn.addEventListener('click', async () => {
+    if (!confirm('Are you sure you want to shut down the server? This will trigger a persona evolution check.')) return;
+    
+    showToast('Shutting down server...', 'info');
+    try {
+      const res = await fetch('/api/shutdown', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({})
+      });
+      if (res.ok) {
+        showToast('Server shutdown complete. You can close this tab.', 'success');
+        setTimeout(() => window.close(), 2000);
+      } else {
+        showToast('Shutdown failed', 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Connection lost (Server likely down)', 'success');
+    }
+  });
+}
+
 sendBtn.addEventListener('click', sendMessage);
 
 userInput.addEventListener('keydown', e => {
@@ -1056,6 +1081,12 @@ userInput.addEventListener('input', () => {
 });
 
 // ============================================
+// Job Polling (Deprecated - using SSE now)
+// ============================================
+// let notifiedJobs = new Set();
+// async function pollJobs() { ... }
+
+// ============================================
 // Initialize
 // ============================================
 document.addEventListener('DOMContentLoaded', () => {
@@ -1069,7 +1100,54 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSettings();
   updateSendButton();
 
-  // Use SSE for real-time updates (only pushes when messages change)
+  // Use SSE for real-time updates (Chat + Jobs)
   startSSE();
+  
+  // Start job polling (Disabled - using SSE)
+  // setInterval(pollJobs, 5000);
 });
+
+function startSSE() {
+  if (window.evtSource) {
+    window.evtSource.close();
+  }
+  
+  window.evtSource = new EventSource('/api/chat/stream');
+  
+  window.evtSource.onmessage = (e) => {
+    if (e.data === ': keep-alive') return;
+    
+    try {
+      const data = JSON.parse(e.data);
+      
+      // Handle different event types
+      if (data.type === 'job_update') {
+        handleJobUpdate(data.job);
+      } else if (data.type === 'history' || data.history) {
+        // Legacy format support (data.history) or new format (data.type='history')
+        const history = data.history || data;
+        updateChatUI(history);
+      }
+    } catch (err) {
+      console.error('SSE Parse Error:', err);
+    }
+  };
+  
+  window.evtSource.onerror = (err) => {
+    console.error('SSE Error:', err);
+    window.evtSource.close();
+    // Retry after 5s
+    setTimeout(startSSE, 5000);
+  };
+}
+
+function handleJobUpdate(job) {
+  if (job.status === 'COMPLETED') {
+    showToast(`Task Complete: ${job.description}`, 'success');
+    addMessage('system', `✅ **Task Complete:** ${job.description}\n\n**Result:**\n${job.result}`);
+  } else if (job.status === 'FAILED') {
+    showToast(`Task Failed: ${job.description}`, 'error');
+    addMessage('system', `❌ **Task Failed:** ${job.description}\n\n**Error:**\n${job.result}`);
+  }
+}
 

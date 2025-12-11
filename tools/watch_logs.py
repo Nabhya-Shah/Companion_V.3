@@ -12,7 +12,7 @@ LOG_FILE = os.path.join(DATA_DIR, 'web_server.log')
 
 def tail_log(filename, interval=0.5):
     """Tail a file and yield new lines as they appear"""
-    with open(filename, 'r') as f:
+    with open(filename, 'r', encoding='utf-8', errors='replace') as f:
         # Go to end of file
         f.seek(0, 2)
         

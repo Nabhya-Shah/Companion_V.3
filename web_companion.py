@@ -21,6 +21,7 @@ from companion_ai.tools import run_tool, list_tools
 from companion_ai.core import metrics
 from companion_ai import memory as mem
 from companion_ai import memory_v2
+from companion_ai import job_manager  # Import job manager
 import json, glob
 
 # Configure logging with both console and file output
@@ -28,9 +29,13 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 LOG_FILE = os.path.join(DATA_DIR, 'web_server.log')
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# Clear log file on server restart
+# Clear log file on server restart (best-effort).
+# On Windows, a log watcher may hold the file open; don't crash in that case.
 if os.path.exists(LOG_FILE):
-    os.remove(LOG_FILE)
+    try:
+        os.remove(LOG_FILE)
+    except OSError:
+        pass
 
 # Create formatters and handlers
 console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
@@ -42,7 +47,8 @@ console_handler.setLevel(logging.INFO)
 console_handler.setFormatter(console_formatter)
 
 # File handler (for persistent logs) - 'w' mode overwrites if file exists, UTF-8 encoding for emoji/arrows
-file_handler = logging.FileHandler(LOG_FILE, mode='w', encoding='utf-8')
+# Use append mode to avoid Windows file-lock conflicts with log watchers.
+file_handler = logging.FileHandler(LOG_FILE, mode='a', encoding='utf-8')
 file_handler.setLevel(logging.DEBUG)
 file_handler.setFormatter(file_formatter)
 
@@ -60,6 +66,9 @@ logger.info("🚀 COMPANION AI WEB SERVER STARTING")
 logger.info(f"📝 Logs: {LOG_FILE}")
 logger.info("=" * 70)
 
+# Start background job worker
+job_manager.start_worker()
+
 app = Flask(__name__)
 
 conversation_history = []
@@ -76,6 +85,55 @@ def index():
         if not request.cookies.get('api_token'):
             resp.set_cookie('api_token', core_config.API_AUTH_TOKEN, httponly=True, samesite='Lax')
     return resp
+
+@app.route('/api/shutdown', methods=['POST'])
+def shutdown():
+    """Gracefully shutdown the server and trigger persona evolution."""
+    data = request.get_json(silent=True) or {}
+    token = (request.headers.get('X-API-TOKEN') or data.get('token')
+             or request.cookies.get('api_token'))
+    if not core_config.require_auth(token):
+        return jsonify({'error': 'Unauthorized'}), 401
+        
+    logger.info("🛑 Shutdown requested. Triggering persona evolution...")
+    
+    # Trigger Persona Evolution (Synchronous to ensure completion)
+    try:
+        from companion_ai import persona_evolution
+        history = conversation_session.conversation_history
+        if history:
+            persona_evolution.analyze_and_evolve(history)
+            logger.info("✅ Persona evolution complete.")
+        else:
+            logger.info("ℹ️ No conversation history to analyze.")
+    except Exception as e:
+        logger.error(f"❌ Persona evolution failed during shutdown: {e}")
+
+    # Shutdown Flask
+    func = request.environ.get('werkzeug.server.shutdown')
+    if func is None:
+        # Fallback for production servers or if werkzeug shutdown not available
+        import os, signal
+        os.kill(os.getpid(), signal.SIGINT)
+        return jsonify({'status': 'Shutting down via signal...'})
+    
+    func()
+    
+    # Stop job worker
+    job_manager.stop_worker()
+    
+    return jsonify({'status': 'Server shutting down...'})
+
+@app.route('/api/jobs/active', methods=['GET'])
+def get_active_jobs():
+    """Get active and recently completed jobs."""
+    token = (request.headers.get('X-API-TOKEN') or request.args.get('token')
+             or request.cookies.get('api_token'))
+    if not core_config.require_auth(token):
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    jobs = job_manager.get_active_jobs()
+    return jsonify({'jobs': jobs})
 
 @app.route('/graph')
 def graph():
@@ -333,26 +391,60 @@ def get_chat_history():
 
 @app.route('/api/chat/stream')
 def chat_history_stream():
-    """Server-sent events stream pushing history updates when they occur."""
+    """Server-sent events stream pushing history updates AND job updates."""
     def event_stream():
         last_version = -1
+        last_job_check = 0
+        # Avoid replaying old job completions on reconnect/startup
+        notified_jobs = set()
+        try:
+            existing = job_manager.get_active_jobs()
+            for job in existing:
+                if job.get('status') in ('COMPLETED', 'FAILED'):
+                    notified_jobs.add(job.get('id'))
+        except Exception as e:
+            logger.error(f"Job stream init error: {e}")
+        
         while True:
+            # 1. Check for Chat Updates
             with history_condition:
-                # Wait for notification or timeout, then check version
+                # Wait for notification or timeout (reduced to 1s for job polling)
                 if history_version == last_version:
-                    history_condition.wait(timeout=20)
-                # After wait (or if version changed), grab current state
+                    history_condition.wait(timeout=1.0)
+                
                 current_version = history_version
                 snapshot = list(conversation_history)
             
-            # Send update if version changed
             if current_version != last_version:
+                # Send history update
                 payload = json.dumps({
+                    'type': 'history',
                     'history': snapshot,
                     'count': len(snapshot)
                 })
                 last_version = current_version
                 yield f"data: {payload}\n\n"
+            
+            # 2. Check for Job Updates (every 2 seconds approx)
+            now = time.time()
+            if now - last_job_check > 2.0:
+                last_job_check = now
+                try:
+                    jobs = job_manager.get_active_jobs()
+                    for job in jobs:
+                        if job['status'] in ('COMPLETED', 'FAILED') and job['id'] not in notified_jobs:
+                            # Send job update
+                            payload = json.dumps({
+                                'type': 'job_update',
+                                'job': job
+                            })
+                            yield f"data: {payload}\n\n"
+                            notified_jobs.add(job['id'])
+                except Exception as e:
+                    logger.error(f"Job stream error: {e}")
+            
+            # Keep-alive
+            yield ": keep-alive\n\n"
 
     response = Response(stream_with_context(event_stream()), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
@@ -613,18 +705,46 @@ def computer_status():
     """Return current computer control status for UI banner."""
     from companion_ai.computer_agent import computer_agent
     return jsonify({
-        'active': computer_agent.enabled and not computer_agent.safe_mode,
+        'active': computer_agent.is_recently_active(),
         'safe_mode': computer_agent.safe_mode,
         'screen': f"{computer_agent.screen_width}x{computer_agent.screen_height}"
     })
+
+@app.route('/api/computer/stream')
+def computer_status_stream():
+    """Server-sent events stream pushing computer control status changes."""
+    def event_stream():
+        from companion_ai.computer_agent import computer_agent
+        last_state = None
+        while True:
+            state = {
+                'active': computer_agent.is_recently_active(),
+                'safe_mode': computer_agent.safe_mode,
+            }
+            if state != last_state:
+                payload = json.dumps({'type': 'computer_status', 'status': state})
+                yield f"data: {payload}\n\n"
+                last_state = state
+            # Keep-alive + low CPU usage
+            yield ": keep-alive\n\n"
+            time.sleep(1.0)
+
+    response = Response(stream_with_context(event_stream()), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['X-Accel-Buffering'] = 'no'
+    return response
 
 @app.route('/api/computer/stop', methods=['POST'])
 def computer_stop():
     """Emergency stop for computer control."""
     from companion_ai.computer_agent import computer_agent
     computer_agent.safe_mode = True
+    
+    # Cancel all background jobs
+    job_manager.cancel_all_jobs()
+    
     logger.warning("Computer control STOPPED via API")
-    return jsonify({'success': True, 'message': 'Computer control disabled'})
+    return jsonify({'success': True, 'message': 'Computer control disabled and jobs cancelled'})
 
 @app.route('/api/vision/analyze', methods=['POST'])
 def vision_analyze():

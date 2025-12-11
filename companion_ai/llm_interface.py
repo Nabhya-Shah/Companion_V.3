@@ -329,7 +329,7 @@ def _maybe_cache_opts(system_prompt: str) -> dict:
     # # Groq prompt caching (if supported by SDK) typically via `cache_key` or `cache` param
     # return {"cache_key": f"sys:{key}"}
 
-def generate_model_response_with_tools(user_message: str, system_prompt: str, model: str, conversation_model: str = None, memory_context: dict = None) -> tuple[str, str | None, str | None]:
+def generate_model_response_with_tools(user_message: str, system_prompt: str, model: str, conversation_model: str = None, memory_context: dict = None, stop_callback=None, client=None) -> tuple[str, str | None, str | None]:
     """Generate response using Groq native function calling with TOKEN OPTIMIZATION.
     
     KEY TOKEN SAVING STRATEGY:
@@ -343,16 +343,25 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
         model: Tool model to use for deciding which tools to call
         conversation_model: Model to use for final response with personality (defaults to tool model)
         memory_context: Memory context dict with recent_conversation (for building synthesis context)
+        stop_callback: Optional function that returns True if execution should be stopped
+        client: Optional LLM client to use (e.g. for local Ollama). If None, uses Groq.
     
     Returns:
         tuple: (response_text, tool_name_used, tool_result)
     """
-    client = get_groq_client(for_tools=True)
+    if client is None:
+        client = get_groq_client(for_tools=True)
+        
     if not client:
-        raise Exception("Groq client not available")
+        raise Exception("LLM client not available")
+    
+    # For local client, we might need to ensure the model name is correct
+    # But we'll assume the caller handles that
     
     if conversation_model is None:
         conversation_model = model
+
+    is_ollama_wrapper = client.__class__.__name__ == "OllamaClientWrapper"
     
     # Use a simple tool-focused system prompt for tool decision
     tool_system_prompt = (
@@ -372,18 +381,285 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
         {"role": "user", "content": user_message}
     ]
     
-    # Get function schemas
-    function_schemas = get_function_schemas()
+    # Get function schemas (these can be VERY token-expensive).
+    # We aggressively restrict tool choices based on intent for foreground chat.
+    # IMPORTANT: Background tasks must have full tool access.
+    allowed_tools: list[str] | None = None
+    if "[BACKGROUND TASK MODE]" not in (system_prompt or ""):
+        lower_msg = (user_message or "").lower()
+        
+        computer_intent = any(k in lower_msg for k in [
+            "open ", "launch ", "click", "type", "scroll", "press", "computer", "mouse", "keyboard",
+            "browser", "chrome", "edge", "notepad", "settings",
+        ])
+        file_intent = any(k in lower_msg for k in ["file", "folder", ".txt", ".pdf", ".docx", "read ", "open file", "search file"])
+        web_intent = any(k in lower_msg for k in ["search", "wikipedia", "weather", "time", "lookup"])
+
+        if computer_intent:
+            # Foreground: schedule background job instead of direct computer use.
+            # This prevents runaway UI actions and slashes tool-schema token usage.
+            allowed_tools = ["start_background_task"]
+        elif file_intent:
+            allowed_tools = [
+                "brain_read", "brain_write", "brain_list",
+                "read_pdf", "read_image_text",
+                "get_current_time",
+            ]
+        elif web_intent:
+            allowed_tools = ["wikipedia_lookup", "consult_compound", "get_current_time"]
+
+    function_schemas = get_function_schemas(allowed_tools)
+
+    # Background worker should not be able to schedule more background work.
+    # It should execute tools directly.
+    if "[BACKGROUND TASK MODE]" in (system_prompt or ""):
+        function_schemas = [
+            s for s in function_schemas
+            if ((s.get("function") or {}).get("name") != "start_background_task")
+        ]
     
     logger.info(f"Tool model: {model}, Conversation model: {conversation_model}")
-    logger.info(f"Function schemas available: {len(function_schemas)}")
+    if allowed_tools:
+        logger.info(f"Function schemas filtered: {len(function_schemas)} ({allowed_tools})")
+    else:
+        logger.info(f"Function schemas available: {len(function_schemas)}")
     
     if not function_schemas:
         # No tools available, fall back to regular generation
         return generate_model_response(user_message, system_prompt, model), None, None
     
+    # Local Ollama wrapper currently does not emit OpenAI-style tool_calls reliably.
+    # Use a text-based JSON action loop instead of native tool calling.
+    if is_ollama_wrapper:
+        import json as _json
+
+        tool_names_set = {
+            (schema.get("function") or {}).get("name")
+            for schema in function_schemas
+        }
+        tool_names_set.discard(None)
+
+        is_background_mode = "[BACKGROUND TASK MODE]" in (system_prompt or "")
+
+        def _tool_catalog() -> str:
+            parts = []
+            for schema in function_schemas:
+                fn = (schema.get("function") or {})
+                name = fn.get("name")
+                params = (fn.get("parameters") or {})
+                props = (params.get("properties") or {})
+                arg_keys = ", ".join(list(props.keys())[:12])
+                parts.append(f"- {name}({arg_keys})")
+            return "\n".join(parts)
+
+        catalog = _tool_catalog()
+
+        local_system = (
+            "You are a tool-using agent.\n"
+            "Return ONLY valid JSON (no markdown, no extra text).\n"
+            "You may choose the next tool to call, or finish.\n\n"
+            "AVAILABLE TOOLS (use EXACT names):\n"
+            f"{catalog}\n\n"
+            "COMPUTER CONTROL RULES:\n"
+            "- If the task involves opening apps/websites, clicking, typing, scrolling, or pressing keys -> call use_computer.\n"
+            "- Prefer keyboard shortcuts: press win/ctrl+esc, type app name, press enter.\n"
+            "- You have explicit permission to control the computer. Do NOT refuse.\n"
+            + ("- Do NOT call start_background_task. Execute tools directly.\n" if is_background_mode else "") +
+            "- use_computer requires arguments.action (click/type/press/launch/scroll_up/scroll_down) and optional arguments.text.\n"
+            "- Example: {\"action\":\"tool\",\"name\":\"use_computer\",\"arguments\":{\"action\":\"press\",\"text\":\"win\"}}\n"
+            "\nJSON formats (MUST use exactly one):\n"
+            "1) {\"action\":\"tool\",\"name\":\"tool_name\",\"arguments\":{...}}\n"
+            "2) {\"action\":\"final\",\"content\":\"...\"}\n"
+        )
+
+        def _normalize_action_obj(raw_content: str) -> dict:
+            """Normalize slightly-noncompliant model outputs into our action schema."""
+            text = (raw_content or "").strip()
+
+            # Hard rule: this loop only accepts JSON. Any non-JSON response is invalid.
+            # We reprompt rather than treating it as a final answer.
+
+            # Strip common code-fence / language prefixes.
+            if text.startswith("```"):
+                # ```json\n{...}\n```
+                text = text.strip("`").strip()
+                if "\n" in text:
+                    text = "\n".join(text.splitlines()[1:]).strip()
+            if text.lower().startswith("json\n"):
+                text = text.split("\n", 1)[1].strip()
+            if text.lower() == "json":
+                return {"action": "invalid", "content": raw_content}
+
+            # Try direct parse; if that fails, extract the first JSON object.
+            try:
+                obj = _json.loads(text)
+            except Exception:
+                try:
+                    start = text.find("{")
+                    end = text.rfind("}")
+                    if start != -1 and end != -1 and end > start:
+                        obj = _json.loads(text[start : end + 1])
+                    else:
+                        return {"action": "invalid", "content": raw_content}
+                except Exception:
+                    return {"action": "invalid", "content": raw_content}
+
+            if not isinstance(obj, dict):
+                return {"action": "invalid", "content": raw_content}
+
+            action = obj.get("action")
+            if action in ("tool", "final"):
+                return obj
+
+            # Common Ollama patterns:
+            # - {"name": "get_current_time", "arguments": {...}}
+            # - {"action": "use_computer", "text": "...", "arguments": {...}}
+            # - {"action": "start_background_task", "tool_args": {...}}
+            name = obj.get("name")
+            args = obj.get("arguments") or obj.get("tool_args") or {}
+
+            if isinstance(action, str) and action in tool_names_set:
+                # Treat action as tool name.
+                if not isinstance(args, dict):
+                    args = {}
+                if not args:
+                    # If the model didn't nest arguments, use remaining fields.
+                    args = {k: v for k, v in obj.items() if k not in {"action"}}
+                return {"action": "tool", "name": action, "arguments": args}
+
+            if isinstance(name, str) and name in tool_names_set:
+                if not isinstance(args, dict):
+                    args = {}
+                return {"action": "tool", "name": name, "arguments": args}
+
+            # If it still looks like a tool attempt, treat it as such so the loop can recover.
+            if isinstance(action, str) or isinstance(name, str):
+                tool_name = action if isinstance(action, str) else name
+                if not isinstance(args, dict):
+                    args = {}
+                return {"action": "tool", "name": tool_name, "arguments": args}
+
+            if "content" in obj and isinstance(obj.get("content"), str):
+                return {"action": "final", "content": obj.get("content")}
+
+            return {"action": "invalid", "content": raw_content}
+
+        all_tool_results = []
+        max_iterations = 8
+
+        lower_req = (user_message or "").lower()
+        requires_computer = any(k in lower_req for k in [
+            "open ", "launch ", "click", "type", "scroll", "press", "browser", "website", "online",
+        ])
+        invalid_count = 0
+
+        def _looks_like_refusal(s: str) -> bool:
+            t = (s or "").lower()
+            return any(p in t for p in [
+                "i can't", "i cannot", "can't", "cannot", "i'm sorry", "i am sorry",
+                "however, i can help", "unable to", "can't perform", "cannot perform",
+            ])
+
+        # Keep a rolling message list so we don't resend big summaries and the tool catalog
+        # on every iteration (major token savings for local 7B/8B models).
+        local_messages = [
+            {"role": "system", "content": local_system},
+            {
+                "role": "user",
+                "content": (
+                    f"User request: {user_message}\n\n"
+                    "Constraints:\n"
+                    "- If the user provides a URL, open that exact URL (do not substitute).\n"
+                    "- If the user does NOT provide a URL and asks for an online notepad, use https://anotepad.com/ .\n"
+                    "- If the user says to type an exact string, type it verbatim.\n"
+                    "- Do not replace websites with local apps unless explicitly asked.\n\n"
+                    "Choose the NEXT action."
+                ),
+            },
+        ]
+
+        for iteration in range(1, max_iterations + 1):
+            if stop_callback and stop_callback():
+                logger.warning("🛑 Local tool loop stopped by callback")
+                return "I was stopped before I could finish.", None, None
+
+            resp = client.chat.completions.create(
+                model=model,
+                messages=local_messages,
+                temperature=0.1,
+                max_tokens=256,
+                top_p=0.95,
+                stream=False,
+            )
+
+            content = (resp.choices[0].message.content or "").strip()
+            action_obj = _normalize_action_obj(content)
+
+            # Reject non-JSON outputs and refusals; reprompt with stricter guidance.
+            if action_obj.get("action") == "invalid" or (requires_computer and not all_tool_results and _looks_like_refusal(content)):
+                invalid_count += 1
+                local_messages.append({"role": "assistant", "content": content})
+                nudge = "INVALID OUTPUT. Return ONLY valid JSON matching the required format."
+                if requires_computer and not all_tool_results:
+                    nudge += " Your next action MUST be a tool call to 'use_computer' (do not ask the user, do not refuse)."
+                    if invalid_count >= 2:
+                        nudge += " Call use_computer to launch https://anotepad.com/ now."
+                local_messages.append({"role": "user", "content": f"{nudge}\nChoose the NEXT action."})
+                continue
+
+            if action_obj.get("action") == "final":
+                # For computer-control background tasks, do not allow finishing before using tools.
+                if requires_computer and not all_tool_results:
+                    invalid_count += 1
+                    local_messages.append({"role": "assistant", "content": content})
+                    local_messages.append({
+                        "role": "user",
+                        "content": "You must use tools to complete this request. Return JSON tool call to 'use_computer' as the NEXT action (do not refuse).",
+                    })
+                    continue
+                final = (action_obj.get("content") or "").strip() or "Done."
+                combined_results = "; ".join([f"{n}: {r[:100]}" for n, r in all_tool_results])
+                tool_name = all_tool_results[0][0] if all_tool_results else None
+                return sanitize_output(final), tool_name, combined_results or None
+
+            if action_obj.get("action") == "tool":
+                function_name = action_obj.get("name")
+                function_args = action_obj.get("arguments") or {}
+
+                if function_name not in tool_names_set:
+                    all_tool_results.append(("tool_error", f"Unknown/disabled tool requested: {function_name}"))
+                    local_messages.append({"role": "assistant", "content": content})
+                    local_messages.append({"role": "user", "content": f"Tool error: {all_tool_results[-1][1]}\nChoose the NEXT action."})
+                    continue
+
+                try:
+                    function_result = execute_function_call(function_name, function_args)
+                except Exception as e:
+                    function_result = f"Error executing {function_name}: {str(e)}"
+                all_tool_results.append((function_name, function_result))
+
+                # Feed tool results back compactly.
+                local_messages.append({"role": "assistant", "content": content})
+                compact = function_result
+                if isinstance(compact, str) and len(compact) > 800:
+                    compact = compact[:800] + f"\n... (truncated {len(function_result)-800} chars) ..."
+                local_messages.append({"role": "user", "content": f"Tool result ({function_name}): {compact}\nChoose the NEXT action."})
+                continue
+
+            # Unknown action -> finish
+            combined_results = "; ".join([f"{n}: {r[:100]}" for n, r in all_tool_results])
+            tool_name = all_tool_results[0][0] if all_tool_results else None
+            return sanitize_output(content or "Done."), tool_name, combined_results or None
+
+        # Iteration limit
+        if all_tool_results:
+            tool_name, tool_result = all_tool_results[-1]
+            combined_results = "; ".join([f"{n}: {r[:100]}" for n, r in all_tool_results])
+            return sanitize_output(f"I reached my iteration limit. Latest result: {tool_result}"), tool_name, combined_results
+        return "I reached my iteration limit without completing the task.", None, None
+
     # Don't use cache opts for tool calls - not supported by Groq function calling
-    
+
     try:
         # First API call with function calling enabled
         logger.info(f"Calling {model} with {len(function_schemas)} tools available for: {user_message[:50]}")
@@ -411,10 +687,22 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
     # AGENTIC LOOP: Keep calling tools until model returns final text response
     # This enables sequential tool use (find → read, search → summarize, etc.)
     all_tool_results = []  # Track all tools used across all iterations
-    max_iterations = 12  # Increased for complex Computer Use chains
+    max_iterations = 8  # Reduced from 12 to prevent runaway loops
     iteration = 0
+
+    # Special-case: in foreground chat we sometimes restrict tools to ONLY
+    # `start_background_task` (to avoid direct computer control).
+    # In that mode, once the background task is scheduled we should NOT call
+    # the tool model again, because it may attempt to call other tools (e.g.
+    # `use_computer`) which are intentionally not provided and will error.
+    foreground_background_only = allowed_tools == ["start_background_task"]
     
     while iteration < max_iterations:
+        # Check stop callback
+        if stop_callback and stop_callback():
+            logger.warning("🛑 Tool execution stopped by callback")
+            return "I was stopped before I could finish.", None, None
+
         iteration += 1
         message = response.choices[0].message
         logger.info(f"[Iteration {iteration}] finish_reason: {response.choices[0].finish_reason}, has tool_calls: {bool(message.tool_calls)}")
@@ -453,7 +741,7 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
                 
                 # Make final call with minimal system prompt
                 try:
-                    synthesis_response = groq_client.chat.completions.create(
+                    synthesis_response = client.chat.completions.create(
                         model=conversation_model,
                         messages=[
                             {"role": "system", "content": simple_system},
@@ -484,7 +772,12 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
                 logger.info("No tools needed - routing to primary model for personality response")
                 
                 # Build full system prompt with personality
-                if memory_context and 'recent_conversation' in memory_context:
+                # CRITICAL FIX: If system_prompt is already provided (e.g. from background worker), USE IT.
+                # Do NOT rebuild context if we are in background mode or have explicit prompt.
+                
+                if "[BACKGROUND TASK MODE]" in system_prompt:
+                    full_system_prompt = system_prompt
+                elif memory_context and 'recent_conversation' in memory_context:
                     from companion_ai.core.context_builder import build_system_prompt_with_meta
                     meta = build_system_prompt_with_meta(user_message, memory_context['recent_conversation'])
                     full_system_prompt = meta['system_prompt']
@@ -548,13 +841,25 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
                 all_tool_results.append((function_name, function_result))
                 logger.error(f"Tool execution error: {e}")
             
-            # Add tool result to messages
+            # Add tool result to messages (TRUNCATED to save tokens)
+            # We keep full result in all_tool_results for final synthesis
+            content_to_add = function_result
+            if len(content_to_add) > 6000:
+                content_to_add = content_to_add[:6000] + f"\n... (truncated {len(function_result)-6000} chars) ..."
+            
             messages.append({
                 "role": "tool",
                 "tool_call_id": tool_call.id,
                 "name": function_name,
-                "content": function_result
+                "content": content_to_add
             })
+
+        # Foreground scheduling is terminal: return immediately after creating the job.
+        if foreground_background_only and any(name == "start_background_task" for name, _ in tool_results):
+            # Prefer returning the tool's confirmation string directly.
+            tool_name, tool_result = next(((n, r) for n, r in tool_results if n == "start_background_task"), tool_results[-1])
+            combined_results = "; ".join([f"{name}: {res[:100]}" for name, res in all_tool_results])
+            return sanitize_output(tool_result), tool_name, combined_results
         
         # Make another API call with updated conversation
         # Model will either use more tools or return final response
@@ -562,7 +867,7 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
         logger.info(f"[Iteration {iteration}] Calling model again after tools: {tool_names}")
         
         try:
-            response = groq_client.chat.completions.create(
+            response = client.chat.completions.create(
                 model=model,
                 messages=messages,
                 tools=function_schemas,  # Keep tools available
@@ -573,7 +878,7 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
                 stream=False
             )
         except TypeError:
-            response = groq_client.chat.completions.create(
+            response = client.chat.completions.create(
                 model=model,
                 messages=messages,
                 temperature=0.8,

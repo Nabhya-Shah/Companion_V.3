@@ -5,6 +5,7 @@ import base64
 import io
 import logging
 import collections
+import tempfile
 from datetime import datetime
 from typing import Optional, Deque, List, Dict
 
@@ -25,6 +26,23 @@ class VisionManager:
     Uses Llama 4 Maverick for vision tasks with a dedicated API key.
     """
     def __init__(self):
+        # Optional local vision via Ollama (e.g., minicpm-v)
+        self.use_local_vision = os.getenv("USE_LOCAL_VISION", "").strip().lower() in {"1", "true", "yes", "on"}
+        self.local_vision_model = os.getenv("LOCAL_VISION_MODEL", "minicpm-v")
+        self._local_backend = None
+
+        if self.use_local_vision:
+            try:
+                from companion_ai.local_llm import OllamaBackend
+                backend = OllamaBackend()
+                if backend.is_available():
+                    self._local_backend = backend
+                    logger.info(f"VisionManager using LOCAL Ollama vision model: {self.local_vision_model}")
+                else:
+                    logger.warning("VisionManager: USE_LOCAL_VISION enabled but Ollama not available; falling back to Groq")
+            except Exception as e:
+                logger.warning(f"VisionManager: local vision init failed; falling back to Groq: {e}")
+
         # Use dedicated vision API key (falls back to main key in config)
         self.api_key = GROQ_VISION_API_KEY
         self.client = Groq(api_key=self.api_key) if self.api_key else None
@@ -45,6 +63,25 @@ class VisionManager:
         self.vision_model = VISION_MODEL
         
         logger.info(f"VisionManager initialized with model: {self.vision_model}")
+
+    def _run_local_vision(self, prompt: str, img: Image.Image) -> str:
+        """Run local Ollama vision model on an in-memory PIL image."""
+        if not self._local_backend:
+            return "Local vision unavailable"
+
+        # Ollama backend expects a file path for now.
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                tmp_path = tmp.name
+                img.save(tmp, format="JPEG", quality=70)
+            return self._local_backend.generate_with_image(prompt, tmp_path, model=self.local_vision_model)
+        finally:
+            if tmp_path:
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
 
     def start_watcher(self):
         """Start the background watcher thread."""
@@ -144,6 +181,15 @@ class VisionManager:
 
     def _generate_summary(self, img: Image.Image) -> str:
         """Generate a brief 1-sentence summary of the image using Vision API."""
+        if self._local_backend:
+            try:
+                prompt = "Describe the active application or main screen content in 1 short sentence. Be specific."
+                out = self._run_local_vision(prompt, img)
+                return out.strip() if out else None
+            except Exception as e:
+                logger.error(f"Local vision summary failed: {e}")
+                return None
+
         if not self.client:
             return "Vision API unavailable"
             
@@ -196,6 +242,41 @@ class VisionManager:
             high_detail: If True, use 1024px resolution (max detail).
             low_detail: If True, use 512px resolution (token saving, good for basic checks).
         """
+        if self._local_backend:
+            try:
+                if low_detail:
+                    res_dim = 512
+                elif high_detail or "read" in prompt.lower() or "text" in prompt.lower():
+                    res_dim = 1024
+                else:
+                    res_dim = 768
+
+                img = self.capture_screen(resize_dim=res_dim)
+
+                # Keep history short to avoid bloating local prompt.
+                history = list(self.visual_log)[-5:]
+                history_lines = []
+                for entry in history:
+                    ts = entry['timestamp'].split('T')[1][:8]
+                    history_lines.append(f"[{ts}] {entry['description']}")
+                history_context = "\n".join(history_lines) if history_lines else "(none)"
+
+                full_prompt = (
+                    "You are an AI agent with eyes. Analyze the screen to help the user.\n"
+                    f"Recent visual history:\n{history_context}\n\n"
+                    f"User question: {prompt}\n\n"
+                    "Instructions:\n"
+                    "1) Identify the active application and main content.\n"
+                    "2) If relevant, mention visible UI elements and their state.\n"
+                    "3) Be concise and direct.\n"
+                )
+
+                out = self._run_local_vision(full_prompt, img)
+                return out.strip() if out else ""
+            except Exception as e:
+                logger.error(f"Local active vision analysis failed: {e}")
+                return f"Error analyzing screen: {str(e)}"
+
         if not self.client:
             return "Vision API unavailable"
             

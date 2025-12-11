@@ -49,6 +49,12 @@
 *   **Mechanism:** Feed tool errors back to the 120B model as "Observations."
 *   **Action:** AI decides to Retry (new params), Alternate (different tool), or Diagnose.
 
+### 7. Local Compute Strategy (RTX 5080)
+**Goal:** Leverage local hardware for privacy and zero-cost background tasks.
+*   **Plan:** See [LOCAL_MODEL_PLAN.md](LOCAL_MODEL_PLAN.md)
+*   **Models:** `llama3.1:8b` (Tools), `minicpm-v` (Vision), `qwen2.5:14b` (Reasoning).
+*   **Backend:** Ollama.
+
 ---
 
 ## 🎮 Phase 4: The "Jarvis" Goal (Long Term)

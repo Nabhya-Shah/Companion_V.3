@@ -8,6 +8,7 @@ class ComputerControlStatus {
         this.isActive = false;
         this.banner = null;
         this.checkInterval = null;
+        this.evtSource = null;
         this.init();
     }
 
@@ -23,15 +24,46 @@ class ComputerControlStatus {
     `;
         document.body.prepend(this.banner);
 
-        // Start polling for status
-        this.startPolling();
+        // Prefer SSE updates; fallback to slow polling if needed
+        this.startSSE();
     }
 
-    startPolling() {
-        // Check computer control status every 2 seconds
+    startSSE() {
+        try {
+            if (this.evtSource) {
+                this.evtSource.close();
+            }
+            this.evtSource = new EventSource('/api/computer/stream');
+
+            this.evtSource.onmessage = (e) => {
+                if (!e.data || e.data === ': keep-alive') return;
+                try {
+                    const data = JSON.parse(e.data);
+                    if (data.type === 'computer_status' && data.status) {
+                        this.setActive(!!data.status.active);
+                    }
+                } catch (err) {
+                    // ignore parse errors
+                }
+            };
+
+            this.evtSource.onerror = () => {
+                try { this.evtSource.close(); } catch (_) {}
+                this.evtSource = null;
+                // Fallback to slow polling if SSE fails
+                this.startPollingFallback();
+            };
+        } catch (e) {
+            this.startPollingFallback();
+        }
+    }
+
+    startPollingFallback() {
+        if (this.checkInterval) return;
+        // Very slow fallback to minimize HTTP noise
         this.checkInterval = setInterval(() => {
             this.checkStatus();
-        }, 2000);
+        }, 30000);
     }
 
     async checkStatus() {

@@ -7,6 +7,8 @@ from __future__ import annotations
 import datetime, re, os, json
 from typing import Callable, Dict, Any
 from companion_ai import memory as mem
+from companion_ai import job_manager  # Import job manager
+
 try:
     from companion_ai.memory_v2 import search_memories
 except ImportError:
@@ -61,6 +63,47 @@ def tool(name: str, schema: Dict[str, Any] | None = None):
 # TOOL DEFINITIONS
 # ============================================================================
 
+@tool('start_background_task', schema={
+    "type": "function",
+    "function": {
+        "name": "start_background_task",
+        "description": "Start a long-running task in the background. Use this for research, deep analysis, or any task that might take more than a few seconds. IMPORTANT: Do NOT wait for this task to complete. It runs asynchronously. Just confirm to the user that it has started.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "description": "A human-readable description of the task (e.g., 'Research quantum physics')"
+                },
+                "tool_name": {
+                    "type": "string",
+                    "description": "The name of the internal tool to run (currently supports: 'research_topic')"
+                },
+                "tool_args": {
+                    "type": "object",
+                    "description": "Arguments for the tool (e.g., {'query': 'quantum physics'})"
+                }
+            },
+            "required": ["description", "tool_name", "tool_args"]
+        }
+    }
+})
+def tool_background_task(description: str, tool_name: str = "", tool_args: Dict = None) -> str:
+    """Start a background task."""
+    if tool_args is None:
+        tool_args = {}
+    
+    # For legacy calls where args might be mixed
+    if isinstance(description, dict):
+        # Handle case where arguments are passed as a single dict
+        args = description
+        description = args.get('description', 'Unknown Task')
+        tool_name = args.get('tool_name', 'unknown')
+        tool_args = args.get('tool_args', {})
+
+    job_id = job_manager.add_job(description, tool_name, tool_args)
+    return f"Started background task '{description}' with ID: {job_id}. I will notify you when it is complete. Do NOT wait for it."
+
 @tool('get_current_time', schema={
     "type": "function",
     "function": {
@@ -88,9 +131,15 @@ def run_tool(name: str, arg: str) -> str:
         return f'Unknown tool: {name}'
     return fn(arg)
 
-def get_function_schemas() -> list[Dict[str, Any]]:
-    """Get all function calling schemas for Groq native integration."""
-    return list(_FUNCTION_SCHEMAS.values())
+def get_function_schemas(allowed: list[str] | None = None) -> list[Dict[str, Any]]:
+    """Get function calling schemas for native tool calling.
+
+    Args:
+        allowed: Optional list of tool names to include. If None, returns all.
+    """
+    if not allowed:
+        return list(_FUNCTION_SCHEMAS.values())
+    return [schema for name, schema in _FUNCTION_SCHEMAS.items() if name in set(allowed)]
 
 def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
     """Execute a function call from Groq's native function calling.
@@ -136,6 +185,12 @@ def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
         return tool_fn(arguments.get('prompt', 'What is on the screen?'))
     elif function_name == 'use_computer':
         return tool_fn(action=arguments.get('action'), text=arguments.get('text'))
+    elif function_name == 'start_background_task':
+        return tool_fn(
+            description=arguments.get('description'),
+            tool_name=arguments.get('tool_name'),
+            tool_args=arguments.get('tool_args')
+        )
     else:
         # Fallback: pass first argument or empty string
         first_arg = next(iter(arguments.values()), '') if arguments else ''
@@ -694,6 +749,9 @@ def tool_use_computer(action: str, text: str = "") -> str:
 
     try:
         from companion_ai.computer_agent import computer_agent
+
+        # Mark activity so UI can show the banner only when actions occur.
+        computer_agent.mark_action()
         
         if action == "click":
             if not text: return "Error: 'text' (element description) is required for click action."
