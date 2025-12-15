@@ -164,7 +164,8 @@ def _worker_loop():
                     # Execute the tool
                     from companion_ai.llm_interface import generate_response
                     from companion_ai.core.prompts import get_static_system_prompt_safe
-                    from companion_ai.local_llm import is_local_available, OllamaClientWrapper
+                    from companion_ai.local_llm import is_local_available, OllamaClientWrapper, LocalLLM
+                    from companion_ai.core import config as core_config
                     
                     # Create a mini-agent loop to solve the task
                     # We use the LLM to decide what tools to use based on the description
@@ -184,14 +185,13 @@ def _worker_loop():
                     
                     # Determine model and client
                     client = None
-                    model = 'llama-3.1-8b-instant' # Default Groq
+                    model = core_config.TOOLS_MODEL # Default Groq
                     
                     if is_local_available():
                         logger.info("🏠 Using LOCAL LLM (Ollama) for background task")
                         client = OllamaClientWrapper()
-                        # NOTE: llama3.x is currently crashing (runner exit status 2) on this machine.
-                        # qwen2.5-coder:7b is installed and verified working.
-                        model = 'qwen2.5-coder:7b'
+                        # Use centralized model config (defaults to qwen2.5-coder:7b for code)
+                        model = LocalLLM.DEFAULT_MODELS['code']
                     else:
                         logger.info("☁️ Using CLOUD LLM (Groq) for background task")
                     
