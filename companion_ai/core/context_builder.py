@@ -57,7 +57,10 @@ def build_system_prompt(user_message: str, recent_conversation: str = "") -> str
     if traits:
         dynamic_parts.append(traits)
     
-    # Memory context - use Mem0 or legacy based on config
+    # 2. Brain Context (personality, user context, learned rules)
+    brain_context = _build_brain_context()
+    if brain_context:
+        dynamic_parts.append(brain_context)
     if config.USE_MEM0:
         memory_context = _build_mem0_context(user_message)
     else:
@@ -95,6 +98,56 @@ def _load_dynamic_traits() -> str:
                         return f"[Adaptive Personality Traits]:\n- " + "\n- ".join(traits)
     except Exception:
         pass # Fail silently to avoid breaking chat
+    return ""
+
+def _build_brain_context() -> str:
+    """Build brain context from persistent notes (token-conscious).
+    
+    Reads key files from brain folder and returns a concise context.
+    Limited to ~500 chars per section to avoid token bloat.
+    """
+    try:
+        from companion_ai.brain_manager import get_brain
+        brain = get_brain()
+        
+        context_parts = []
+        MAX_SECTION_LEN = 500  # Limit each section to save tokens
+        
+        # Key files to include (path, label, priority)
+        key_files = [
+            ("memories/personality.md", "MY PERSONALITY"),
+            ("memories/user_context.md", "ABOUT USER"),
+        ]
+        
+        for file_path, label in key_files:
+            content = brain.read(file_path)
+            if content:
+                # Strip HTML comments and truncate
+                lines = [l for l in content.split("\n") if not l.strip().startswith("<!--")]
+                clean = "\n".join(lines).strip()
+                if clean:
+                    # Truncate if too long
+                    if len(clean) > MAX_SECTION_LEN:
+                        clean = clean[:MAX_SECTION_LEN] + "..."
+                    context_parts.append(f"[{label}]\n{clean}")
+        
+        # Check for recent daily summary (yesterday or today)
+        from datetime import date, timedelta
+        for days_ago in [0, 1]:
+            check_date = date.today() - timedelta(days=days_ago)
+            daily_path = f"memories/daily/{check_date}.md"
+            content = brain.read(daily_path)
+            if content:
+                lines = [l for l in content.split("\n") if not l.strip().startswith("<!--")]
+                clean = "\n".join(lines).strip()[:300]
+                if clean:
+                    context_parts.append(f"[RECENT MEMORY]\n{clean}")
+                break  # Only include most recent
+        
+        if context_parts:
+            return "\n\n".join(context_parts)
+    except Exception as e:
+        pass  # Fail silently
     return ""
 
 def _build_mem0_context(user_message: str) -> str:
