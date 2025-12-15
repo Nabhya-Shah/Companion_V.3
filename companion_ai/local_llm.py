@@ -261,7 +261,7 @@ class LocalLLM:
     DEFAULT_MODELS = {
         "text": "llama3.2:latest",         # Fast, good instruction following
         "reasoning": "llama3.2:latest",     # Use text model (deepseek too slow)
-        "vision": "minicpm-v:latest",       # Image understanding (beats GPT-4o!)
+        "vision": "llava:13b",              # Image understanding (WINNER: 10s vs 35s/50s)
         "code": "qwen2.5-coder:7b",         # Code generation
     }
     
