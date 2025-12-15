@@ -356,8 +356,26 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
     Returns:
         tuple: (response_text, tool_name_used, tool_result)
     """
+    # Detect if we should use local Ollama client based on model name
+    is_local_model = (
+        model and 
+        (":" in model or  # Ollama format like llama3.2:latest
+         model.startswith("llama") or 
+         model.startswith("qwen") or
+         model.startswith("mistral"))
+        and not model.startswith("meta-llama")  # Groq uses meta-llama prefix
+        and not model.startswith("openai")
+    )
+    
     if client is None:
-        client = get_groq_client(for_tools=True)
+        if is_local_model:
+            # Use local Ollama for tool execution (saves Groq tokens!)
+            from companion_ai.local_llm import LocalLLM
+            local_llm = LocalLLM()
+            client = local_llm.get_client()
+            logger.info(f"Using LOCAL Ollama client for tools with model: {model}")
+        else:
+            client = get_groq_client(for_tools=True)
         
     if not client:
         raise Exception("LLM client not available")
@@ -395,14 +413,34 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
     if "[BACKGROUND TASK MODE]" not in (system_prompt or ""):
         lower_msg = (user_message or "").lower()
         
-        computer_intent = any(k in lower_msg for k in [
-            "open ", "launch ", "click", "type", "scroll", "press", "computer", "mouse", "keyboard",
-            "browser", "chrome", "edge", "notepad", "settings",
+        # NOTE: Order matters! More specific intents first.
+        # browser_intent uses Playwright (fast), computer_intent uses PyAutoGUI (slow/vision)
+        browser_intent = any(k in lower_msg for k in [
+            "browser_goto", "browser_click", "browser_type", "browse to", 
+            "website", "webpage", "navigate to", "go to http", "open http",
+            "google.com", "wikipedia.org", ".com", ".org", "url"
+        ])
+        vision_intent = any(k in lower_msg for k in [
+            "look at", "look at screen", "what's on screen", "screen", "screenshot",
+            "see my", "what do you see", "describe what", "analyze screen"
         ])
         file_intent = any(k in lower_msg for k in ["file", "folder", ".txt", ".pdf", ".docx", "read ", "open file", "search file"])
         web_intent = any(k in lower_msg for k in ["search", "wikipedia", "weather", "time", "lookup"])
+        computer_intent = any(k in lower_msg for k in [
+            "open ", "launch ", "click", "type", "scroll", "press", "computer", "mouse", "keyboard",
+            "chrome", "edge", "notepad", "settings",  # Removed "browser" - conflicts with browser_intent
+        ])
 
-        if computer_intent:
+        if browser_intent:
+            # Playwright-based browser automation (fast, reliable)
+            allowed_tools = [
+                "browser_goto", "browser_click", "browser_type", "browser_read", "browser_press",
+                "get_current_time",
+            ]
+        elif vision_intent:
+            # Vision/screen analysis
+            allowed_tools = ["look_at_screen", "get_current_time"]
+        elif computer_intent:
             # Foreground: schedule background job instead of direct computer use.
             # This prevents runaway UI actions and slashes tool-schema token usage.
             allowed_tools = ["start_background_task"]

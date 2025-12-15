@@ -220,33 +220,48 @@ async def press_key(key: str) -> str:
 
 
 # Synchronous wrappers for tool integration
+# Using new event loop pattern to avoid "no running event loop" errors
+def _run_async(coro):
+    """Run async coroutine in a new event loop (safe for sync callers)."""
+    try:
+        loop = asyncio.get_running_loop()
+        # Already in async context - this shouldn't happen in sync tool calls
+        # but handle it gracefully
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            future = pool.submit(asyncio.run, coro)
+            return future.result()
+    except RuntimeError:
+        # No running loop - create one (normal case for sync tool calls)
+        return asyncio.run(coro)
+
 def sync_goto(url: str) -> str:
     """Sync wrapper for goto."""
-    return asyncio.get_event_loop().run_until_complete(goto(url))
+    return _run_async(goto(url))
 
 def sync_click(selector: str, text: Optional[str] = None) -> str:
     """Sync wrapper for click."""
-    return asyncio.get_event_loop().run_until_complete(click(selector, text))
+    return _run_async(click(selector, text))
 
 def sync_type(selector: str, text: str) -> str:
     """Sync wrapper for type_text."""
-    return asyncio.get_event_loop().run_until_complete(type_text(selector, text))
+    return _run_async(type_text(selector, text))
 
 def sync_get_text(selector: Optional[str] = None) -> str:
     """Sync wrapper for get_text."""
-    return asyncio.get_event_loop().run_until_complete(get_text(selector))
+    return _run_async(get_text(selector))
 
 def sync_screenshot(path: Optional[str] = None) -> str:
     """Sync wrapper for screenshot."""
-    return asyncio.get_event_loop().run_until_complete(screenshot(path))
+    return _run_async(screenshot(path))
 
 def sync_press_key(key: str) -> str:
     """Sync wrapper for press_key."""
-    return asyncio.get_event_loop().run_until_complete(press_key(key))
+    return _run_async(press_key(key))
 
 def sync_close() -> str:
     """Sync wrapper for close_browser."""
-    asyncio.get_event_loop().run_until_complete(close_browser())
+    _run_async(close_browser())
     return "Browser closed"
 
 

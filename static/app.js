@@ -872,6 +872,74 @@ document.getElementById('resetTokensBtn')?.addEventListener('click', async () =>
 });
 
 // ============================================
+// Daily Token Budget (Groq limits)
+// ============================================
+async function loadTokenBudget() {
+  try {
+    const r = await fetch('/api/token-budget', { headers: authHeaders() });
+    if (!r.ok) return;
+
+    const data = await r.json();
+
+    // Create or update the budget display in header
+    let budgetEl = document.getElementById('tokenBudgetDisplay');
+    if (!budgetEl) {
+      // Create the element if it doesn't exist
+      budgetEl = document.createElement('div');
+      budgetEl.id = 'tokenBudgetDisplay';
+      budgetEl.style.cssText = `
+        position: fixed;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--surface-secondary, #1a1a2e);
+        padding: 8px 14px;
+        border-radius: 8px;
+        font-size: 12px;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--border-color, #333);
+      `;
+      document.body.appendChild(budgetEl);
+    }
+
+    const percent = data.percent || 0;
+    const used = data.used || 0;
+    const limit = data.limit || 500000;
+
+    // Color based on usage
+    let color = '#4ade80'; // green
+    let icon = '🟢';
+    if (data.warning) {
+      color = '#fbbf24'; // yellow
+      icon = '🟡';
+    }
+    if (data.critical) {
+      color = '#ef4444'; // red
+      icon = '🔴';
+    }
+
+    budgetEl.innerHTML = `
+      <span>${icon}</span>
+      <span style="color: ${color}; font-weight: 600;">${percent.toFixed(1)}%</span>
+      <span style="color: var(--text-muted, #888);">
+        ${(used / 1000).toFixed(0)}K / ${(limit / 1000000).toFixed(1)}M tokens today
+      </span>
+    `;
+
+    // Auto-refresh every 30 seconds
+    setTimeout(loadTokenBudget, 30000);
+  } catch (e) {
+    console.error('Failed to load token budget:', e);
+  }
+}
+
+// Load token budget on startup
+loadTokenBudget();
+
+// ============================================
 // Settings
 // ============================================
 async function loadSettings() {
@@ -1045,7 +1113,7 @@ function stopSSE() {
 if (shutdownBtn) {
   shutdownBtn.addEventListener('click', async () => {
     if (!confirm('Are you sure you want to shut down the server? This will trigger a persona evolution check.')) return;
-    
+
     showToast('Shutting down server...', 'info');
     try {
       const res = await fetch('/api/shutdown', {
@@ -1102,7 +1170,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Use SSE for real-time updates (Chat + Jobs)
   startSSE();
-  
+
   // Start job polling (Disabled - using SSE)
   // setInterval(pollJobs, 5000);
 });
@@ -1111,15 +1179,15 @@ function startSSE() {
   if (window.evtSource) {
     window.evtSource.close();
   }
-  
+
   window.evtSource = new EventSource('/api/chat/stream');
-  
+
   window.evtSource.onmessage = (e) => {
     if (e.data === ': keep-alive') return;
-    
+
     try {
       const data = JSON.parse(e.data);
-      
+
       // Handle different event types
       if (data.type === 'job_update') {
         handleJobUpdate(data.job);
@@ -1132,7 +1200,7 @@ function startSSE() {
       console.error('SSE Parse Error:', err);
     }
   };
-  
+
   window.evtSource.onerror = (err) => {
     console.error('SSE Error:', err);
     window.evtSource.close();

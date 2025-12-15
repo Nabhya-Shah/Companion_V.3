@@ -54,8 +54,10 @@ TOOLS_MODEL = "llama-3.1-8b-instant"  # Planner: Uses cached prompt to decide to
 TOOLS_MODEL_FAST = "llama-3.1-8b-instant"  # Backup / Fast execution if needed
 VISION_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"  # Vision tasks (Maverick)
 
-# Feature flag: Use fast tool executor by default
+# Feature flags
 USE_FAST_TOOL_EXECUTOR = True
+USE_LOCAL_TOOLS = os.getenv("USE_LOCAL_TOOLS", "1").strip().lower() in {"1", "true", "yes", "on"}  # Default ON to save Groq tokens
+LOCAL_TOOLS_MODEL = os.getenv("LOCAL_TOOLS_MODEL", "llama3.2:latest")  # Fast local model for tool execution
 
 # Model capabilities reference (for documentation)
 # - 120B: 128k context, high intelligence, expensive
@@ -88,9 +90,12 @@ MODEL_INFO = {
 def get_tool_executor() -> str:
     """Get the appropriate model for tool execution.
     
-    Returns Scout by default (reliable native function calling).
-    Returns 8B if USE_FAST_TOOL_EXECUTOR is enabled.
+    Returns:
+        - Local Ollama model if USE_LOCAL_TOOLS=1 (saves Groq tokens!)
+        - Groq 8B model otherwise
     """
+    if USE_LOCAL_TOOLS:
+        return LOCAL_TOOLS_MODEL  # Local Ollama - free!
     if USE_FAST_TOOL_EXECUTOR:
         return TOOLS_MODEL_FAST
     return TOOLS_MODEL
