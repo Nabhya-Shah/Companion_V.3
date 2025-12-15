@@ -174,7 +174,37 @@ class Trainer:
             self.save_result(result)
             
             if success:
-                logger.info(f"✅ SUCCESS: {reasoning}")
+                logger.info(f"SUCCESS: {reasoning}")
+                
+                # Write skill to brain folder
+                try:
+                    from companion_ai.brain_manager import get_brain
+                    brain = get_brain()
+                    
+                    # Create skill note
+                    skill_name = task.name.replace(" ", "_").lower()
+                    skill_content = f'''# Skill: {task.name}
+
+## Task
+{task.prompt}
+
+## Successful Strategy
+{response[:500]}
+
+## Verification
+{reasoning}
+
+## Duration
+{duration:.2f}s
+
+## Learned
+- Attempt: {attempt + 1}/{max_retries}
+'''
+                    brain.write(f"training/skills/{skill_name}.md", skill_content)
+                    logger.info(f"Skill saved to brain: training/skills/{skill_name}.md")
+                except Exception as e:
+                    logger.error(f"Failed to save skill: {e}")
+                    
                 return # Task Complete
             else:
                 logger.warning(f"❌ FAIL: {reasoning}")

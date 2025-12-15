@@ -135,6 +135,75 @@ def get_active_jobs():
     jobs = job_manager.get_active_jobs()
     return jsonify({'jobs': jobs})
 
+@app.route('/api/token-budget', methods=['GET'])
+def token_budget():
+    """Get current token budget status."""
+    try:
+        from companion_ai.token_budget import get_budget_status, should_auto_save
+        status = get_budget_status()
+        status['should_auto_save'] = should_auto_save()
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Token budget error: {e}")
+        return jsonify({'error': str(e), 'used': 0, 'limit': 500000, 'percent': 0}), 500
+
+@app.route('/api/brain/auto-write', methods=['POST'])
+def brain_auto_write():
+    """Trigger brain auto-write (end of conversation summary)."""
+    try:
+        token = (request.headers.get('X-API-TOKEN') or request.cookies.get('api_token'))
+        if not core_config.require_auth(token):
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        from companion_ai.brain_manager import get_brain
+        from companion_ai.llm_interface import generate_model_response
+        from datetime import date
+        
+        brain = get_brain()
+        
+        # Get conversation history for summary
+        history = conversation_session.conversation_history[-10:]  # Last 10 messages
+        if not history:
+            return jsonify({'success': False, 'reason': 'No conversation history'})
+        
+        # Build conversation text
+        conv_text = "\n".join([
+            f"{msg.get('role', 'user')}: {msg.get('content', '')[:200]}"
+            for msg in history
+        ])
+        
+        # Generate summary using 120B (smart model)
+        summary_prompt = f'''Analyze this conversation and extract:
+1. Key topics discussed
+2. Any user preferences learned
+3. Skills/knowledge demonstrated
+
+Conversation:
+{conv_text}
+
+Write a brief summary (max 200 words) for the AI's daily journal.'''
+        
+        summary = generate_model_response(
+            summary_prompt, 
+            "You are a summarizer. Be concise.", 
+            core_config.PRIMARY_MODEL
+        )
+        
+        # Write to brain folder (local model writes, saving tokens)
+        today = str(date.today())
+        brain.write(
+            f"memories/daily/{today}.md", 
+            f"# Daily Summary - {today}\n\n{summary}",
+            append=False
+        )
+        
+        logger.info(f"Brain auto-write complete: memories/daily/{today}.md")
+        return jsonify({'success': True, 'file': f'memories/daily/{today}.md'})
+        
+    except Exception as e:
+        logger.error(f"Brain auto-write error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/graph')
 def graph():
     """Interactive knowledge graph visualization"""

@@ -72,7 +72,14 @@ def log_tokens(model: str, input_tokens: int, output_tokens: int, context: str =
         _last_request_tokens['models'].append(model)
     
     total = input_tokens + output_tokens
-    logger.info(f"📊 TOKENS [{model}] in={input_tokens} out={output_tokens} total={total} | {context}")
+    logger.info(f"TOKENS [{model}] in={input_tokens} out={output_tokens} total={total} | {context}")
+    
+    # Record to daily budget tracker
+    try:
+        from companion_ai.token_budget import record_tokens
+        record_tokens(model, total)
+    except Exception as e:
+        logger.debug(f"Token budget recording failed: {e}")
 
 def get_token_stats() -> dict:
     """Get current token statistics."""
