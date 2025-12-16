@@ -98,6 +98,57 @@ def sanitize_output(text: str) -> str:
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
+
+def _summarize_for_synthesis(tool_name: str, result: str, max_chars: int = 200) -> str:
+    """Summarize long tool results using local model to save tokens.
+    
+    Instead of blindly truncating, use local LLM to compress while keeping key facts.
+    Only triggers for results > 300 chars.
+    
+    Args:
+        tool_name: Name of the tool that produced the result
+        result: The full tool result
+        max_chars: Target max length for summary
+        
+    Returns:
+        Compressed result string (or original if short enough)
+    """
+    if len(result) <= 300:
+        return result  # Short enough, keep as-is
+    
+    try:
+        from companion_ai.local_llm import LocalLLM
+        local = LocalLLM()
+        
+        if not local.is_available():
+            # Fallback to simple truncation
+            return result[:max_chars] + "..." if len(result) > max_chars else result
+        
+        # Use local model to summarize (faster than Groq, saves tokens)
+        summary_prompt = (
+            f"Summarize this {tool_name} output in under {max_chars} chars. "
+            f"Keep ONLY the key facts - no filler words:\n\n{result[:1000]}"
+        )
+        
+        summary = local.generate(
+            prompt=summary_prompt,
+            model="llama3.1:latest",  # Fast 8B model
+            temperature=0.3,
+            max_tokens=100
+        )
+        
+        # Ensure it's not longer than max
+        if len(summary) > max_chars:
+            summary = summary[:max_chars] + "..."
+            
+        logger.debug(f"Summarized {tool_name} result: {len(result)} -> {len(summary)} chars")
+        return summary
+        
+    except Exception as e:
+        logger.warning(f"Summarization failed, using truncation: {e}")
+        return result[:max_chars] + "..." if len(result) > max_chars else result
+
+
 # LLM imports
 try:
     from groq import Groq
@@ -778,7 +829,7 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
             
             # Build summary of tool results
             if all_tool_results:
-                tool_summary = "\n".join([f"{name}: {res[:300]}" for name, res in all_tool_results])
+                tool_summary = "\n".join([f"{name}: {_summarize_for_synthesis(name, res)}" for name, res in all_tool_results])
                 
                 # Check if Mem0 memories should be included
                 mem0_context = ""

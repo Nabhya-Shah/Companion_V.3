@@ -61,6 +61,21 @@ def build_system_prompt(user_message: str, recent_conversation: str = "") -> str
     brain_context = _build_brain_context()
     if brain_context:
         dynamic_parts.append(brain_context)
+    
+    # 3. Capabilities Awareness - Tell 120B what tools it has
+    capabilities = """[YOUR CAPABILITIES]
+You have access to powerful tools that execute in the background:
+• VISION: You can see the user's screen and describe what's there
+• COMPUTER: You can control mouse, keyboard, open apps, type text
+• BROWSER: You can navigate websites, click elements, read page content
+• MEMORY: You can remember facts about the user and recall them later
+• BRAIN: You can read/write persistent notes to your brain folder
+
+When you receive tool results, weave them naturally into your response.
+If a tool was used, you'll see its output - incorporate those details.
+You don't need to explain that you "used a tool" - just respond naturally."""
+    dynamic_parts.append(capabilities)
+    
     if config.USE_MEM0:
         memory_context = _build_mem0_context(user_message)
     else:
