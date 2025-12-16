@@ -114,8 +114,10 @@ data/
 
 ## 📋 Backlog / Future Ideas
 
+> **See [ROADMAP.md](./ROADMAP.md) for detailed prioritized roadmap**
+
 ### High Priority
-- [ ] Fix knowledge graph UI display
+- [x] Fix knowledge graph UI display ✅ (Dec 2025)
 - [ ] Add escape key to stop generation
 - [ ] Improved error messages in UI
 
