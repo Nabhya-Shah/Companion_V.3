@@ -26,9 +26,9 @@ class VisionManager:
     Uses Llama 4 Maverick for vision tasks with a dedicated API key.
     """
     def __init__(self):
-        # Optional local vision via Ollama (e.g., minicpm-v)
-        self.use_local_vision = os.getenv("USE_LOCAL_VISION", "").strip().lower() in {"1", "true", "yes", "on"}
-        self.local_vision_model = os.getenv("LOCAL_VISION_MODEL", "minicpm-v")
+        # Use LOCAL vision by default (saves Groq tokens, llava:13b is installed)
+        self.use_local_vision = os.getenv("USE_LOCAL_VISION", "1").strip().lower() in {"1", "true", "yes", "on"}
+        self.local_vision_model = os.getenv("LOCAL_VISION_MODEL", "llava:13b")
         self._local_backend = None
 
         if self.use_local_vision:

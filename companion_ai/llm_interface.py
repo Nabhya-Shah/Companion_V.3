@@ -356,20 +356,13 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
     Returns:
         tuple: (response_text, tool_name_used, tool_result)
     """
-    # Detect if we should use local Ollama client based on model name
-    is_local_model = (
-        model and 
-        (":" in model or  # Ollama format like llama3.2:latest
-         model.startswith("llama") or 
-         model.startswith("qwen") or
-         model.startswith("mistral"))
-        and not model.startswith("meta-llama")  # Groq uses meta-llama prefix
-        and not model.startswith("openai")
-    )
+    # Detect if model is LOCAL Ollama format: "model:tag" (has colon, no slash)
+    # Examples: qwen2.5:32b ✓, llava:13b ✓, llama-3.1-8b-instant ✗ (Groq)
+    is_local_model = model and ":" in model and "/" not in model
     
     if client is None:
         if is_local_model:
-            # Use local Ollama for tool execution (saves Groq tokens!)
+            # Use local Ollama for heavy tool execution
             from companion_ai.local_llm import LocalLLM
             local_llm = LocalLLM()
             client = local_llm.get_client()
@@ -410,6 +403,10 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
     # We aggressively restrict tool choices based on intent for foreground chat.
     # IMPORTANT: Background tasks must have full tool access.
     allowed_tools: list[str] | None = None
+    
+    # Initialize intent flags (used for hybrid model routing below)
+    browser_intent = vision_intent = file_intent = web_intent = computer_intent = False
+    
     if "[BACKGROUND TASK MODE]" not in (system_prompt or ""):
         lower_msg = (user_message or "").lower()
         
@@ -452,6 +449,28 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
             ]
         elif web_intent:
             allowed_tools = ["wikipedia_lookup", "consult_compound", "get_current_time"]
+
+    # ========================================================================
+    # HYBRID MODEL ROUTING: Override model for heavy intents
+    # ========================================================================
+    # Heavy intents (vision, browser, files) → Use LOCAL Ollama (qwen2.5:32b)
+    # Light intents (web, time) → Use Groq 8B (fast, free)
+    # ========================================================================
+    heavy_intent = browser_intent or vision_intent or file_intent if "[BACKGROUND TASK MODE]" not in (system_prompt or "") else True
+    
+    # DEBUG: Log routing decision
+    logger.info(f"HYBRID ROUTING CHECK: heavy_intent={heavy_intent} (browser={browser_intent}, vision={vision_intent}, file={file_intent}), is_ollama_wrapper={is_ollama_wrapper}")
+    
+    if heavy_intent and not is_ollama_wrapper:
+        # Switch to local model for heavy tools
+        from companion_ai.core import config as core_config
+        from companion_ai.local_llm import LocalLLM
+        
+        model = core_config.LOCAL_HEAVY_MODEL  # qwen2.5:32b
+        local_llm = LocalLLM()
+        client = local_llm.get_client()
+        is_ollama_wrapper = True
+        logger.info(f"HYBRID ROUTING: Switching to LOCAL {model} for heavy intent (browser={browser_intent}, vision={vision_intent}, file={file_intent})")
 
     function_schemas = get_function_schemas(allowed_tools)
 

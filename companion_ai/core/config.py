@@ -49,20 +49,66 @@ def require_auth(token: str) -> bool:
 # - VISION: Image analysis only
 # - COMPOUND: Web/weather fast path
 
-PRIMARY_MODEL = "openai/gpt-oss-120b"  # Decisions, synthesis, personality
-TOOLS_MODEL = "llama-3.1-8b-instant"  # Planner: Uses cached prompt to decide tools
-TOOLS_MODEL_FAST = "llama-3.1-8b-instant"  # Backup / Fast execution if needed
-VISION_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"  # Vision tasks (Maverick)
+PRIMARY_MODEL = "openai/gpt-oss-120b"  # Final synthesis, personality, smart responses
+TOOLS_MODEL = "llama-3.1-8b-instant"  # Light tools via Groq (fast, free tier)
+TOOLS_MODEL_FAST = "llama-3.1-8b-instant"  # Backup
+VISION_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"  # Cloud vision (fallback)
 
-# Feature flags
-USE_FAST_TOOL_EXECUTOR = True
-USE_LOCAL_TOOLS = os.getenv("USE_LOCAL_TOOLS", "1").strip().lower() in {"1", "true", "yes", "on"}  # Default ON to save Groq tokens
-LOCAL_TOOLS_MODEL = os.getenv("LOCAL_TOOLS_MODEL", "llama3.2:latest")  # Fast local model for tool execution
+# ============================================================================
+# HYBRID MODEL ROUTING - The Core of V5 Architecture
+# ============================================================================
+# LIGHT TOOLS: Simple operations, low tokens → Groq cloud (fast, free)
+# HEAVY TOOLS: Vision, files, computer, memory → Local Ollama (free, parallel)
+# ============================================================================
 
-# Model capabilities reference (for documentation)
-# - 120B: 128k context, high intelligence, expensive
-# - 8B: 8k context, fast, cheap, good for tools
-# - Compound: Built-in tools (web/calc) - DISABLED in favor of native tools
+# Local models for heavy operations (saves Groq tokens!)
+LOCAL_HEAVY_MODEL = os.getenv("LOCAL_HEAVY_MODEL", "qwen2.5:32b")  # Tool calling champion
+LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "llava:13b")  # Vision analysis
+
+# Tool categorization - determines routing
+LIGHT_TOOLS = {
+    "wikipedia_lookup",     # Simple web lookup
+    "get_current_time",     # Trivial
+    "start_background_task", # Just scheduling
+    "consult_compound",     # Web search
+}
+
+HEAVY_TOOLS = {
+    "look_at_screen",       # Vision - big tokens
+    "use_computer",         # Multi-step, needs vision
+    "browser_goto",         # Web automation
+    "browser_click",
+    "browser_type",
+    "browser_read",
+    "browser_press",
+    "brain_read",           # File operations
+    "brain_write",
+    "brain_list",
+    "memory_search",        # Memory retrieval
+    "read_pdf",             # Document parsing
+    "read_image_text",      # OCR
+}
+
+
+def is_heavy_tool(tool_name: str) -> bool:
+    """Check if a tool should use local heavy model."""
+    return tool_name in HEAVY_TOOLS
+
+
+def get_tool_model(tool_name: str = None) -> tuple[str, bool]:
+    """Get the appropriate model for a tool.
+    
+    Returns:
+        tuple: (model_name, is_local)
+        - is_local=True means use Ollama client
+        - is_local=False means use Groq client
+    """
+    if tool_name and tool_name in HEAVY_TOOLS:
+        return LOCAL_HEAVY_MODEL, True
+    return TOOLS_MODEL, False  # Light tools use Groq
+
+
+# Model capabilities reference
 MODEL_INFO = {
     "openai/gpt-oss-120b": {
         "description": "Primary model - handles all chat, reasoning, analysis",
@@ -88,17 +134,13 @@ MODEL_INFO = {
 
 
 def get_tool_executor() -> str:
-    """Get the appropriate model for tool execution.
+    """Get the DEFAULT model for tool execution (light tools).
     
-    Returns:
-        - Local Ollama model if USE_LOCAL_TOOLS=1 (saves Groq tokens!)
-        - Groq 8B model otherwise
+    NOTE: Heavy tools (vision, browser, files) are automatically routed to
+    LOCAL_HEAVY_MODEL (qwen2.5:32b) inside generate_model_response_with_tools
+    based on intent detection. This function returns the Groq model for light tools.
     """
-    if USE_LOCAL_TOOLS:
-        return LOCAL_TOOLS_MODEL  # Local Ollama - free!
-    if USE_FAST_TOOL_EXECUTOR:
-        return TOOLS_MODEL_FAST
-    return TOOLS_MODEL
+    return TOOLS_MODEL  # Groq 8B for light tools (fast, reliable)
 
 
 # ============================================================================

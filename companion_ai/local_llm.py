@@ -285,6 +285,14 @@ class LocalLLM:
         """Check if any local LLM backend is available."""
         return self.backend is not None and self.backend.is_available()
     
+    def get_client(self) -> OllamaClientWrapper:
+        """Get an OpenAI-compatible client wrapper for tool calling compatibility.
+        
+        Returns:
+            OllamaClientWrapper that mimics OpenAI/Groq client interface
+        """
+        return OllamaClientWrapper()
+    
     def generate(self, prompt: str, task: str = "text", model: str = None) -> str:
         """
         Generate a response using local LLM.
