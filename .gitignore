@@ -43,7 +43,15 @@ memory_export_*.txt
 coverage.xml
 htmlcov/
 /.DS_Store
-Thumbs.db# Byte-compiled / optimized / DLL files
+Thumbs.db
+
+# Gaming AI - Model weights (too large for git)
+*.pt
+*.onnx
+*.pth
+.venv-gaming/
+
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class

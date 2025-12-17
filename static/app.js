@@ -18,6 +18,7 @@ const refreshMetricsBtn = document.getElementById('refreshMetricsBtn');
 const exportChatBtn = document.getElementById('exportChatBtn');
 const clearMemoryBtn = document.getElementById('clearMemoryBtn');
 const clearChatBtn = document.getElementById('clearChatBtn');
+const stopBtn = document.getElementById('stopBtn');
 
 // ============================================
 // State
@@ -29,6 +30,7 @@ let currentConversation = [];
 let lastHistoryLength = -1; // Start at -1 to force initial render
 let eventSource = null;
 let isStreaming = false; // Prevents SSE from overwriting during streaming
+let abortController = null; // For stopping generation
 
 // ============================================
 // Utilities
@@ -268,6 +270,10 @@ async function sendMessage(retry = false) {
   // Set streaming flag to prevent SSE overwrites
   isStreaming = true;
 
+  // Show stop button, hide send button
+  if (stopBtn) stopBtn.style.display = 'flex';
+  if (sendBtn) sendBtn.style.display = 'none';
+
   // Typewriter state
   let displayedText = '';
   let pendingText = '';
@@ -309,11 +315,15 @@ async function sendMessage(retry = false) {
     }
   }
 
+  // Create abort controller for ESC key cancellation
+  abortController = new AbortController();
+
   try {
     const resp = await fetch('/api/chat/send', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ message, tts_enabled: ttsEnabled })
+      body: JSON.stringify({ message, tts_enabled: ttsEnabled }),
+      signal: abortController.signal
     });
 
     if (resp.status === 401 && !retry) {
@@ -389,6 +399,10 @@ async function sendMessage(retry = false) {
           cursorEl.remove();
           // Re-enable SSE updates now that streaming is done
           isStreaming = false;
+          abortController = null;
+          // Restore buttons
+          if (stopBtn) stopBtn.style.display = 'none';
+          if (sendBtn) sendBtn.style.display = 'flex';
           lastHistoryLength++; // Prevent immediate re-render
           // Ensure token stats are refreshed even if streaming logic missed it
           loadTokenStats();
@@ -399,8 +413,39 @@ async function sendMessage(retry = false) {
 
   } catch (e) {
     isStreaming = false; // Clear flag on error too
+    abortController = null;
+
+    // Handle abort (ESC key pressed)
+    if (e.name === 'AbortError') {
+      // Keep partial response if any text was displayed
+      if (displayedText.trim()) {
+        cursorEl.remove();
+        const textDiv = wrapper.querySelector('.message-text');
+        if (textDiv) {
+          textDiv.innerHTML = renderMarkdown(displayedText + '\n\n*[Response stopped]*');
+          addCopyButtons(textDiv);
+        }
+        if (window.showToast) showToast('Generation stopped', 'info');
+      } else {
+        wrapper.remove();
+        if (window.showToast) showToast('Generation cancelled', 'info');
+      }
+      // Restore buttons
+      if (stopBtn) stopBtn.style.display = 'none';
+      if (sendBtn) sendBtn.style.display = 'flex';
+      return;
+    }
+
     wrapper.remove();
     addMessage('ai', 'Sorry, something went wrong: ' + e.message);
+  }
+}
+
+// Stop current generation (ESC key or Stop button)
+function stopGeneration() {
+  if (abortController && isStreaming) {
+    abortController.abort();
+    abortController = null;
   }
 }
 
@@ -1143,6 +1188,19 @@ userInput.addEventListener('keydown', e => {
   }
 });
 
+// ESC key to stop generation
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && isStreaming) {
+    e.preventDefault();
+    stopGeneration();
+  }
+});
+
+// Stop button click handler
+if (stopBtn) {
+  stopBtn.addEventListener('click', stopGeneration);
+}
+
 userInput.addEventListener('input', () => {
   resizeTextarea();
   updateSendButton();
@@ -1174,48 +1232,3 @@ document.addEventListener('DOMContentLoaded', () => {
   // Start job polling (Disabled - using SSE)
   // setInterval(pollJobs, 5000);
 });
-
-function startSSE() {
-  if (window.evtSource) {
-    window.evtSource.close();
-  }
-
-  window.evtSource = new EventSource('/api/chat/stream');
-
-  window.evtSource.onmessage = (e) => {
-    if (e.data === ': keep-alive') return;
-
-    try {
-      const data = JSON.parse(e.data);
-
-      // Handle different event types
-      if (data.type === 'job_update') {
-        handleJobUpdate(data.job);
-      } else if (data.type === 'history' || data.history) {
-        // Legacy format support (data.history) or new format (data.type='history')
-        const history = data.history || data;
-        updateChatUI(history);
-      }
-    } catch (err) {
-      console.error('SSE Parse Error:', err);
-    }
-  };
-
-  window.evtSource.onerror = (err) => {
-    console.error('SSE Error:', err);
-    window.evtSource.close();
-    // Retry after 5s
-    setTimeout(startSSE, 5000);
-  };
-}
-
-function handleJobUpdate(job) {
-  if (job.status === 'COMPLETED') {
-    showToast(`Task Complete: ${job.description}`, 'success');
-    addMessage('system', `✅ **Task Complete:** ${job.description}\n\n**Result:**\n${job.result}`);
-  } else if (job.status === 'FAILED') {
-    showToast(`Task Failed: ${job.description}`, 'error');
-    addMessage('system', `❌ **Task Failed:** ${job.description}\n\n**Error:**\n${job.result}`);
-  }
-}
-

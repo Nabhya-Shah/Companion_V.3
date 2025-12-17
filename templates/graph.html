@@ -1,10 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Knowledge Graph - Companion AI</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -13,9 +15,9 @@
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #fff;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0a0a0f;
+            color: #f8fafc;
             overflow: hidden;
         }
 
@@ -39,11 +41,13 @@
             position: absolute;
             top: 20px;
             left: 20px;
-            background: rgba(0, 0, 0, 0.85);
+            background: rgba(18, 18, 26, 0.9);
             padding: 16px;
-            border-radius: 12px;
-            backdrop-filter: blur(10px);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
             width: 280px;
             z-index: 1000;
             max-height: calc(100vh - 40px);
@@ -55,20 +59,20 @@
         }
 
         .controls::-webkit-scrollbar-thumb {
-            background: rgba(255,255,255,0.2);
+            background: rgba(255, 255, 255, 0.2);
             border-radius: 3px;
         }
 
         .controls h2 {
             font-size: 1.3rem;
             margin-bottom: 12px;
-            color: #a78bfa;
+            color: #8b5cf6;
         }
 
         /* Collapsible sections */
         .section {
             margin-bottom: 12px;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
             padding-bottom: 12px;
         }
 
@@ -95,12 +99,12 @@
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            color: rgba(255,255,255,0.7);
+            color: rgba(255, 255, 255, 0.7);
         }
 
         .section-toggle {
             font-size: 12px;
-            color: rgba(255,255,255,0.5);
+            color: rgba(255, 255, 255, 0.5);
             transition: transform 0.2s;
         }
 
@@ -126,7 +130,7 @@
             justify-content: space-between;
             font-size: 0.8rem;
             margin-bottom: 4px;
-            color: rgba(255,255,255,0.8);
+            color: rgba(255, 255, 255, 0.8);
         }
 
         .slider-value {
@@ -139,7 +143,7 @@
             height: 6px;
             -webkit-appearance: none;
             appearance: none;
-            background: rgba(255,255,255,0.1);
+            background: rgba(255, 255, 255, 0.1);
             border-radius: 3px;
             outline: none;
         }
@@ -193,7 +197,7 @@
             position: absolute;
             cursor: pointer;
             inset: 0;
-            background: rgba(255,255,255,0.1);
+            background: rgba(255, 255, 255, 0.1);
             border-radius: 10px;
             transition: 0.2s;
         }
@@ -210,11 +214,11 @@
             transition: 0.2s;
         }
 
-        .toggle-switch input:checked + .toggle-slider {
+        .toggle-switch input:checked+.toggle-slider {
             background: #a78bfa;
         }
 
-        .toggle-switch input:checked + .toggle-slider:before {
+        .toggle-switch input:checked+.toggle-slider:before {
             transform: translateX(16px);
         }
 
@@ -339,12 +343,12 @@
             font-size: 10px;
             font-weight: 500;
             fill: #fff;
-            text-shadow: 
-                -1px -1px 0 rgba(0,0,0,0.8),
-                1px -1px 0 rgba(0,0,0,0.8),
-                -1px 1px 0 rgba(0,0,0,0.8),
-                1px 1px 0 rgba(0,0,0,0.8),
-                0 0 8px rgba(0,0,0,0.9);
+            text-shadow:
+                -1px -1px 0 rgba(0, 0, 0, 0.8),
+                1px -1px 0 rgba(0, 0, 0, 0.8),
+                -1px 1px 0 rgba(0, 0, 0, 0.8),
+                1px 1px 0 rgba(0, 0, 0, 0.8),
+                0 0 8px rgba(0, 0, 0, 0.9);
             pointer-events: none;
             user-select: none;
         }
@@ -358,7 +362,7 @@
             display: none;
         }
 
-        .link.highlighted + .link-label,
+        .link.highlighted+.link-label,
         .link-label.visible {
             display: block;
             fill: rgba(255, 255, 255, 0.8);
@@ -413,13 +417,14 @@
         }
     </style>
 </head>
+
 <body>
     <div id="graph-container">
         <div class="controls">
             <h2>🧠 Knowledge Graph</h2>
-            
+
             <input type="text" class="search-box" placeholder="Search entities..." id="searchBox">
-            
+
             <!-- Stats Section -->
             <div class="section">
                 <div class="section-header" onclick="toggleSection(this)">
@@ -492,7 +497,8 @@
                             <span>Link Opacity</span>
                             <span class="slider-value" id="linkOpacityVal">0.15</span>
                         </div>
-                        <input type="range" class="slider" id="linkOpacity" min="0.02" max="0.5" step="0.01" value="0.15">
+                        <input type="range" class="slider" id="linkOpacity" min="0.02" max="0.5" step="0.01"
+                            value="0.15">
                     </div>
                     <div class="slider-group">
                         <div class="slider-label">
@@ -568,9 +574,9 @@
                 <button class="zoom-btn" onclick="zoomOut()" title="Zoom Out">−</button>
                 <button class="zoom-btn" onclick="zoomReset()" title="Reset Zoom">⟲</button>
             </div>
-            
+
             <button class="reset-btn" onclick="resetGraph()">Reset All</button>
-            
+
             <p class="controls-hint">Scroll to zoom • Drag to pan • Click nodes to focus</p>
         </div>
 
@@ -606,11 +612,11 @@
         function zoomIn() {
             svg.transition().duration(300).call(zoom.scaleBy, 1.3);
         }
-        
+
         function zoomOut() {
             svg.transition().duration(300).call(zoom.scaleBy, 0.7);
         }
-        
+
         function zoomReset() {
             svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
         }
@@ -745,12 +751,12 @@
                 linkElements.attr("d", d => {
                     const dx = d.target.x - d.source.x;
                     const dy = d.target.y - d.source.y;
-                    
+
                     // Straight lines for semantic links, curved for others
                     if (d.type === 'semantic_similarity' || d.type === 'text_overlap') {
                         return `M${d.source.x},${d.source.y}L${d.target.x},${d.target.y}`;
                     }
-                    
+
                     const dr = Math.sqrt(dx * dx + dy * dy);
                     return `M${d.source.x},${d.source.y}A${dr},${dr} 0 0,1 ${d.target.x},${d.target.y}`;
                 });
@@ -769,11 +775,11 @@
                 linkElements.classed("highlighted", false);
 
                 if (query) {
-                    const matches = nodes.filter(n => 
+                    const matches = nodes.filter(n =>
                         n.label.toLowerCase().includes(query) ||
                         n.type.toLowerCase().includes(query)
                     );
-                    
+
                     matches.forEach(node => {
                         nodeElements.filter(d => d.id === node.id).classed("highlighted", true);
                         linkElements.filter(l => l.source.id === node.id || l.target.id === node.id)
@@ -788,7 +794,7 @@
             // Handle Mem0 nodes which might not have mentions/importance
             const mentions = node.mentions || 1;
             const importance = node.importance || 0.5;
-            
+
             const mentionsFactor = Math.min(mentions * 1.5, 8);
             const importanceFactor = importance * 10;
             return base + mentionsFactor + importanceFactor;
@@ -796,27 +802,27 @@
 
         function selectNode(node) {
             selectedNode = node;
-            
+
             if (node) {
                 document.getElementById('selectedEntity').textContent = node.label;
-                
+
                 // Find connected nodes
                 const connectedIds = new Set([node.id]);
                 links.forEach(l => {
                     if (l.source.id === node.id) connectedIds.add(l.target.id);
                     if (l.target.id === node.id) connectedIds.add(l.source.id);
                 });
-                
+
                 // Highlight selected and connected, dim others
                 nodeElements.classed("highlighted", d => d.id === node.id);
                 nodeElements.classed("dimmed", d => !connectedIds.has(d.id));
-                linkElements.classed("highlighted", l => 
+                linkElements.classed("highlighted", l =>
                     l.source.id === node.id || l.target.id === node.id
                 );
-                linkElements.classed("dimmed", l => 
+                linkElements.classed("dimmed", l =>
                     l.source.id !== node.id && l.target.id !== node.id
                 );
-                linkLabels.classed("visible", l => 
+                linkLabels.classed("visible", l =>
                     l.source.id === node.id || l.target.id === node.id
                 );
             } else {
@@ -836,9 +842,9 @@
                 <p><strong>Type:</strong> ${node.type}</p>
                 <p><strong>Mentions:</strong> ${node.mentions}</p>
                 <p><strong>Importance:</strong> ${(node.importance * 100).toFixed(0)}%</p>
-                ${Object.keys(node.attributes).length > 0 ? 
-                    '<p><strong>Attributes:</strong></p>' + 
-                    Object.entries(node.attributes).slice(0, 3).map(([k, v]) => 
+                ${Object.keys(node.attributes).length > 0 ?
+                    '<p><strong>Attributes:</strong></p>' +
+                    Object.entries(node.attributes).slice(0, 3).map(([k, v]) =>
                         `<p style="margin-left: 12px;">• ${k}: ${v}</p>`
                     ).join('') : ''}
             `;
@@ -944,7 +950,7 @@
 
         // Reset also resets sliders
         const originalResetGraph = resetGraph;
-        resetGraph = function() {
+        resetGraph = function () {
             originalResetGraph();
             // Reset sliders to defaults
             document.getElementById('centerForce').value = 0.05;
@@ -963,7 +969,7 @@
             document.getElementById('textSizeVal').textContent = '10';
             document.getElementById('showLabels').checked = true;
             document.getElementById('showArrows').checked = true;
-            
+
             // Re-apply defaults
             nodeSizeMultiplier = 1;
             nodeElements.selectAll('circle').attr('r', d => getNodeRadius(d));
@@ -981,4 +987,5 @@
         };
     </script>
 </body>
+
 </html>
