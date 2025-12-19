@@ -29,6 +29,7 @@ pyautogui>=0.9.53       # UI automation (mouse/keyboard)
 # Knowledge Graph & Embeddings
 networkx>=3.1           # Graph operations for knowledge graph
 sentence-transformers>=2.2.0  # Embeddings for Mem0 and semantic search
+FlagEmbedding>=1.2.0    # BGE reranker for RAG
 
 # Memory (V4)
 mem0ai>=0.1.0           # Mem0 memory framework
