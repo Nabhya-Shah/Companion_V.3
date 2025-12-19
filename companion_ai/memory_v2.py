@@ -414,10 +414,25 @@ def clear_all_memories(user_id: str = "default") -> bool:
     Returns:
         True if successful
     """
+    global _memory_instance
     try:
         memory = get_memory()
         memory.delete_all(user_id=user_id)
-        logger.info(f"🗑️ Cleared all memories for user: {user_id}")
+        logger.info(f"[OK] Cleared all Mem0 memories for user: {user_id}")
+        
+        # Also try to reset the Qdrant collection to ensure clean state
+        try:
+            qdrant_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "mem0_qdrant")
+            import shutil
+            if os.path.exists(qdrant_path):
+                shutil.rmtree(qdrant_path)
+                logger.info(f"[OK] Deleted Qdrant data at {qdrant_path}")
+        except Exception as qe:
+            logger.warning(f"Could not delete Qdrant data: {qe}")
+        
+        # Force reset the memory instance so next use creates fresh
+        _memory_instance = None
+        logger.info("[OK] Reset Mem0 instance")
         return True
     except Exception as e:
         logger.error(f"Failed to clear memories: {e}")

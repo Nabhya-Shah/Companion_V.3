@@ -638,7 +638,9 @@ def clear_memory():
         if core_config.USE_MEM0:
             try:
                 memory_v2.clear_all_memories(user_id=core_config.MEM0_USER_ID)
-                logger.info("Cleared Mem0 vector memory")
+                # Reset the Mem0 instance to force fresh start
+                memory_v2._reset_memory()
+                logger.info("Cleared Mem0 vector memory and reset instance")
             except Exception as mem0_err:
                 logger.error(f"Failed to clear Mem0: {mem0_err}")
         

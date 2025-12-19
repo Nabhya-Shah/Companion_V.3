@@ -44,7 +44,8 @@ def reset_last_request_tokens():
         'input': 0,
         'output': 0,
         'total': 0,
-        'models': []
+        'models': [],
+        'source': 'unknown'  # 'groq', 'local', or 'mixed'
     }
 
 def get_last_token_usage() -> dict:
@@ -70,6 +71,16 @@ def log_tokens(model: str, input_tokens: int, output_tokens: int, context: str =
     _last_request_tokens['total'] += (input_tokens + output_tokens)
     if model not in _last_request_tokens['models']:
         _last_request_tokens['models'].append(model)
+    
+    # Determine source: local models have ":" but no "/" (e.g. "qwen2.5:32b")
+    # Groq/cloud models have "/" or no ":" (e.g. "openai/gpt-oss-120b", "llama-3.1-8b-instant")
+    is_local = model and ":" in model and "/" not in model
+    current_source = _last_request_tokens.get('source', 'unknown')
+    
+    if current_source == 'unknown':
+        _last_request_tokens['source'] = 'local' if is_local else 'groq'
+    elif (current_source == 'groq' and is_local) or (current_source == 'local' and not is_local):
+        _last_request_tokens['source'] = 'mixed'
     
     total = input_tokens + output_tokens
     logger.info(f"TOKENS [{model}] in={input_tokens} out={output_tokens} total={total} | {context}")
@@ -407,17 +418,20 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
     Returns:
         tuple: (response_text, tool_name_used, tool_result)
     """
-    # Detect if model is LOCAL Ollama format: "model:tag" (has colon, no slash)
-    # Examples: qwen2.5:32b ✓, llava:13b ✓, llama-3.1-8b-instant ✗ (Groq)
-    is_local_model = model and ":" in model and "/" not in model
+    # Detect if model is LOCAL:
+    # 1. Old Ollama format: "model:tag" (has colon, no slash) - e.g. qwen2.5:32b
+    # 2. New vLLM format: matches LOCAL_HEAVY_MODEL config - e.g. Qwen/Qwen2.5-3B-Instruct
+    is_ollama_format = model and ":" in model and "/" not in model
+    is_vllm_local = model == core_config.LOCAL_HEAVY_MODEL
+    is_local_model = is_ollama_format or is_vllm_local
     
     if client is None:
         if is_local_model:
-            # Use local Ollama for heavy tool execution
+            # Use local vLLM/Ollama for heavy tool execution
             from companion_ai.local_llm import LocalLLM
             local_llm = LocalLLM()
             client = local_llm.get_client()
-            logger.info(f"Using LOCAL Ollama client for tools with model: {model}")
+            logger.info(f"Using LOCAL client for tools with model: {model}")
         else:
             client = get_groq_client(for_tools=True)
         
@@ -514,10 +528,9 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
     
     if heavy_intent and not is_ollama_wrapper:
         # Switch to local model for heavy tools
-        from companion_ai.core import config as core_config
         from companion_ai.local_llm import LocalLLM
         
-        model = core_config.LOCAL_HEAVY_MODEL  # qwen2.5:32b
+        model = core_config.LOCAL_HEAVY_MODEL  # vLLM model
         local_llm = LocalLLM()
         client = local_llm.get_client()
         is_ollama_wrapper = True

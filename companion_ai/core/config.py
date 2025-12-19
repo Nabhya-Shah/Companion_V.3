@@ -62,8 +62,9 @@ VISION_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"  # Cloud vision (
 # ============================================================================
 
 # Local models for heavy operations (saves Groq tokens!)
-LOCAL_HEAVY_MODEL = os.getenv("LOCAL_HEAVY_MODEL", "qwen2.5:32b")  # Tool calling champion
-LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "llava:13b")  # Vision analysis
+# NOTE: Now using vLLM backend instead of Ollama - use HuggingFace format
+LOCAL_HEAVY_MODEL = os.getenv("LOCAL_HEAVY_MODEL", "Qwen/Qwen2.5-3B-Instruct")  # vLLM model
+LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "llava:13b")  # Vision analysis (still Ollama for now)
 
 # Tool categorization - determines routing
 LIGHT_TOOLS = {

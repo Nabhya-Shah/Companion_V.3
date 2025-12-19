@@ -786,11 +786,11 @@ def clear_all_memory():
         cursor.execute("DELETE FROM memory_consolidation")
         
         conn.commit()
-        print("🧹 All memory data cleared successfully")
+        print("[OK] All memory data cleared successfully")
         
     except Exception as e:
         conn.rollback()
-        print(f"❌ Failed to clear memory: {e}")
+        print(f"[ERROR] Failed to clear memory: {e}")
         raise e
     finally:
         conn.close()

@@ -366,8 +366,25 @@ async function sendMessage(retry = false) {
               const roleLabel = wrapper.querySelector('.message-role');
               if (roleLabel) {
                 const total = (data.tokens.input || 0) + (data.tokens.output || 0);
+                const source = data.tokens.source || 'unknown';
+
+                // Source indicator colors: orange for Groq, blue for local, purple for mixed
+                let sourceColor = '#888';
+                let sourceLabel = '';
+                if (source === 'groq') {
+                  sourceColor = '#f97316';  // Orange
+                  sourceLabel = 'Groq';
+                } else if (source === 'local') {
+                  sourceColor = '#3b82f6';  // Blue
+                  sourceLabel = 'Local';
+                } else if (source === 'mixed') {
+                  sourceColor = '#a855f7';  // Purple
+                  sourceLabel = 'Mixed';
+                }
+
                 const tokenHtml = `<span class="token-badge" title="Input: ${data.tokens.input} | Output: ${data.tokens.output}">(${total} tokens)</span>`;
-                roleLabel.innerHTML = `Companion ${tokenHtml}`;
+                const sourceHtml = sourceLabel ? `<span class="source-badge" style="color: ${sourceColor}; margin-left: 8px; font-size: 11px; opacity: 0.9;">[${sourceLabel}]</span>` : '';
+                roleLabel.innerHTML = `Companion ${tokenHtml}${sourceHtml}`;
               }
               // Refresh global token stats automatically
               loadTokenStats();
