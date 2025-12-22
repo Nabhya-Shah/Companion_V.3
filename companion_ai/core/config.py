@@ -16,6 +16,10 @@ load_dotenv()
 # ============================================================================
 # API KEYS
 # ============================================================================
+
+# V6 Architecture toggle - Enable local loop orchestration
+# When True, uses the 120B orchestrator to decide if local loops should handle tasks
+USE_ORCHESTRATOR = os.getenv("USE_ORCHESTRATOR", "false").lower() == "true"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_TOOL_API_KEY = os.getenv("GROQ_TOOL_API_KEY")  # Dedicated key for tool planner
 GROQ_VISION_API_KEY = os.getenv("GROQ_VISION_API_KEY", GROQ_API_KEY)  # Falls back to main key

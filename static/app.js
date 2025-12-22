@@ -9,16 +9,22 @@ const userInput = document.getElementById('userInput');
 const sendBtn = document.getElementById('sendBtn');
 const toggleMemoryBtn = document.getElementById('toggleMemoryBtn');
 const toggleSettingsBtn = document.getElementById('toggleSettingsBtn');
+const toggleTasksBtn = document.getElementById('toggleTasksBtn');
 const shutdownBtn = document.getElementById('shutdownBtn');
 const closeMemoryBtn = document.getElementById('closeMemoryBtn');
 const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+const closeTasksBtn = document.getElementById('closeTasksBtn');
 const memorySidebar = document.getElementById('memorySidebar');
+const tasksSidebar = document.getElementById('tasksSidebar');
 const settingsModal = document.getElementById('settingsModal');
 const refreshMetricsBtn = document.getElementById('refreshMetricsBtn');
 const exportChatBtn = document.getElementById('exportChatBtn');
 const clearMemoryBtn = document.getElementById('clearMemoryBtn');
 const clearChatBtn = document.getElementById('clearChatBtn');
 const stopBtn = document.getElementById('stopBtn');
+const tasksList = document.getElementById('tasksList');
+const tasksEmpty = document.getElementById('tasksEmpty');
+const taskCountBadge = document.getElementById('taskCountBadge');
 
 // ============================================
 // State
@@ -482,6 +488,8 @@ toggleMemoryBtn?.addEventListener('click', () => {
   memorySidebar.classList.toggle('visible');
 });
 
+// Note: toggleTasksBtn listener is at bottom with polling logic
+
 toggleSettingsBtn?.addEventListener('click', () => {
   settingsModal.classList.add('visible');
 });
@@ -489,6 +497,8 @@ toggleSettingsBtn?.addEventListener('click', () => {
 closeMemoryBtn?.addEventListener('click', () => {
   memorySidebar.classList.remove('visible');
 });
+
+// Note: closeTasksBtn listener is at bottom with polling logic
 
 closeSettingsBtn?.addEventListener('click', () => {
   settingsModal.classList.remove('visible');
@@ -1230,6 +1240,146 @@ userInput.addEventListener('input', () => {
 // async function pollJobs() { ... }
 
 // ============================================
+// Background Tasks Panel (V6)
+// ============================================
+async function loadTasks() {
+  try {
+    const response = await fetch('/api/tasks', { headers: authHeaders() });
+    const data = await response.json();
+
+    if (data.tasks && data.tasks.length > 0) {
+      tasksEmpty.style.display = 'none';
+      tasksList.style.display = 'flex';
+      renderTasks(data.tasks);
+      updateTaskBadge(data.count);
+    } else {
+      tasksEmpty.style.display = 'flex';
+      tasksList.style.display = 'none';
+      updateTaskBadge(0);
+    }
+  } catch (error) {
+    console.error('Error loading tasks:', error);
+  }
+}
+
+function updateTaskBadge(count) {
+  if (count > 0) {
+    taskCountBadge.textContent = count;
+    taskCountBadge.style.display = 'flex';
+  } else {
+    taskCountBadge.style.display = 'none';
+  }
+}
+
+function renderTasks(tasks) {
+  tasksList.innerHTML = tasks.map(task => `
+    <div class="task-card" data-task-id="${task.id}" onclick="toggleTaskDetails('${task.id}')">
+      <div class="task-card-header">
+        <div class="task-status-icon ${task.state}">
+          ${getTaskIcon(task.state)}
+        </div>
+        <span class="task-title">${escapeHtml(task.description)}</span>
+        <svg class="task-expand-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="m6 9 6 6 6-6"/>
+        </svg>
+      </div>
+      <div class="task-timeline" id="timeline-${task.id}">
+        <!-- Timeline loaded on expand -->
+      </div>
+    </div>
+  `).join('');
+}
+
+function getTaskIcon(state) {
+  switch (state) {
+    case 'running':
+      return '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>';
+    case 'completed':
+      return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 12 2 2 4-4"/></svg>';
+    case 'failed':
+      return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 6-12 12M6 6l12 12"/></svg>';
+    default:
+      return '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/></svg>';
+  }
+}
+
+async function toggleTaskDetails(taskId) {
+  const card = document.querySelector(`[data-task-id="${taskId}"]`);
+  const timeline = document.getElementById(`timeline-${taskId}`);
+
+  if (card.classList.contains('expanded')) {
+    card.classList.remove('expanded');
+    return;
+  }
+
+  card.classList.add('expanded');
+
+  // Load timeline
+  try {
+    const response = await fetch(`/api/tasks/${taskId}`, { headers: authHeaders() });
+    const data = await response.json();
+
+    if (data.data && data.data.timeline) {
+      timeline.innerHTML = data.data.timeline.map(step => `
+        <div class="timeline-step">
+          <div class="timeline-dot ${step.status}"></div>
+          <div class="timeline-content">
+            <div class="timeline-description">${escapeHtml(step.description)}</div>
+            ${step.started ? `<div class="timeline-time">${formatTime(step.started)}</div>` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+  } catch (error) {
+    console.error('Error loading task timeline:', error);
+    timeline.innerHTML = '<div class="timeline-step"><div class="timeline-description">Failed to load timeline</div></div>';
+  }
+}
+
+function formatTime(isoString) {
+  const date = new Date(isoString);
+  return date.toLocaleTimeString();
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Poll tasks every 5 seconds when panel is open
+let tasksInterval = null;
+function startTasksPolling() {
+  if (!tasksInterval) {
+    tasksInterval = setInterval(loadTasks, 5000);
+  }
+}
+
+function stopTasksPolling() {
+  if (tasksInterval) {
+    clearInterval(tasksInterval);
+    tasksInterval = null;
+  }
+}
+
+// Toggle polling when panel opens/closes
+toggleTasksBtn?.addEventListener('click', () => {
+  tasksSidebar.classList.toggle('visible');
+
+  if (tasksSidebar.classList.contains('visible')) {
+    loadTasks();
+    startTasksPolling();
+  } else {
+    stopTasksPolling();
+  }
+});
+
+closeTasksBtn?.addEventListener('click', () => {
+  tasksSidebar.classList.remove('visible');
+  stopTasksPolling();
+});
+
+// ============================================
 // Initialize
 // ============================================
 document.addEventListener('DOMContentLoaded', () => {
@@ -1242,6 +1392,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadTokenStats();
   loadSettings();
   updateSendButton();
+  loadTasks(); // Load initial task count
 
   // Use SSE for real-time updates (Chat + Jobs)
   startSSE();
@@ -1249,3 +1400,4 @@ document.addEventListener('DOMContentLoaded', () => {
   // Start job polling (Disabled - using SSE)
   // setInterval(pollJobs, 5000);
 });
+

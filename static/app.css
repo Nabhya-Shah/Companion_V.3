@@ -663,6 +663,240 @@ body {
 }
 
 /* ============================================
+   LEFT SIDEBAR - Background Tasks
+   ============================================ */
+.tasks-sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  height: 100vh;
+  width: var(--sidebar-width);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-right: 1px solid var(--glass-border);
+  display: none;
+  flex-direction: column;
+  z-index: 1000;
+  transform: translateX(-100%);
+}
+
+.tasks-sidebar.visible {
+  display: flex;
+  transform: translateX(0);
+  animation: slideInLeft 0.3s ease;
+}
+
+@keyframes slideInLeft {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.tasks-sidebar .sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.tasks-sidebar .sidebar-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tasks-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.tasks-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 12px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.tasks-empty p {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.tasks-empty span {
+  font-size: 13px;
+}
+
+.tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.task-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.task-card:hover {
+  border-color: var(--border-accent);
+  background: var(--bg-hover);
+}
+
+.task-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+}
+
+.task-status-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.task-status-icon.running {
+  background: var(--accent-subtle);
+  color: var(--accent);
+  animation: pulse 2s infinite;
+}
+
+.task-status-icon.completed {
+  background: var(--success-subtle);
+  color: var(--success);
+}
+
+.task-status-icon.failed {
+  background: var(--error-subtle);
+  color: var(--error);
+}
+
+.task-title {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-expand-icon {
+  color: var(--text-muted);
+  transition: transform var(--transition);
+}
+
+.task-card.expanded .task-expand-icon {
+  transform: rotate(180deg);
+}
+
+/* Timeline View */
+.task-timeline {
+  display: none;
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--border-light);
+}
+
+.task-card.expanded .task-timeline {
+  display: block;
+}
+
+.timeline-step {
+  display: flex;
+  gap: 12px;
+  position: relative;
+  padding: 8px 0;
+}
+
+.timeline-step:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 24px;
+  bottom: -8px;
+  width: 2px;
+  background: var(--border);
+}
+
+.timeline-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--border);
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+
+.timeline-dot.completed {
+  background: var(--success);
+}
+
+.timeline-dot.running {
+  background: var(--accent);
+  animation: pulse 1.5s infinite;
+}
+
+.timeline-dot.pending {
+  background: var(--text-muted);
+}
+
+.timeline-content {
+  flex: 1;
+}
+
+.timeline-description {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.timeline-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+/* Task count badge */
+.task-count-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  background: var(--accent);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+
+#toggleTasksBtn {
+  position: relative;
+}
+
+/* ============================================
    RIGHT SIDEBAR - Memory & Debug
    ============================================ */
 .memory-sidebar {

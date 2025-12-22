@@ -1,0 +1,39 @@
+# Docker Compose for vLLM local inference
+# Run: docker compose -f docker-compose.vllm.yml up -d
+
+services:
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: companion-vllm
+    runtime: nvidia
+    ports:
+      - "8000:8000"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    volumes:
+      - vllm-cache:/root/.cache/huggingface
+    command: >
+      --model Qwen/Qwen2.5-3B-Instruct
+      --host 0.0.0.0
+      --port 8000
+      --gpu-memory-utilization 0.7
+      --max-model-len 4096
+      --dtype auto
+      --enforce-eager
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  vllm-cache:
+    driver: local

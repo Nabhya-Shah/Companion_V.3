@@ -817,6 +817,93 @@ def computer_stop():
     logger.warning("Computer control STOPPED via API")
     return jsonify({'success': True, 'message': 'Computer control disabled and jobs cancelled'})
 
+
+# --- Tasks API (V6 Architecture) ---
+
+@app.route('/api/tasks', methods=['GET'])
+def get_tasks():
+    """Get list of active background tasks."""
+    try:
+        from companion_ai.local_loops import get_loop
+        
+        computer_loop = get_loop('computer')
+        if computer_loop:
+            tasks = computer_loop.get_active_tasks()
+            return jsonify({'tasks': tasks, 'count': len(tasks)})
+        else:
+            return jsonify({'tasks': [], 'count': 0})
+    except Exception as e:
+        logger.error(f"Error getting tasks: {e}")
+        return jsonify({'tasks': [], 'count': 0, 'error': str(e)})
+
+
+@app.route('/api/tasks/<task_id>', methods=['GET'])
+def get_task_status(task_id):
+    """Get detailed status of a specific task with timeline."""
+    try:
+        from companion_ai.local_loops import get_loop
+        import asyncio
+        
+        computer_loop = get_loop('computer')
+        if not computer_loop:
+            return jsonify({'error': 'Computer loop not available'}), 503
+        
+        # Run async in sync context
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                computer_loop.execute({'operation': 'status', 'task_id': task_id})
+            )
+            return jsonify(result.to_dict())
+        finally:
+            loop.close()
+            
+    except Exception as e:
+        logger.error(f"Error getting task {task_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tasks/<task_id>/cancel', methods=['POST'])
+def cancel_task(task_id):
+    """Cancel a running task."""
+    try:
+        from companion_ai.local_loops import get_loop
+        import asyncio
+        
+        computer_loop = get_loop('computer')
+        if not computer_loop:
+            return jsonify({'error': 'Computer loop not available'}), 503
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                computer_loop.execute({'operation': 'cancel', 'task_id': task_id})
+            )
+            return jsonify(result.to_dict())
+        finally:
+            loop.close()
+            
+    except Exception as e:
+        logger.error(f"Error canceling task {task_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/loops/capabilities', methods=['GET'])
+def get_loop_capabilities():
+    """Get capabilities of all local loops (for debugging)."""
+    try:
+        from companion_ai.local_loops import get_capabilities_summary, list_loops
+        
+        return jsonify({
+            'summary': get_capabilities_summary(),
+            'loops': list_loops()
+        })
+    except Exception as e:
+        logger.error(f"Error getting loop capabilities: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/vision/analyze', methods=['POST'])
 def vision_analyze():
     try:

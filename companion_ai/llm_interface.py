@@ -72,9 +72,15 @@ def log_tokens(model: str, input_tokens: int, output_tokens: int, context: str =
     if model not in _last_request_tokens['models']:
         _last_request_tokens['models'].append(model)
     
-    # Determine source: local models have ":" but no "/" (e.g. "qwen2.5:32b")
-    # Groq/cloud models have "/" or no ":" (e.g. "openai/gpt-oss-120b", "llama-3.1-8b-instant")
-    is_local = model and ":" in model and "/" not in model
+    # Determine source: 
+    # - Ollama models: have ":" but no "/" (e.g. "qwen2.5:32b")
+    # - vLLM models: start with "Qwen/" or contain LOCAL_HEAVY_MODEL pattern
+    # - Groq/cloud: contain "llama-" or "gpt-" or other cloud patterns
+    is_local = model and (
+        (":" in model and "/" not in model) or  # Ollama format
+        model.startswith("Qwen/") or  # vLLM Qwen models
+        model == core_config.LOCAL_HEAVY_MODEL  # Exact match to configured local model
+    )
     current_source = _last_request_tokens.get('source', 'unknown')
     
     if current_source == 'unknown':
@@ -239,6 +245,83 @@ if GROQ_MEMORY_API_KEY:
     except Exception as e:
         logger.error(f"Groq memory client initialization failed: {str(e)}")
         groq_memory_client = None
+
+# ============================================================================
+# vLLM Client (Docker Local Model)
+# ============================================================================
+# vLLM provides an OpenAI-compatible API, so we use the openai client
+_vllm_client = None
+VLLM_BASE_URL = os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1")
+VLLM_MODEL = core_config.LOCAL_HEAVY_MODEL  # e.g., "Qwen/Qwen2.5-3B-Instruct"
+
+def _initialize_vllm_client():
+    """Initialize vLLM client for local model inference."""
+    global _vllm_client
+    try:
+        from openai import OpenAI
+        _vllm_client = OpenAI(
+            base_url=VLLM_BASE_URL,
+            api_key="not-needed"  # vLLM doesn't require auth
+        )
+        # Test connection
+        models = _vllm_client.models.list()
+        if models.data:
+            logger.info(f"✅ vLLM client initialized: {VLLM_BASE_URL}")
+            logger.info(f"   Available models: {[m.id for m in models.data]}")
+        else:
+            logger.warning("vLLM connected but no models available")
+    except Exception as e:
+        logger.warning(f"vLLM client initialization failed (is Docker running?): {e}")
+        _vllm_client = None
+
+def get_vllm_client():
+    """Get the vLLM client for local model inference."""
+    global _vllm_client
+    if _vllm_client is None and core_config.USE_ORCHESTRATOR:
+        _initialize_vllm_client()
+    return _vllm_client
+
+def generate_vllm_response(prompt: str, system_prompt: str = None, max_tokens: int = 1024) -> str:
+    """Generate a response using the local vLLM model.
+    
+    Use this for local inference instead of Groq to save rate limits.
+    """
+    client = get_vllm_client()
+    if not client:
+        logger.warning("vLLM not available, falling back to Groq")
+        return None
+    
+    try:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        
+        response = client.chat.completions.create(
+            model=VLLM_MODEL,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=max_tokens
+        )
+        
+        # Log tokens
+        if hasattr(response, 'usage') and response.usage:
+            log_tokens(
+                VLLM_MODEL, 
+                response.usage.prompt_tokens, 
+                response.usage.completion_tokens,
+                "vllm_local"
+            )
+        
+        return response.choices[0].message.content
+        
+    except Exception as e:
+        logger.error(f"vLLM generation failed: {e}")
+        return None
+
+# Initialize vLLM if orchestrator is enabled
+if core_config.USE_ORCHESTRATOR:
+    _initialize_vllm_client()
 
 # --- Core Generation Functions ---
 # NOTE: Prompt building now handled by companion_ai/core/prompts.py and context_builder.py
@@ -1077,7 +1160,11 @@ def generate_model_response_streaming(user_message: str, system_prompt: str, mod
     """Generate response using streaming for real-time token output.
     
     Yields chunks of text as they arrive from the API.
+    Includes timeout handling to prevent stuck streams.
     """
+    import threading
+    import queue
+    
     client = get_groq_client()
     if not client:
         yield "I'm offline (LLM client unavailable)."
@@ -1088,32 +1175,78 @@ def generate_model_response_streaming(user_message: str, system_prompt: str, mod
         {"role": "user", "content": user_message}
     ]
     
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0.8,
-            max_tokens=1024,
-            top_p=0.9,
-            stream=True  # Enable streaming
-        )
+    # Use a queue for thread-safe streaming with timeout
+    chunk_queue = queue.Queue()
+    error_event = threading.Event()
+    done_event = threading.Event()
+    
+    def stream_worker():
+        """Worker thread to handle streaming with timeout protection."""
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.8,
+                max_tokens=1024,
+                top_p=0.9,
+                stream=True
+            )
+            
+            full_text = ""
+            for chunk in response:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    text = chunk.choices[0].delta.content
+                    full_text += text
+                    chunk_queue.put(text)
+            
+            # Log estimated tokens
+            est_input = len(system_prompt + user_message) // 4
+            est_output = len(full_text) // 4
+            log_tokens(model, est_input, est_output, "streaming")
+            
+        except Exception as e:
+            logger.error(f"Streaming worker error: {e}")
+            chunk_queue.put(f"Error: {str(e)}")
+            error_event.set()
+        finally:
+            done_event.set()
+    
+    # Start worker thread
+    worker = threading.Thread(target=stream_worker, daemon=True)
+    worker.start()
+    
+    # Yield chunks with timeout
+    CHUNK_TIMEOUT = 30.0  # Max 30 seconds between chunks
+    TOTAL_TIMEOUT = 120.0  # Max 2 minutes total
+    start_time = time.time()
+    
+    while not done_event.is_set():
+        try:
+            chunk = chunk_queue.get(timeout=CHUNK_TIMEOUT)
+            yield chunk
+            start_time = time.time()  # Reset timeout on successful chunk
+        except queue.Empty:
+            # No chunk received within timeout
+            if not done_event.is_set():
+                elapsed = time.time() - start_time
+                if elapsed >= CHUNK_TIMEOUT:
+                    logger.warning(f"Stream timeout - no response for {CHUNK_TIMEOUT}s")
+                    yield "\n\n[Response timed out - try a simpler question]"
+                    return
         
-        full_text = ""
-        for chunk in response:
-            if chunk.choices and chunk.choices[0].delta.content:
-                text = chunk.choices[0].delta.content
-                full_text += text
-                yield text
-        
-        # Log estimated tokens (streaming doesn't give usage stats)
-        # Rough estimate: 1 token ≈ 4 chars
-        est_input = len(system_prompt + user_message) // 4
-        est_output = len(full_text) // 4
-        log_tokens(model, est_input, est_output, "streaming")
-        
-    except Exception as e:
-        logger.error(f"Streaming error: {e}")
-        yield f"Error: {str(e)}"
+        # Check total timeout
+        if time.time() - start_time > TOTAL_TIMEOUT:
+            logger.warning(f"Stream total timeout exceeded ({TOTAL_TIMEOUT}s)")
+            yield "\n\n[Response took too long - please try again]"
+            return
+    
+    # Drain any remaining chunks
+    while not chunk_queue.empty():
+        try:
+            chunk = chunk_queue.get_nowait()
+            yield chunk
+        except queue.Empty:
+            break
 
 
 def generate_groq_response(prompt: str, model: str = "llama-3.1-8b-instant") -> str:

@@ -122,6 +122,7 @@ class ConversationSession:
         """Streaming version of process_message.
         
         Yields text chunks as they arrive. Stores response after completion.
+        Uses orchestrator when USE_ORCHESTRATOR is enabled.
         """
         # Step 1: Update memory context
         self._update_memory_context_with_keywords(user_message)
@@ -135,11 +136,31 @@ class ConversationSession:
                 recent_turns.append(f"AI: {entry.get('ai', '')}")
             self.memory_context['recent_conversation'] = "\n".join(recent_turns)
         
-        # Step 3: Generate response with streaming
+        # Step 3: Generate response - use orchestrator if enabled
         full_response = ""
-        for chunk in generate_response_streaming(user_message, self.memory_context):
-            full_response += chunk
-            yield chunk
+        
+        if core_config.USE_ORCHESTRATOR:
+            # V6 Architecture: Use orchestrator for routing
+            try:
+                from companion_ai.orchestrator import process_message as orchestrator_process
+                response, metadata = orchestrator_process(user_message, self.memory_context)
+                # Simulate streaming by yielding word by word
+                for word in response.split(' '):
+                    yield word + ' '
+                    full_response += word + ' '
+                full_response = full_response.strip()
+                logger.info(f"Orchestrator metadata: {metadata}")
+            except Exception as e:
+                logger.error(f"Orchestrator failed, falling back: {e}")
+                # Fallback to normal streaming
+                for chunk in generate_response_streaming(user_message, self.memory_context):
+                    full_response += chunk
+                    yield chunk
+        else:
+            # Standard streaming
+            for chunk in generate_response_streaming(user_message, self.memory_context):
+                full_response += chunk
+                yield chunk
         
         # Step 4: Store conversation after completion
         self.conversation_history.append({
