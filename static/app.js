@@ -110,9 +110,77 @@ function addCopyButtons(container) {
 }
 
 // ============================================
+// Pipeline Rendering
+// ============================================
+function renderPipeline(metadata) {
+  if (!metadata || !metadata.source) return '';
+
+  const steps = [];
+
+  // 1. Initial Decision
+  steps.push({
+    type: 'decision',
+    title: 'Orchestrator Decision',
+    desc: `Route to: ${metadata.source}`,
+    data: metadata.source === 'loop_vision' ? 'Visual verification needed' :
+      metadata.source === 'loop_tool' ? 'External capabilities required' :
+        'Direct conversation'
+  });
+
+  // 2. Loop Execution
+  if (metadata.loop_result) {
+    const res = metadata.loop_result;
+    const status = res.status || 'unknown';
+
+    steps.push({
+      type: status === 'success' ? 'result' : 'error',
+      title: `Loop Execution: ${metadata.source.replace('loop_', '')}`,
+      desc: `Status: ${status}`,
+      data: res.error ? res.error :
+        (res.data ? JSON.stringify(res.data, null, 2) : 'No data returned')
+    });
+  }
+
+  // 3. Synthesis
+  steps.push({
+    type: 'tool',
+    title: 'Final Synthesis',
+    desc: 'Generating response using 120B model',
+    data: null
+  });
+
+  const html = steps.map(step => `
+    <div class="pipeline-step ${step.type}">
+      <div class="step-info">
+        <div class="step-header">
+          <span class="step-type">${step.type}</span>
+          <span class="step-title">${step.title}</span>
+        </div>
+        <div class="step-desc">${step.desc}</div>
+        ${step.data ? `<div class="step-data">${escapeHtml(step.data)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+
+  return `
+    <div class="pipeline-view">
+      <div class="pipeline-toggle" onclick="this.classList.toggle('open'); this.nextElementSibling.classList.toggle('open')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="9 18 15 12 9 6"></polyline>
+        </svg>
+        View Process Pipeline
+      </div>
+      <div class="pipeline-content">
+        ${html}
+      </div>
+    </div>
+  `;
+}
+
+// ============================================
 // Message Rendering
 // ============================================
-function createMessageElement(role, text, timestamp, tokens) {
+function createMessageElement(role, text, timestamp, tokens, metadata) {
   const wrapper = document.createElement('div');
   wrapper.className = 'message-wrapper';
 
@@ -134,7 +202,16 @@ function createMessageElement(role, text, timestamp, tokens) {
   let tokenHtml = '';
   if (role === 'ai' && tokens && showTokens) {
     const total = (tokens.input || 0) + (tokens.output || 0);
+    const source = tokens.source || 'unknown';
+    // Color code source
+    let sourceColor = '#888';
+    if (source === 'groq') sourceColor = '#f97316';
+    else if (source === 'local') sourceColor = '#3b82f6';
+
     tokenHtml = `<span class="token-badge" title="Input: ${tokens.input} | Output: ${tokens.output}">(${total} tokens)</span>`;
+    if (source !== 'unknown') {
+      tokenHtml += `<span class="source-badge" style="color: ${sourceColor}; margin-left: 6px; font-size: 10px;">${source}</span>`;
+    }
   }
 
   roleLabel.innerHTML = `${roleName} ${tokenHtml}`;
@@ -145,6 +222,16 @@ function createMessageElement(role, text, timestamp, tokens) {
   if (role === 'ai') {
     textDiv.innerHTML = renderMarkdown(text);
     setTimeout(() => addCopyButtons(textDiv), 0);
+
+    // Append Pipeline View if metadata exists
+    if (metadata) {
+      const pipelineHtml = renderPipeline(metadata);
+      if (pipelineHtml) {
+        const pipelineDiv = document.createElement('div');
+        pipelineDiv.innerHTML = pipelineHtml;
+        textDiv.appendChild(pipelineDiv);
+      }
+    }
   } else {
     textDiv.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
   }
@@ -207,13 +294,13 @@ function createLoadingMessage() {
   return wrapper;
 }
 
-function addMessage(role, text, timestamp, tokens) {
+function addMessage(role, text, timestamp, tokens, metadata) {
   // Hide welcome screen on first message
   if (welcomeScreen && welcomeScreen.parentNode) {
     welcomeScreen.remove();
   }
 
-  const messageEl = createMessageElement(role, text, timestamp, tokens);
+  const messageEl = createMessageElement(role, text, timestamp, tokens, metadata);
   chatPane.appendChild(messageEl);
   scrollToBottom();
 }
@@ -240,7 +327,7 @@ async function sendMessage(retry = false) {
   resizeTextarea();
   updateSendButton();
 
-  // Create streaming AI message with proper structure (matching createMessageElement)
+  // Create streaming AI message structure
   const wrapper = document.createElement('div');
   wrapper.className = 'message-wrapper';
 
@@ -273,10 +360,10 @@ async function sendMessage(retry = false) {
   const textEl = textDiv.querySelector('.text-content');
   const cursorEl = textDiv.querySelector('.streaming-cursor');
 
-  // Set streaming flag to prevent SSE overwrites
+  // Set streaming flag
   isStreaming = true;
 
-  // Show stop button, hide send button
+  // Show stop button
   if (stopBtn) stopBtn.style.display = 'flex';
   if (sendBtn) sendBtn.style.display = 'none';
 
@@ -284,8 +371,9 @@ async function sendMessage(retry = false) {
   let displayedText = '';
   let pendingText = '';
   let isTyping = false;
+  let receivedMetadata = null;
 
-  // Smooth typewriter effect - types out pending text char by char
+  // Smooth typewriter effect
   async function typeNextChar() {
     if (pendingText.length === 0) {
       isTyping = false;
@@ -293,7 +381,6 @@ async function sendMessage(retry = false) {
     }
     isTyping = true;
 
-    // Type 1-3 chars at a time for natural feel
     const charsToType = Math.min(pendingText.length, Math.random() > 0.7 ? 2 : 1);
     const chars = pendingText.slice(0, charsToType);
     pendingText = pendingText.slice(charsToType);
@@ -302,18 +389,16 @@ async function sendMessage(retry = false) {
     textEl.textContent = displayedText;
     scrollToBottom();
 
-    // Variable delay for natural rhythm (faster for spaces, slower for punctuation)
     let delay = 15 + Math.random() * 10;
     if (chars.includes('.') || chars.includes('!') || chars.includes('?')) {
-      delay = 80 + Math.random() * 40; // Pause at sentence ends
+      delay = 80 + Math.random() * 40;
     } else if (chars.includes(',')) {
-      delay = 40 + Math.random() * 20; // Brief pause at commas
+      delay = 40 + Math.random() * 20;
     }
 
     setTimeout(typeNextChar, delay);
   }
 
-  // Add text to pending queue and start typing if not already
   function queueText(text) {
     pendingText += text;
     if (!isTyping) {
@@ -321,7 +406,6 @@ async function sendMessage(retry = false) {
     }
   }
 
-  // Create abort controller for ESC key cancellation
   abortController = new AbortController();
 
   try {
@@ -346,10 +430,8 @@ async function sendMessage(retry = false) {
       throw new Error(data.error || 'Error');
     }
 
-    // Read streaming response
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
-    let fullResponse = '';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -363,54 +445,39 @@ async function sendMessage(retry = false) {
           try {
             const data = JSON.parse(line.slice(6));
 
+            // Handle metadata event
+            if (data.meta) {
+              receivedMetadata = data.meta;
+              // Optional: Show "Processing..." indicator or update status immediately
+              console.log("Pipeline metadata received:", receivedMetadata);
+            }
+
             if (data.chunk) {
-              fullResponse += data.chunk;
               queueText(data.chunk);
             }
 
-            if (data.done && data.tokens && showTokens) {
-              const roleLabel = wrapper.querySelector('.message-role');
-              if (roleLabel) {
+            if (data.done) {
+              // Update token stats in UI
+              if (data.tokens && showTokens) {
+                // ... (existing token update logic)
                 const total = (data.tokens.input || 0) + (data.tokens.output || 0);
                 const source = data.tokens.source || 'unknown';
-
-                // Source indicator colors: orange for Groq, blue for local, purple for mixed
-                let sourceColor = '#888';
-                let sourceLabel = '';
-                if (source === 'groq') {
-                  sourceColor = '#f97316';  // Orange
-                  sourceLabel = 'Groq';
-                } else if (source === 'local') {
-                  sourceColor = '#3b82f6';  // Blue
-                  sourceLabel = 'Local';
-                } else if (source === 'mixed') {
-                  sourceColor = '#a855f7';  // Purple
-                  sourceLabel = 'Mixed';
-                }
-
-                const tokenHtml = `<span class="token-badge" title="Input: ${data.tokens.input} | Output: ${data.tokens.output}">(${total} tokens)</span>`;
-                const sourceHtml = sourceLabel ? `<span class="source-badge" style="color: ${sourceColor}; margin-left: 8px; font-size: 11px; opacity: 0.9;">[${sourceLabel}]</span>` : '';
-                roleLabel.innerHTML = `Companion ${tokenHtml}${sourceHtml}`;
+                roleLabel.innerHTML = `Companion <span class="token-badge">(${total} tokens)</span> <span style="font-size:10px; opacity:0.7">[${source}]</span>`;
+                loadTokenStats();
               }
-              // Refresh global token stats automatically
-              loadTokenStats();
+
+              if (data.memory_saved && window.showToast) {
+                showToast("Memory Updated ✨", "success");
+              }
             }
 
-            if (data.done && data.memory_saved) {
-              if (window.showToast) showToast("Memory Updated ✨", "success");
-            }
-
-            if (data.error) {
-              throw new Error(data.error);
-            }
-          } catch (parseErr) {
-            // Ignore parse errors for incomplete JSON
-          }
+            if (data.error) throw new Error(data.error);
+          } catch (parseErr) { }
         }
       }
     }
 
-    // Wait for typing to finish, then remove cursor smoothly
+    // Wait for typing to finish
     const waitForTyping = () => {
       if (pendingText.length > 0 || isTyping) {
         setTimeout(waitForTyping, 50);
@@ -420,14 +487,24 @@ async function sendMessage(retry = false) {
         cursorEl.style.opacity = '0';
         setTimeout(() => {
           cursorEl.remove();
-          // Re-enable SSE updates now that streaming is done
+
+          // Render markdown final
+          textDiv.innerHTML = renderMarkdown(displayedText);
+          addCopyButtons(textDiv);
+
+          // Render Pipeline if metadata exists
+          if (receivedMetadata) {
+            const pipelineHtml = renderPipeline(receivedMetadata);
+            const pipelineDiv = document.createElement('div');
+            pipelineDiv.innerHTML = pipelineHtml;
+            textDiv.appendChild(pipelineDiv);
+          }
+
           isStreaming = false;
           abortController = null;
-          // Restore buttons
           if (stopBtn) stopBtn.style.display = 'none';
           if (sendBtn) sendBtn.style.display = 'flex';
-          lastHistoryLength++; // Prevent immediate re-render
-          // Ensure token stats are refreshed even if streaming logic missed it
+          lastHistoryLength++;
           loadTokenStats();
         }, 300);
       }
@@ -435,32 +512,22 @@ async function sendMessage(retry = false) {
     waitForTyping();
 
   } catch (e) {
-    isStreaming = false; // Clear flag on error too
+    // ... (existing error handling)
+    isStreaming = false;
     abortController = null;
-
-    // Handle abort (ESC key pressed)
     if (e.name === 'AbortError') {
-      // Keep partial response if any text was displayed
       if (displayedText.trim()) {
         cursorEl.remove();
-        const textDiv = wrapper.querySelector('.message-text');
-        if (textDiv) {
-          textDiv.innerHTML = renderMarkdown(displayedText + '\n\n*[Response stopped]*');
-          addCopyButtons(textDiv);
-        }
-        if (window.showToast) showToast('Generation stopped', 'info');
+        textDiv.innerHTML = renderMarkdown(displayedText + '\n\n*[Stopped]*');
       } else {
         wrapper.remove();
-        if (window.showToast) showToast('Generation cancelled', 'info');
       }
-      // Restore buttons
       if (stopBtn) stopBtn.style.display = 'none';
       if (sendBtn) sendBtn.style.display = 'flex';
       return;
     }
-
     wrapper.remove();
-    addMessage('ai', 'Sorry, something went wrong: ' + e.message);
+    addMessage('ai', 'Error: ' + e.message);
   }
 }
 
@@ -1136,8 +1203,10 @@ function renderHistory(history) {
 
   history.forEach(entry => {
     if (entry.user) addMessage('user', entry.user);
-    if (entry.ai) addMessage('ai', entry.ai, null, entry.tokens);
+    if (entry.ai) addMessage('ai', entry.ai, null, entry.tokens, entry.metadata);
   });
+
+  scrollToBottom(true);
 }
 
 async function syncChatHistory() {
@@ -1250,7 +1319,23 @@ async function loadTasks() {
     if (data.tasks && data.tasks.length > 0) {
       tasksEmpty.style.display = 'none';
       tasksList.style.display = 'flex';
+
+      // Preserve expanded state
+      const expandedIds = [...document.querySelectorAll('.task-card.expanded')]
+        .map(el => el.dataset.taskId);
+
       renderTasks(data.tasks);
+
+      // Restore expanded state
+      expandedIds.forEach(id => {
+        const card = document.querySelector(`[data-task-id="${id}"]`);
+        if (card) {
+          card.classList.add('expanded');
+          // Also reload the timeline
+          toggleTaskDetails(id, true);
+        }
+      });
+
       updateTaskBadge(data.count);
     } else {
       tasksEmpty.style.display = 'flex';
@@ -1273,12 +1358,19 @@ function updateTaskBadge(count) {
 
 function renderTasks(tasks) {
   tasksList.innerHTML = tasks.map(task => `
-    <div class="task-card" data-task-id="${task.id}" onclick="toggleTaskDetails('${task.id}')">
-      <div class="task-card-header">
+    <div class="task-card" data-task-id="${task.id}">
+      <div class="task-card-header" onclick="toggleTaskDetails('${task.id}')">
         <div class="task-status-icon ${task.state}">
           ${getTaskIcon(task.state)}
         </div>
         <span class="task-title">${escapeHtml(task.description)}</span>
+        ${(task.state === 'running' || task.state === 'pending') ? `
+          <button class="task-cancel-btn" onclick="event.stopPropagation(); cancelTask('${task.id}')" title="Cancel task">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="m18 6-12 12M6 6l12 12"/>
+            </svg>
+          </button>
+        ` : ''}
         <svg class="task-expand-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="m6 9 6 6 6-6"/>
         </svg>
@@ -1288,6 +1380,26 @@ function renderTasks(tasks) {
       </div>
     </div>
   `).join('');
+}
+
+async function cancelTask(taskId) {
+  try {
+    const response = await fetch(`/api/tasks/${taskId}/cancel`, {
+      method: 'POST',
+      headers: authHeaders()
+    });
+    const data = await response.json();
+
+    if (data.status === 'success') {
+      showToast('Task cancelled', 'success');
+      loadTasks(); // Refresh the task list
+    } else {
+      showToast(data.error || 'Failed to cancel task', 'error');
+    }
+  } catch (error) {
+    console.error('Error cancelling task:', error);
+    showToast('Failed to cancel task', 'error');
+  }
 }
 
 function getTaskIcon(state) {
@@ -1303,11 +1415,11 @@ function getTaskIcon(state) {
   }
 }
 
-async function toggleTaskDetails(taskId) {
+async function toggleTaskDetails(taskId, forceLoad = false) {
   const card = document.querySelector(`[data-task-id="${taskId}"]`);
   const timeline = document.getElementById(`timeline-${taskId}`);
 
-  if (card.classList.contains('expanded')) {
+  if (!forceLoad && card.classList.contains('expanded')) {
     card.classList.remove('expanded');
     return;
   }

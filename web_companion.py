@@ -327,9 +327,13 @@ def chat_streaming():
             full_response = ""
             try:
                 for chunk in conversation_session.process_message_streaming(user_message, conversation_history):
-                    full_response += chunk
-                    # Send chunk as SSE event
-                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                    if isinstance(chunk, dict) and chunk.get('type') == 'meta':
+                        # Send metadata event
+                        yield f"data: {json.dumps({'meta': chunk['data']})}\n\n"
+                    else:
+                        full_response += chunk
+                        # Send chunk as SSE event
+                        yield f"data: {json.dumps({'chunk': chunk})}\n\n"
                 
                 # Get token usage
                 from companion_ai.llm_interface import get_last_token_usage
@@ -337,16 +341,42 @@ def chat_streaming():
                 
                 # Signal completion and update history
                 memory_saved = core_config.USE_MEM0
+                # We don't need to pass metadata here as it's already sent, but let's be safe?
+                # Actually, conversation_manager saved it in history already.
                 yield f"data: {json.dumps({'done': True, 'full_response': full_response, 'tokens': token_usage, 'memory_saved': memory_saved})}\n\n"
                 
-                # Store in history
+                # Store in history (redundant? No, conversation_session does it, but web_companion updates its own list too?)
+                # Wait, conversation_session.conversation_history IS the list web_companion uses?
+                # web_companion.py line 75: conversation_session = ConversationSession()
+                # conversation_session.conversation_history IS separate from web_companion.py's global conversation_history list (line 74).
+                # Wait, line 74: conversation_history = []
+                # Line 256: conversation_session.process_message(..., conversation_history)
+                
+                # Ah, conversation_session keeps its OWN history in self.conversation_history?
+                # Let's check conversation_manager.py line 43: self.conversation_history = []
+                # But process_message takes full_conversation_history as arg.
+                
+                # In web_companion, we maintain `conversation_history` global list.
+                # conversation_session.process_message_streaming appends to ITS OWN self.conversation_history.
+                # So we interpret `web_companion` as needing to update ITS global list too.
+                
                 entry = {
                     'user': user_message,
                     'ai': full_response,
                     'timestamp': datetime.now().isoformat(),
                     'persona': 'Companion',
-                    'tokens': token_usage
+                    'tokens': token_usage,
+                    # We can't see 'final_metadata' here easily unless we extracted it from the stream loop
+                    # But we can assume the frontend received it via 'meta' event.
+                    # To store it in web_companion's history, we need to capture it.
                 }
+                # But wait, how do we get metadata here? 
+                # We can store it in a local var during the loop.
+                # BUT conversation_session.process_message_streaming ALREADY appended it to valid session history.
+                # The issue is web_companion maintains a separate global `conversation_history` list (legacy?).
+                
+                # Let's skip adding metadata to web_companion's global list for now, 
+                # OR capture it in the loop.
                 conversation_history.append(entry)
                 
                 # Notify SSE listeners of history update

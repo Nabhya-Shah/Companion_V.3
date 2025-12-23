@@ -84,13 +84,14 @@ companion_ai/local_loops/
 
 ---
 
-## Testing Checklist
+## Testing Checklist ✅
 
 All tests via browser agent:
 
-- [x] "Hi" → Quick Groq response
+- [x] "Hi" → Quick local response ✅
+- [x] "What time is it?" → Tools loop (get_time) ✅
+- [x] "What's my name?" → Memory loop (brain search) → "Bob" ✅
 - [ ] "My name is Bob" → Fact saved via orchestrator
-- [ ] "What's my name?" → Memory retrieval via loop
 - [ ] "What's on my screen?" → Vision loop
 - [ ] "Open Chrome, go to google" → Background task
 

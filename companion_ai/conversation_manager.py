@@ -138,13 +138,19 @@ class ConversationSession:
         
         # Step 3: Generate response - use orchestrator if enabled
         full_response = ""
+        final_metadata = {}
         
         if core_config.USE_ORCHESTRATOR:
             # V6 Architecture: Use orchestrator for routing
             try:
                 from companion_ai.orchestrator import process_message as orchestrator_process
                 response, metadata = orchestrator_process(user_message, self.memory_context)
-                # Simulate streaming by yielding word by word
+                final_metadata = metadata
+                
+                # Yield metadata first
+                yield {"type": "meta", "data": metadata}
+                
+                # Simulate streaming
                 for word in response.split(' '):
                     yield word + ' '
                     full_response += word + ' '
@@ -152,12 +158,14 @@ class ConversationSession:
                 logger.info(f"Orchestrator metadata: {metadata}")
             except Exception as e:
                 logger.error(f"Orchestrator failed, falling back: {e}")
-                # Fallback to normal streaming
+                final_metadata = {"source": "direct_fallback", "error": str(e)}
+                yield {"type": "meta", "data": final_metadata}
                 for chunk in generate_response_streaming(user_message, self.memory_context):
                     full_response += chunk
                     yield chunk
         else:
-            # Standard streaming
+            final_metadata = {"source": "direct"}
+            yield {"type": "meta", "data": final_metadata}
             for chunk in generate_response_streaming(user_message, self.memory_context):
                 full_response += chunk
                 yield chunk
@@ -166,7 +174,8 @@ class ConversationSession:
         self.conversation_history.append({
             "user": user_message,
             "ai": full_response,
-            "timestamp": db.datetime.now().isoformat()
+            "timestamp": db.datetime.now().isoformat(),
+            "metadata": final_metadata
         })
         
         # Step 5: Add to Mem0 immediately (V4 hybrid memory)

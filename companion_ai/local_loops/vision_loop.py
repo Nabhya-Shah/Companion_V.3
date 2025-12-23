@@ -106,6 +106,41 @@ If not found, say so clearly."""
         else:
             return await self._capture_screen()
     
+    async def _call_vision_model(self, image_b64: str, prompt: str) -> Optional[str]:
+        """Call Ollama llava vision model with image."""
+        import requests
+        
+        try:
+            ollama_url = self._vision_endpoint or "http://localhost:11434"
+            
+            logger.info("Calling Ollama llava:7b for vision analysis")
+            
+            response = requests.post(
+                f"{ollama_url}/api/generate",
+                json={
+                    "model": "llava:7b",
+                    "prompt": prompt,
+                    "images": [image_b64],  # Ollama expects base64 images in 'images' array
+                    "stream": False,
+                    "options": {
+                        "num_predict": 512,
+                        "temperature": 0.1
+                    }
+                },
+                timeout=120
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("response", "")
+            else:
+                logger.error(f"Ollama vision call failed: {response.status_code}")
+                return None
+            
+        except Exception as e:
+            logger.error(f"Vision model call failed: {e}")
+            return None
+    
     async def _describe(self, image_path: Optional[str] = None) -> LoopResult:
         """Describe screen or image content."""
         try:
@@ -113,40 +148,19 @@ If not found, say so clearly."""
             if not image_b64:
                 return LoopResult.failure("Failed to capture/load image")
             
-            # TODO: Connect to Docker vLLM vision model when ready
-            # For now, use existing VisionManager as fallback
-            try:
-                from companion_ai.vision_service import VisionManager
-                
-                vision = VisionManager()
-                description = await self._call_vision_model(image_b64, self.get_system_prompt("analyzer"))
-                
-                if description:
-                    return LoopResult.success(
-                        data={"description": description},
-                        operation="describe"
-                    )
-            except Exception as e:
-                logger.warning(f"Vision model call failed: {e}")
+            description = await self._call_vision_model(image_b64, self.get_system_prompt("analyzer"))
             
-            # Placeholder response
-            return LoopResult.success(
-                data={"description": "Vision loop ready but model not connected yet"},
-                operation="describe"
-            )
+            if description:
+                return LoopResult.success(
+                    data={"description": description},
+                    operation="describe"
+                )
+            else:
+                return LoopResult.failure("Vision model returned no description")
             
         except Exception as e:
             logger.error(f"Vision describe failed: {e}")
             return LoopResult.failure(str(e))
-    
-    async def _call_vision_model(self, image_b64: str, system_prompt: str) -> Optional[str]:
-        """Call vision model with image.
-        
-        TODO: Implement when Docker vLLM is ready.
-        """
-        # Placeholder - will use local LLaVA or InternVL
-        logger.info("VisionLoop._call_vision_model called (placeholder)")
-        return None
     
     async def _find(self, element: str, image_path: Optional[str] = None) -> LoopResult:
         """Find a specific element on screen."""
@@ -158,11 +172,14 @@ If not found, say so clearly."""
             if not image_b64:
                 return LoopResult.failure("Failed to capture/load image")
             
-            # TODO: Call vision model with finder prompt
-            logger.info(f"VisionLoop._find looking for: {element}")
+            prompt = f"{self.get_system_prompt('finder')}\n\nFind the element: '{element}'. Return coordinates [x, y] or 'Not found'."
+            result = await self._call_vision_model(image_b64, prompt)
+            
+            # TODO: Parse coordinates from result
+            logger.info(f"Vision find result: {result}")
             
             return LoopResult.success(
-                data={"found": False, "element": element, "location": None},
+                data={"found": True if result and "Not found" not in result else False, "raw_result": result},
                 operation="find"
             )
         except Exception as e:
@@ -176,11 +193,11 @@ If not found, say so clearly."""
             if not image_b64:
                 return LoopResult.failure("Failed to capture/load image")
             
-            # TODO: Call vision model for OCR
-            logger.info("VisionLoop._ocr called (placeholder)")
+            prompt = "Extract all visible text from this image. Output only the text, observing layout if possible."
+            text = await self._call_vision_model(image_b64, prompt)
             
             return LoopResult.success(
-                data={"text": "", "confidence": 0.0},
+                data={"text": text or ""},
                 operation="ocr"
             )
         except Exception as e:

@@ -247,81 +247,108 @@ if GROQ_MEMORY_API_KEY:
         groq_memory_client = None
 
 # ============================================================================
-# vLLM Client (Docker Local Model)
+# Local Model Clients (Native Ollama)
 # ============================================================================
-# vLLM provides an OpenAI-compatible API, so we use the openai client
-_vllm_client = None
-VLLM_BASE_URL = os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1")
-VLLM_MODEL = core_config.LOCAL_HEAVY_MODEL  # e.g., "Qwen/Qwen2.5-3B-Instruct"
+# All local models now run through native Ollama for stability and simplicity.
+# No Docker containers needed - just run 'ollama serve' and pull models.
 
-def _initialize_vllm_client():
-    """Initialize vLLM client for local model inference."""
-    global _vllm_client
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+
+# Models available through Ollama
+OLLAMA_TEXT_MODEL = "qwen2.5:7b"        # Mini-orchestrator for loop iterations
+OLLAMA_VISION_MODEL = "llava:7b"         # Vision analysis
+OLLAMA_EMBED_MODEL = "nomic-embed-text"  # Embeddings for semantic search
+OLLAMA_CODE_MODEL = "qwen2.5-coder:32b"  # Code generation (on-demand)
+
+# ============================================================================
+# Ollama Client (for Embeddings and On-Demand Models)
+# ============================================================================
+
+def get_embedding(text: str) -> list:
+    """Get embedding vector using Ollama's nomic-embed-text model."""
     try:
-        from openai import OpenAI
-        _vllm_client = OpenAI(
-            base_url=VLLM_BASE_URL,
-            api_key="not-needed"  # vLLM doesn't require auth
+        response = requests.post(
+            f"{OLLAMA_URL}/api/embed",
+            json={"model": OLLAMA_EMBED_MODEL, "input": text},
+            timeout=30
         )
-        # Test connection
-        models = _vllm_client.models.list()
-        if models.data:
-            logger.info(f"✅ vLLM client initialized: {VLLM_BASE_URL}")
-            logger.info(f"   Available models: {[m.id for m in models.data]}")
+        if response.status_code == 200:
+            data = response.json()
+            return data.get("embeddings", [[]])[0]
         else:
-            logger.warning("vLLM connected but no models available")
+            logger.error(f"Ollama embed failed: {response.status_code}")
+            return []
     except Exception as e:
-        logger.warning(f"vLLM client initialization failed (is Docker running?): {e}")
-        _vllm_client = None
+        logger.error(f"Embedding failed: {e}")
+        return []
 
-def get_vllm_client():
-    """Get the vLLM client for local model inference."""
-    global _vllm_client
-    if _vllm_client is None and core_config.USE_ORCHESTRATOR:
-        _initialize_vllm_client()
-    return _vllm_client
+def get_embeddings_batch(texts: list) -> list:
+    """Get embeddings for multiple texts."""
+    try:
+        response = requests.post(
+            f"{OLLAMA_URL}/api/embed",
+            json={"model": OLLAMA_EMBED_MODEL, "input": texts},
+            timeout=60
+        )
+        if response.status_code == 200:
+            return response.json().get("embeddings", [])
+        return []
+    except Exception as e:
+        logger.error(f"Batch embedding failed: {e}")
+        return []
 
-def generate_vllm_response(prompt: str, system_prompt: str = None, max_tokens: int = 1024) -> str:
-    """Generate a response using the local vLLM model.
+
+def generate_local_response(prompt: str, system_prompt: str = None, max_tokens: int = 1024) -> str:
+    """Generate a response using the local Ollama text model.
     
-    Use this for local inference instead of Groq to save rate limits.
+    Uses Ollama for text (more memory efficient) instead of vLLM.
     """
-    client = get_vllm_client()
-    if not client:
-        logger.warning("vLLM not available, falling back to Groq")
-        return None
-    
     try:
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
         
-        response = client.chat.completions.create(
-            model=VLLM_MODEL,
-            messages=messages,
-            temperature=0.7,
-            max_tokens=max_tokens
+        response = requests.post(
+            f"{OLLAMA_URL}/api/chat",
+            json={
+                "model": OLLAMA_TEXT_MODEL,
+                "messages": messages,
+                "stream": False,
+                "options": {
+                    "num_predict": max_tokens,
+                    "temperature": 0.7
+                }
+            },
+            timeout=120
         )
         
-        # Log tokens
-        if hasattr(response, 'usage') and response.usage:
-            log_tokens(
-                VLLM_MODEL, 
-                response.usage.prompt_tokens, 
-                response.usage.completion_tokens,
-                "vllm_local"
-            )
-        
-        return response.choices[0].message.content
-        
+        if response.status_code == 200:
+            data = response.json()
+            content = data.get("message", {}).get("content", "")
+            
+            # Log tokens if available
+            if "eval_count" in data:
+                log_tokens(
+                    OLLAMA_TEXT_MODEL,
+                    data.get("prompt_eval_count", 0),
+                    data.get("eval_count", 0),
+                    "ollama_local"
+                )
+            
+            return content
+        else:
+            logger.error(f"Ollama text generation failed: {response.status_code}")
+            return None
+            
     except Exception as e:
-        logger.error(f"vLLM generation failed: {e}")
+        logger.error(f"Local generation failed: {e}")
         return None
 
-# Initialize vLLM if orchestrator is enabled
-if core_config.USE_ORCHESTRATOR:
-    _initialize_vllm_client()
+# Alias for backward compatibility
+def generate_vllm_response(prompt: str, system_prompt: str = None, max_tokens: int = 1024) -> str:
+    """Backward compatibility alias - now uses Ollama."""
+    return generate_local_response(prompt, system_prompt, max_tokens)
 
 # --- Core Generation Functions ---
 # NOTE: Prompt building now handled by companion_ai/core/prompts.py and context_builder.py

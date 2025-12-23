@@ -49,7 +49,14 @@ class OrchestratorDecision:
     def from_json(cls, json_str: str) -> "OrchestratorDecision":
         """Parse decision from JSON string."""
         try:
+            # Try to extract JSON from markdown code blocks if present
+            if "```json" in json_str:
+                json_str = json_str.split("```json")[1].split("```")[0].strip()
+            elif "```" in json_str:
+                json_str = json_str.split("```")[1].split("```")[0].strip()
+            
             data = json.loads(json_str)
+            logger.info(f"✅ DEBUG: Parsed JSON successfully: action={data.get('action')}, loop={data.get('loop')}")
             return cls(
                 action=OrchestratorAction(data.get("action", "answer")),
                 content=data.get("content"),
@@ -58,49 +65,38 @@ class OrchestratorDecision:
                 save_facts=data.get("save_facts", [])
             )
         except Exception as e:
-            logger.error(f"Failed to parse orchestrator decision: {e}")
+            logger.error(f"❌ DEBUG: Failed to parse orchestrator decision: {e}")
+            logger.error(f"❌ DEBUG: Raw input was: {json_str[:200]}...")
             # Fallback to treating entire response as answer
             return cls(action=OrchestratorAction.ANSWER, content=json_str)
-
 
 class Orchestrator:
     """The 120B brain that orchestrates local loops.
     
-    Uses local vLLM when available, falls back to Groq.
+    Uses Groq 120B for main orchestration decisions.
+    Local Ollama models are used for loop execution (not orchestration).
     """
     
     def __init__(self):
         self._capabilities_cache = None
-        self._vllm_client = None
         self._groq_client = None
     
-    def _get_local_client(self):
-        """Get vLLM client for local inference (preferred)."""
-        if not self._vllm_client:
-            from companion_ai.llm_interface import get_vllm_client
-            self._vllm_client = get_vllm_client()
-        return self._vllm_client
-    
     def _get_groq_client(self):
-        """Get Groq client (fallback)."""
+        """Get Groq client for 120B orchestration."""
         if not self._groq_client:
             from companion_ai.llm_interface import get_groq_client
             self._groq_client = get_groq_client()
         return self._groq_client
     
     def _get_client_and_model(self):
-        """Get the best available client and model.
+        """Get the Groq client and 120B model for orchestration.
         
-        Prefers local vLLM, falls back to Groq.
-        Returns (client, model_name, is_local)
+        The main orchestrator ALWAYS uses Groq 120B.
+        Local Ollama models are only used within loops.
+        Returns (client, model_name, is_local=False)
         """
-        local_client = self._get_local_client()
-        if local_client:
-            return local_client, core_config.LOCAL_HEAVY_MODEL, True
-        
         groq_client = self._get_groq_client()
         if groq_client:
-            logger.warning("Using Groq fallback (vLLM not available)")
             return groq_client, core_config.PRIMARY_MODEL, False
         
         return None, None, False
@@ -127,24 +123,35 @@ class Orchestrator:
 ## Your Decision Format
 You MUST respond with a JSON object (no markdown, just JSON):
 
-For direct answers:
+For direct answers (greetings, conversation, questions you can answer):
 {{"action": "answer", "content": "Your response here"}}
 
-For delegating to a loop:
-{{"action": "delegate", "loop": "memory", "task": {{"operation": "search", "query": "..."}}}}
+For delegating to tools loop (time, math, simple lookups):
+{{"action": "delegate", "loop": "tools", "task": {{"operation": "get_time"}}}}
+{{"action": "delegate", "loop": "tools", "task": {{"operation": "calculate", "expression": "2+2"}}}}
+{{"action": "delegate", "loop": "tools", "task": {{"operation": "brain_list", "subdir": ""}}}}
+{{"action": "delegate", "loop": "tools", "task": {{"operation": "brain_read", "path": "notes/file.md"}}}}
 
-For background tasks:
+For delegating to memory loop (recalling user facts):
+{{"action": "delegate", "loop": "memory", "task": {{"operation": "search", "query": "user name"}}}}
+
+For delegating to vision loop (looking at screen):
+{{"action": "delegate", "loop": "vision", "task": {{"operation": "describe"}}}}
+{{"action": "delegate", "loop": "vision", "task": {{"operation": "find", "element": "submit button"}}}}
+
+For background tasks (long-running automation only):
 {{"action": "background", "loop": "computer", "task": {{"operation": "execute", "task": "..."}}}}
 
-## When to Delegate
-- Memory questions ("what's my name?") → delegate to memory loop
-- Vision requests ("what's on screen?") → delegate to vision loop  
-- Simple tools (time, math) → delegate to tools loop
-- Complex automation → background to computer loop
-- Normal conversation → answer directly
+## IMPORTANT Routing Rules
+- "What time is it?" → DELEGATE to tools loop with get_time (NOT background!)
+- "What's 2+2?" → DELEGATE to tools loop with calculate
+- "What's my name?" → DELEGATE to memory loop
+- "Look at my screen" → DELEGATE to vision loop
+- "Hi", "Hello", questions about general topics → ANSWER directly
+- Long automation tasks → BACKGROUND only
 
-## After Your Response
-If the conversation contains facts worth remembering, add:
+## Detecting Facts to Save
+If the user shares personal info (name, preferences, facts about themselves), add:
 "save_facts": ["User's name is X", "User likes Y"]
 
 Only save CONCRETE facts, not casual chat.
@@ -211,6 +218,9 @@ Only save CONCRETE facts, not casual chat.
             
             raw_response = response.choices[0].message.content.strip()
             
+            # DEBUG: Log the raw response from 120B
+            logger.info(f"🔍 DEBUG: 120B raw response:\n{raw_response[:500]}...")
+            
             # Log tokens
             from companion_ai.llm_interface import log_tokens
             log_tokens(
@@ -221,7 +231,12 @@ Only save CONCRETE facts, not casual chat.
             )
             
             # Parse decision
-            return OrchestratorDecision.from_json(raw_response)
+            decision = OrchestratorDecision.from_json(raw_response)
+            
+            # DEBUG: Log the parsed decision
+            logger.info(f"🎯 DEBUG: Parsed decision: action={decision.action}, loop={decision.loop}, has_content={decision.content is not None}")
+            
+            return decision
             
         except Exception as e:
             logger.error(f"Failed to get orchestrator decision: {e}")
@@ -269,13 +284,19 @@ Only save CONCRETE facts, not casual chat.
         loop_name = decision.loop
         task = decision.task or {}
         
+        # DEBUG: Log delegation attempt
+        logger.info(f"🔄 DEBUG: Delegating to loop '{loop_name}' with task: {task}")
+        
         loop = get_loop(loop_name)
         if not loop:
-            logger.error(f"Loop not found: {loop_name}")
+            logger.error(f"❌ DEBUG: Loop not found: {loop_name}")
             return await self._generate_direct_response(user_message, context)
+        
+        logger.info(f"✅ DEBUG: Got loop instance: {loop}")
         
         try:
             # Execute loop
+            logger.info(f"🚀 DEBUG: Executing loop.execute({task})")
             result = await loop.execute(task)
             
             if result.status.value == "error":
@@ -360,7 +381,10 @@ Only save CONCRETE facts, not casual chat.
         try:
             from companion_ai.core.context_builder import build_system_prompt_with_meta
             
-            system_prompt = build_system_prompt_with_meta(context)
+            # Fix: pass user_message and recent_conversation, extract system_prompt from result
+            recent_conversation = context.get("recent_conversation", "")
+            result = build_system_prompt_with_meta(user_message, recent_conversation)
+            system_prompt = result.get("system_prompt", "")
             
             response = client.chat.completions.create(
                 model=model,

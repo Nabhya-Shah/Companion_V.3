@@ -36,7 +36,7 @@ and return the result. Be precise and concise."""
         super().__init__(config)
     
     def _get_supported_operations(self) -> List[str]:
-        return ["get_time", "calculate", "web_search", "wikipedia"]
+        return ["get_time", "calculate", "web_search", "wikipedia", "brain_read", "brain_list"]
     
     async def execute(self, task: Dict[str, Any]) -> LoopResult:
         """Execute a tool task.
@@ -46,6 +46,8 @@ and return the result. Be precise and concise."""
             {"operation": "calculate", "expression": "2 + 2"}
             {"operation": "web_search", "query": "weather today"}
             {"operation": "wikipedia", "topic": "Python programming"}
+            {"operation": "brain_read", "path": "notes/todo.md"}
+            {"operation": "brain_list", "subdir": "notes"}
         """
         operation = task.get("operation")
         
@@ -57,6 +59,10 @@ and return the result. Be precise and concise."""
             return await self._web_search(task.get("query", ""))
         elif operation == "wikipedia":
             return await self._wikipedia(task.get("topic", ""))
+        elif operation == "brain_read":
+            return await self._brain_read(task.get("path", ""))
+        elif operation == "brain_list":
+            return await self._brain_list(task.get("subdir", ""))
         else:
             return LoopResult.failure(f"Unknown operation: {operation}")
     
@@ -99,22 +105,24 @@ and return the result. Be precise and concise."""
     async def _web_search(self, query: str) -> LoopResult:
         """Perform web search.
         
-        Uses existing compound/web search functionality.
+        Using browser automation since internal search tool was removed.
         """
         if not query:
             return LoopResult.failure("No query provided")
         
         try:
-            # Use existing tools infrastructure
             from companion_ai.tools import execute_function_call
             
+            # Use browser to search DuckDuckGo
+            search_url = f"https://duckduckgo.com/?q={query.replace(' ', '+')}"
+            
             result = execute_function_call(
-                "consult_compound",
-                {"query": query}
+                "browser_goto",
+                {"url": search_url}
             )
             
             return LoopResult.success(
-                data={"query": query, "result": result},
+                data={"query": query, "result": f"Opened search for '{query}' in browser."},
                 operation="web_search"
             )
         except Exception as e:
@@ -140,4 +148,39 @@ and return the result. Be precise and concise."""
             )
         except Exception as e:
             logger.error(f"Wikipedia lookup failed: {e}")
+            return LoopResult.failure(str(e))
+
+    async def _brain_read(self, path: str) -> LoopResult:
+        """Read from brain folder."""
+        if not path:
+            return LoopResult.failure("No path provided")
+        
+        try:
+            from companion_ai.tools import tool_brain_read
+            
+            # Using the direct tool function (sync)
+            result = tool_brain_read(path)
+            
+            return LoopResult.success(
+                data={"path": path, "content": result},
+                operation="brain_read"
+            )
+        except Exception as e:
+            logger.error(f"Brain read failed: {e}")
+            return LoopResult.failure(str(e))
+
+    async def _brain_list(self, subdir: str) -> LoopResult:
+        """List brain folder."""
+        try:
+            from companion_ai.tools import tool_brain_list
+            
+            # Using the direct tool function (sync)
+            result = tool_brain_list(subdir)
+            
+            return LoopResult.success(
+                data={"subdir": subdir, "files": result},
+                operation="brain_list"
+            )
+        except Exception as e:
+            logger.error(f"Brain list failed: {e}")
             return LoopResult.failure(str(e))

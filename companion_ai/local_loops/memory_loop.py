@@ -80,20 +80,63 @@ relevant memories from the provided list. Return the indices of relevant memorie
             return LoopResult.failure(f"Unknown operation: {operation}")
     
     async def _search(self, query: str) -> LoopResult:
-        """Search for relevant memories."""
+        """Search for relevant memories from all sources."""
         if not query:
             return LoopResult.failure("No query provided")
         
+        results = []
+        query_lower = query.lower()
+        
         try:
-            # Use existing Mem0 search
-            from companion_ai import memory_v2
+            # Source 1: Search brain files (preferences, user context)
+            from companion_ai.brain_manager import get_brain
+            brain = get_brain()
             
-            memories = memory_v2.search_memories(query, limit=10)
+            # Check key brain files
+            brain_files = [
+                "memories/preferences.md",
+                "memories/user_context.md", 
+                "memories/personality.md"
+            ]
+            
+            for brain_file in brain_files:
+                content = brain.read(brain_file)
+                if content:
+                    # Simple keyword matching
+                    lines = content.split('\n')
+                    for line in lines:
+                        line_clean = line.strip()
+                        if not line_clean or line_clean.startswith('<!--'):
+                            continue
+                        # Check if query matches this line
+                        if any(word in line_clean.lower() for word in query_lower.split()):
+                            results.append({
+                                "source": "brain",
+                                "file": brain_file,
+                                "content": line_clean
+                            })
+            
+            # Source 2: Search Mem0 if available
+            try:
+                from companion_ai import memory_v2
+                mem0_results = memory_v2.search_memories(query, limit=5)
+                for mem in mem0_results:
+                    results.append({
+                        "source": "mem0",
+                        "content": mem.get("text", str(mem))
+                    })
+            except Exception as e:
+                logger.debug(f"Mem0 search skipped: {e}")
+            
+            logger.info(f"Memory search for '{query}': found {len(results)} results")
             
             return LoopResult.success(
-                data={"memories": memories, "count": len(memories)},
-                operation="search",
-                query=query
+                data={
+                    "memories": results, 
+                    "count": len(results),
+                    "query": query
+                },
+                operation="search"
             )
         except Exception as e:
             logger.error(f"Memory search failed: {e}")

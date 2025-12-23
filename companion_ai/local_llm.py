@@ -399,7 +399,87 @@ def is_local_available() -> bool:
     """Check if local LLM is available."""
     return get_local_llm().is_available()
 
+# Proper OllamaBackend for native Ollama (port 11434)
+class OllamaBackend(LocalLLMBackend):
+    """Native Ollama backend - uses localhost:11434."""
+    
+    def __init__(self, base_url: str = "http://localhost:11434"):
+        self.base_url = base_url
+        self._available = None
+    
+    def is_available(self) -> bool:
+        """Check if Ollama server is running."""
+        if self._available is not None:
+            return self._available
+        
+        try:
+            response = requests.get(f"{self.base_url}/api/tags", timeout=2)
+            self._available = response.status_code == 200
+        except Exception:
+            self._available = False
+        
+        return self._available
+    
+    def generate(self, prompt: str, model: str = None) -> str:
+        """Generate response using Ollama."""
+        model = model or "qwen2.5:7b"
+        
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": prompt,
+                    "stream": False,
+                },
+                timeout=120
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("response", "")
+        except Exception as e:
+            logger.error(f"Ollama generate error: {e}")
+            raise
+    
+    def generate_with_image(self, prompt: str, image_path: str, model: str = None) -> str:
+        """Generate response with image using Ollama vision model (llava)."""
+        import base64
+        
+        # Read and encode image
+        with open(image_path, "rb") as f:
+            image_data = base64.b64encode(f.read()).decode("utf-8")
+        
+        model = model or "llava:7b"
+        
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": prompt,
+                    "images": [image_data],
+                    "stream": False,
+                },
+                timeout=120
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("response", "")
+        except Exception as e:
+            logger.error(f"Ollama vision error: {e}")
+            raise
+    
+    def list_models(self) -> List[str]:
+        """List models available in Ollama."""
+        try:
+            response = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            return [m["name"] for m in data.get("models", [])]
+        except Exception as e:
+            logger.error(f"Ollama list models error: {e}")
+            return []
 
-# Legacy compatibility - OllamaClientWrapper now points to vLLM
+
+# Legacy compatibility
 OllamaClientWrapper = VLLMClientWrapper
-OllamaBackend = VLLMBackend
