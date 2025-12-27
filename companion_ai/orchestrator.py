@@ -143,12 +143,32 @@ For background tasks (long-running automation only):
 {{"action": "background", "loop": "computer", "task": {{"operation": "execute", "task": "..."}}}}
 
 ## IMPORTANT Routing Rules
+## MEMORY & PERSONALIZATION:
+- "Remember that X", "Memorize this" → DELEGATE to memory loop (mem0_add)
+- "I prefer X", "My favorite Y is Z", "I am [Context]" → DELEGATE to memory loop (mem0_add)
+- "What do you know about me?", "Who am I?" → DELEGATE to memory loop (mem0_get)
+- "Forget that X" → DELEGATE to memory loop (mem0_delete)
 - "What time is it?" → DELEGATE to tools loop with get_time (NOT background!)
 - "What's 2+2?" → DELEGATE to tools loop with calculate
 - "What's my name?" → DELEGATE to memory loop
 - "Look at my screen" → DELEGATE to vision loop
 - "Hi", "Hello", questions about general topics → ANSWER directly
-- Long automation tasks → BACKGROUND only
+
+**BROWSER AUTOMATION (uses Playwright - fast & reliable):**
+- "Go to google.com" → DELEGATE to tools loop (browser_goto)
+- "Open bookmark X", "Open [Name] (e.g. Open Bromcom)" → DELEGATE to tools loop (open_bookmark)
+- "Go to google.com" → DELEGATE to tools loop (browser_goto)
+- "Save this page as X", "Bookmark this" → DELEGATE to tools loop (add_bookmark)
+- "Open wikipedia", "Open a new tab", "Open Chrome tab" → DELEGATE to tools loop (browser_goto url="about:blank")
+- "Click the login button" → DELEGATE to tools loop (browser_click)
+- "Type my email" → DELEGATE to tools loop (browser_type)
+- "Enable browser control", "Restart Chrome for AI", "Fix Chrome" → DELEGATE to tools loop (enable_browser_control)
+- ANY web browsing task → DELEGATE to tools loop
+
+**DESKTOP AUTOMATION (slower, uses vision):**
+- "Open notepad" → BACKGROUND computer loop
+- "Click on desktop icon" → BACKGROUND computer loop
+- ONLY use computer loop for non-browser desktop tasks (e.g. Spotify, Discord, Explorer)
 
 ## Detecting Facts to Save
 If the user shares personal info (name, preferences, facts about themselves), add:

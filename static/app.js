@@ -1309,8 +1309,11 @@ userInput.addEventListener('input', () => {
 // async function pollJobs() { ... }
 
 // ============================================
+// ============================================
 // Background Tasks Panel (V6)
 // ============================================
+let lastTasksSig = "";
+
 async function loadTasks() {
   try {
     const response = await fetch('/api/tasks', { headers: authHeaders() });
@@ -1320,18 +1323,32 @@ async function loadTasks() {
       tasksEmpty.style.display = 'none';
       tasksList.style.display = 'flex';
 
-      // Preserve expanded state
+      // Create signature based on task IDs, states, and descriptions
+      // This prevents re-rendering (and killing the cancel button) if nothing basic changed
+      const currentSig = JSON.stringify(data.tasks.map(t => ({ id: t.id, state: t.state, desc: t.description })));
+
       const expandedIds = [...document.querySelectorAll('.task-card.expanded')]
         .map(el => el.dataset.taskId);
 
-      renderTasks(data.tasks);
+      // Only re-render list if headers changed
+      if (currentSig !== lastTasksSig) {
+        lastTasksSig = currentSig;
+        renderTasks(data.tasks);
 
-      // Restore expanded state
+        // Restore expanded state only after a re-render
+        expandedIds.forEach(id => {
+          const card = document.querySelector(`[data-task-id="${id}"]`);
+          if (card) {
+            card.classList.add('expanded');
+          }
+        });
+      }
+
+      // Always reload the timeline for expanded cards (to show progress)
+      // We do this even if headers didn't change
       expandedIds.forEach(id => {
-        const card = document.querySelector(`[data-task-id="${id}"]`);
-        if (card) {
-          card.classList.add('expanded');
-          // Also reload the timeline
+        // Only if the task still exists
+        if (data.tasks.find(t => t.id === id)) {
           toggleTaskDetails(id, true);
         }
       });

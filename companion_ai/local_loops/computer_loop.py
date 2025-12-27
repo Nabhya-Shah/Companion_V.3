@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from .base import Loop, LoopResult, LoopStatus
 from .registry import register_loop
+from .agent_s_loop import AgentSLoop
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +132,7 @@ Return: {"success": true/false, "observation": "what you see"}"""
     def __init__(self, config: Dict[str, Any] = None):
         super().__init__(config)
         self._active_tasks: Dict[str, BackgroundTask] = {}
+        self._agent_loops: Dict[str, AgentSLoop] = {}  # Track running agents for cancellation
         self._notification_callback: Optional[Callable] = None
     
     def _get_supported_operations(self) -> List[str]:
@@ -192,7 +194,7 @@ Return: {"success": true/false, "observation": "what you see"}"""
             response = requests.post(
                 "http://localhost:11434/api/generate",
                 json={
-                    "model": "qwen2.5vl:7b",
+                    "model": "gemma3:4b",
                     "prompt": """List all visible windows and UI elements on this Windows screenshot.
 For each window, specify:
 1. The window title
@@ -369,13 +371,12 @@ Return ONLY valid JSON, no explanation."""
             return LoopResult.failure(str(e))
     
     async def _run_task(self, task_id: str):
-        """Run a task using VISION-FIRST architecture.
+        """Run a task using Agent-S architecture with keyboard-first approach.
         
-        Flow:
-        1. Vision sees current screen state
-        2. Mini-overseer plans smart steps based on what's visible
-        3. Execute each step with ComputerAgent
-        4. Vision verifies after each step
+        This delegates to AgentSLoop which uses:
+        - Qwen2.5-VL for planning (prefers keyboard shortcuts like Win+R)
+        - pyautogui for execution
+        - No clicking (more reliable)
         """
         task = self._active_tasks.get(task_id)
         if not task:
@@ -385,154 +386,41 @@ Return ONLY valid JSON, no explanation."""
         self._notify(task_id, {"state": "running"})
         
         try:
-            from companion_ai.computer_agent import computer_agent
+            # Create AgentSLoop instance and track it for cancellation
+            agent_loop = AgentSLoop()
+            self._agent_loops[task_id] = agent_loop
             
-            # Step 1: Vision sees current screen
-            step1 = task.add_step("Seeing current screen state")
-            step1.status = TaskState.RUNNING
-            step1.started_at = datetime.now()
-            self._notify(task_id, {"step": step1.id, "status": "running", "description": step1.description})
+            # Execute via Agent-S architecture
+            result = await agent_loop.execute_task(task.description)
             
-            if task.state == TaskState.FAILED:
-                return
+            # Log pipeline for debugging
+            logger.info(f"Pipeline log: {len(result.get('pipeline', []))} entries")
+            for entry in result.get('pipeline', []):
+                logger.debug(f"  {entry.get('stage')}: {entry.get('output', '')[:100]}")
             
-            screen_context = self._see_screen()
+            # Sync steps from AgentSLoop to our task
+            for step_data in result.get("steps", []):
+                step = task.add_step(step_data.get("name", "Unknown"))
+                step.status = TaskState.COMPLETED if step_data.get("status") == "completed" else TaskState.FAILED
+                step.completed_at = datetime.now()
+                step.result = step_data.get("result", "")
+                self._notify(task_id, {"step": step.id, "status": step.status.value, "description": step.description})
             
-            step1.status = TaskState.COMPLETED
-            step1.completed_at = datetime.now()
-            step1.result = screen_context[:200] + "..." if len(screen_context) > 200 else screen_context
-            self._notify(task_id, {"step": step1.id, "status": "completed"})
-            
-            await asyncio.sleep(0.5)
-            
-            # Step 2: Mini-overseer plans the task
-            step2 = task.add_step("Planning execution steps")
-            step2.status = TaskState.RUNNING
-            step2.started_at = datetime.now()
-            self._notify(task_id, {"step": step2.id, "status": "running", "description": step2.description})
-            
-            if task.state == TaskState.FAILED:
-                return
-            
-            planned_steps = self._plan_with_overseer(task.description, screen_context)
-            
-            if not planned_steps:
-                # Don't launch random text! Fail gracefully instead
-                logger.error("Overseer returned no steps - task is too complex or planning failed")
-                step2.status = TaskState.FAILED
-                step2.completed_at = datetime.now()
-                step2.error = "Could not plan steps for this task. Try a simpler task like 'open notepad' or 'go to google.com'"
-                self._notify(task_id, {"step": step2.id, "status": "failed", "error": step2.error})
-                
+            # Update task status
+            if result.get("status") == "completed":
+                task.state = TaskState.COMPLETED
+                task.result = f"Completed {len(result.get('steps', []))} steps"
+                self._notify(task_id, {"state": "completed", "result": task.result})
+            else:
                 task.state = TaskState.FAILED
-                task.result = "Planning failed - task too complex"
+                task.result = result.get("error", "Unknown error")
                 self._notify(task_id, {"state": "failed", "error": task.result})
-                return
-            
-            step2.status = TaskState.COMPLETED
-            step2.completed_at = datetime.now()
-            step2.result = f"Planned {len(planned_steps)} steps"
-            self._notify(task_id, {"step": step2.id, "status": "completed"})
-            
-            await asyncio.sleep(0.5)
-            
-            # Step 3+: Execute each planned step
-            for i, planned_step in enumerate(planned_steps):
-                if task.state == TaskState.FAILED:
-                    return
                 
-                action = planned_step.get("action", "unknown")
-                reason = planned_step.get("reason", "")
-                
-                step = task.add_step(f"Step {i+1}: {action} - {reason[:50]}")
-                step.status = TaskState.RUNNING
-                step.started_at = datetime.now()
-                self._notify(task_id, {"step": step.id, "status": "running", "description": step.description})
-                
-                try:
-                    result = None
-                    
-                    if action == "launch":
-                        app = planned_step.get("app", planned_step.get("target", ""))
-                        logger.info(f"Launching: {app}")
-                        result = computer_agent.launch_app(app)
-                    
-                    elif action == "click":
-                        target = planned_step.get("target", "")
-                        result = computer_agent.click_element(target)
-                    
-                    elif action == "type":
-                        text = planned_step.get("text", "")
-                        result = computer_agent.type_text(text)
-                    
-                    elif action == "press":
-                        key = planned_step.get("key", "")
-                        # Handle key combinations like "ctrl+t"
-                        if "+" in key:
-                            result = computer_agent.press_key(key)
-                        else:
-                            result = computer_agent.press_key(key)
-                    
-                    elif action == "wait":
-                        wait_time = float(planned_step.get("seconds", 1))
-                        await asyncio.sleep(wait_time)
-                        result = f"Waited {wait_time}s"
-                    
-                    else:
-                        result = f"Unknown action: {action}"
-                    
-                    step.status = TaskState.COMPLETED
-                    step.completed_at = datetime.now()
-                    step.result = str(result) if result else "Done"
-                    self._notify(task_id, {"step": step.id, "status": "completed"})
-                    
-                    # Longer delay for reliability, especially after type/press actions
-                    if action in ["type", "press", "launch"]:
-                        await asyncio.sleep(1.5)
-                    else:
-                        await asyncio.sleep(0.5)
-                    
-                except Exception as e:
-                    step.status = TaskState.FAILED
-                    step.completed_at = datetime.now()
-                    step.error = str(e)
-                    self._notify(task_id, {"step": step.id, "status": "failed", "error": str(e)})
-                    logger.error(f"Step failed: {e}")
-            
-            # Final step: Verify with vision
-            if task.state != TaskState.FAILED:
-                verify_step = task.add_step("Verifying results")
-                verify_step.status = TaskState.RUNNING
-                verify_step.started_at = datetime.now()
-                self._notify(task_id, {"step": verify_step.id, "status": "running", "description": verify_step.description})
-                
-                await asyncio.sleep(1)
-                final_screen = self._see_screen()
-                
-                verify_step.status = TaskState.COMPLETED
-                verify_step.completed_at = datetime.now()
-                verify_step.result = final_screen[:150] + "..." if len(final_screen) > 150 else final_screen
-                self._notify(task_id, {"step": verify_step.id, "status": "completed"})
-            
-            # Mark task complete
-            task.state = TaskState.COMPLETED
-            task.result = f"Completed {len(planned_steps)} steps"
-            self._notify(task_id, {"state": "completed", "result": task.result})
-            
         except Exception as e:
             logger.error(f"ComputerLoop task {task_id} failed: {e}")
             task.state = TaskState.FAILED
             task.result = str(e)
             self._notify(task_id, {"state": "failed", "error": str(e)})
-            
-        except Exception as e:
-            logger.error(f"ComputerLoop task {task_id} failed: {e}")
-            task.state = TaskState.FAILED
-            task.result = str(e)
-            self._notify(task_id, {
-                "state": "failed",
-                "error": str(e)
-            })
     
     async def _get_status(self, task_id: str) -> LoopResult:
         """Get status of a background task."""
@@ -562,6 +450,11 @@ Return ONLY valid JSON, no explanation."""
         task = self._active_tasks.get(task_id)
         if not task:
             return LoopResult.failure(f"Task not found: {task_id}")
+        
+        # Cancel the running agent if exists
+        if task_id in self._agent_loops:
+            self._agent_loops[task_id].cancel()
+            logger.info(f"Cancelled agent loop for task {task_id}")
         
         task.state = TaskState.FAILED
         task.result = "Cancelled by user"

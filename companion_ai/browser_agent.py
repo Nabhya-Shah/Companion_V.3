@@ -17,34 +17,148 @@ logger = logging.getLogger(__name__)
 
 # Lazy import to avoid startup overhead
 _browser = None
+_context = None
 _page = None
 _playwright = None
 
+# Path to store browser data (bookmarks, cookies, etc.)
+import os
+BROWSER_DATA_DIR = os.path.join(os.path.expanduser("~"), ".companion_browser")
+
 
 async def _ensure_browser(headless: bool = False):
-    """Ensure browser is launched and page is ready."""
-    global _browser, _page, _playwright
+    """Ensure browser is launched and page is ready.
     
-    if _browser and _page:
-        return _page
+    1. Tries to connect to EXISTING Chrome on port 9222 (for full user profile).
+    2. Falls back to persistent context at ~/.companion_browser.
+    """
+    global _browser, _context, _page, _playwright
+    
+    if _page:
+        try:
+            # Check if page is still valid
+            await _page.title()
+            return _page
+        except:
+            # Page was closed, need to recreate
+            _page = None
+            _context = None
     
     from playwright.async_api import async_playwright
     
-    _playwright = await async_playwright().start()
-    _browser = await _playwright.chromium.launch(headless=headless)
-    _page = await _browser.new_page()
-    logger.info(f"Browser launched (headless={headless})")
-    return _page
+    if not _playwright:
+        try:
+            _playwright = await async_playwright().start()
+        except:
+            pass # Might be already started in this process
+    
+    # ---------------------------------------------------------
+    # STRATEGY 1: Connect to existing Chrome (Port 9222)
+    # ---------------------------------------------------------
+    # ---------------------------------------------------------
+    # STRATEGY 1: Connect to existing Chrome (Port 9222)
+    # ---------------------------------------------------------
+    if not headless:
+        for i in range(3): # Retry loop in case Chrome is just starting
+            try:
+                logger.info(f"Strategy 1 (Attempt {i+1}/3): Connecting to existing Chrome on http://localhost:9222 ...")
+                browser = await _playwright.chromium.connect_over_cdp("http://localhost:9222", timeout=3000)
+                
+                if browser.contexts:
+                    _context = browser.contexts[0]
+                else:
+                    _context = await browser.new_context()
+                    
+                if _context.pages:
+                    _page = _context.pages[0]
+                else:
+                    _page = await _context.new_page()
+                    
+                logger.info("\u2705 SUCCESS: Connected to existing Chrome instance!")
+                return _page
+            except Exception as e:
+                logger.info(f"Strategy 1 attempt {i+1} failed: {e}")
+                if i < 2: await asyncio.sleep(1.5)
+    
+    logger.info("Strategy 1 failed after retries. proceed to fallback.")
+
+    # ---------------------------------------------------------
+    # STRATEGY 2: Launch User's REAL Chrome (if closed)
+    # ---------------------------------------------------------
+    # Try to launch the actual Chrome binary with the real user profile
+    try:
+        if not headless:
+            import os
+            local_app_data = os.environ.get('LOCALAPPDATA', '')
+            real_user_data = os.path.join(local_app_data, r"Google\Chrome\User Data")
+            chrome_exe = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+            
+            if os.path.exists(real_user_data) and os.path.exists(chrome_exe):
+                logger.info("Strategy 2: Attempting to launch REAL Chrome profile...")
+                
+                # We try to launch it exposing the debugging port, so we can reconnect later
+                _context = await _playwright.chromium.launch_persistent_context(
+                    user_data_dir=real_user_data,
+                    executable_path=chrome_exe,
+                    headless=False,
+                    viewport={"width": 1280, "height": 800},
+                    args=[
+                        "--remote-debugging-port=9222", # Enable it for next time!
+                        "--disable-blink-features=AutomationControlled"
+                    ]
+                )
+                
+                if _context.pages:
+                    _page = _context.pages[0]
+                else:
+                    _page = await _context.new_page()
+                    
+                logger.info("\u2705 SUCCESS: Launched REAL Chrome profile!")
+                return _page
+    except Exception as e:
+        # This usually fails if Chrome is ALREADY OPEN (SingletonLock)
+        logger.info(f"Strategy 2 failed (Profile likely locked/open): {e}")
+
+    # ---------------------------------------------------------
+    # STRATEGY 3: Launch dedicated persistent context (Fallback)
+    # ---------------------------------------------------------
+    # This saves cookies in ~/.companion_browser
+    
+    try:
+        logger.info("Strategy 3: Launching isolated browser profile...")
+        _context = await _playwright.chromium.launch_persistent_context(
+            user_data_dir=BROWSER_DATA_DIR,
+            headless=headless,
+            viewport={"width": 1280, "height": 800},
+            args=[
+                "--disable-blink-features=AutomationControlled",  # Less detectable
+            ]
+        )
+        
+        # Get existing page or create new one
+        if _context.pages:
+            _page = _context.pages[0]
+        else:
+            _page = await _context.new_page()
+        
+        logger.info(f"Browser launched with persistent profile at {BROWSER_DATA_DIR}")
+        return _page
+    except Exception as e:
+        logger.error(f"Failed to launch browser: {e}")
+        raise
 
 
 async def close_browser():
     """Close the browser and cleanup."""
-    global _browser, _page, _playwright
+    global _browser, _context, _page, _playwright
     
+    if _context:
+        await _context.close()
+        _context = None
+        _page = None
     if _browser:
         await _browser.close()
         _browser = None
-        _page = None
     if _playwright:
         await _playwright.stop()
         _playwright = None
@@ -220,20 +334,49 @@ async def press_key(key: str) -> str:
 
 
 # Synchronous wrappers for tool integration
-# Using new event loop pattern to avoid "no running event loop" errors
+# Synchronous wrappers for tool integration
+# Using a dedicated background thread with persistent event loop
+# This is CRITICAL for keeping the browser open and the Playwright objects valid across calls
+_agent_loop = None
+_loop_thread = None
+
+def _start_loop_thread():
+    """Worker thread that runs the persistent event loop."""
+    global _agent_loop
+    import asyncio
+    
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    _agent_loop = loop
+    
+    logger.info("Browser Agent background loop started")
+    loop.run_forever()
+
+def _ensure_monitor():
+    """Ensure the background loop thread is running."""
+    global _loop_thread, _agent_loop
+    import threading
+    import time
+    
+    if not _loop_thread or not _loop_thread.is_alive():
+        _loop_thread = threading.Thread(target=_start_loop_thread, daemon=True)
+        _loop_thread.start()
+        
+        # Wait for loop to be initialized
+        start = time.time()
+        while _agent_loop is None:
+            if time.time() - start > 5:
+                raise RuntimeError("Failed to start browser background loop")
+            time.sleep(0.05)
+
 def _run_async(coro):
-    """Run async coroutine in a new event loop (safe for sync callers)."""
-    try:
-        loop = asyncio.get_running_loop()
-        # Already in async context - this shouldn't happen in sync tool calls
-        # but handle it gracefully
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            future = pool.submit(asyncio.run, coro)
-            return future.result()
-    except RuntimeError:
-        # No running loop - create one (normal case for sync tool calls)
-        return asyncio.run(coro)
+    """Run async coroutine in the persistent background loop."""
+    _ensure_monitor()
+    import asyncio
+    
+    # Submit coroutine to the background loop
+    future = asyncio.run_coroutine_threadsafe(coro, _agent_loop)
+    return future.result()
 
 def sync_goto(url: str) -> str:
     """Sync wrapper for goto."""

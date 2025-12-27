@@ -36,7 +36,11 @@ and return the result. Be precise and concise."""
         super().__init__(config)
     
     def _get_supported_operations(self) -> List[str]:
-        return ["get_time", "calculate", "web_search", "wikipedia", "brain_read", "brain_list"]
+        return [
+            "get_time", "calculate", "web_search", "wikipedia", "brain_read", "brain_list",
+            "browser_goto", "browser_click", "browser_type", "browser_read", "browser_press",
+            "add_bookmark", "open_bookmark", "enable_browser_control"
+        ]
     
     async def execute(self, task: Dict[str, Any]) -> LoopResult:
         """Execute a tool task.
@@ -57,6 +61,22 @@ and return the result. Be precise and concise."""
             return await self._calculate(task.get("expression", ""))
         elif operation == "web_search":
             return await self._web_search(task.get("query", ""))
+        elif operation == "add_bookmark":
+            return await self._add_bookmark(task.get("name", ""), task.get("url", ""))
+        elif operation == "open_bookmark":
+            return await self._open_bookmark(task.get("name", ""))
+        elif operation == "enable_browser_control":
+            return await self._enable_browser_control()
+        elif operation == "browser_goto":
+            return await self._browser_tool("browser_goto", {"url": task.get("url", "")})
+        elif operation == "browser_click":
+            return await self._browser_tool("browser_click", {"selector": task.get("selector", ""), "text": task.get("text", "")})
+        elif operation == "browser_type":
+            return await self._browser_tool("browser_type", {"selector": task.get("selector", ""), "text": task.get("text", "")})
+        elif operation == "browser_read":
+            return await self._browser_tool("browser_read", {"selector": task.get("selector", "")})
+        elif operation == "browser_press":
+            return await self._browser_tool("browser_press", {"key": task.get("key", "")})
         elif operation == "wikipedia":
             return await self._wikipedia(task.get("topic", ""))
         elif operation == "brain_read":
@@ -184,3 +204,105 @@ and return the result. Be precise and concise."""
         except Exception as e:
             logger.error(f"Brain list failed: {e}")
             return LoopResult.failure(str(e))
+
+    async def _browser_tool(self, tool_name: str, args: Dict) -> LoopResult:
+        """Execute a browser tool."""
+        try:
+            from companion_ai.tools import execute_function_call
+            
+            result = execute_function_call(tool_name, args)
+            
+            return LoopResult.success(
+                data={"result": result, "args": args},
+                operation=tool_name
+            )
+        except Exception as e:
+            logger.error(f"Browser tool {tool_name} failed: {e}")
+            return LoopResult.failure(f"{tool_name} failed: {str(e)}")
+
+    async def _add_bookmark(self, name: str, url: str) -> LoopResult:
+        """Save a bookmark to the brain."""
+        try:
+            from companion_ai.tools import tool_brain_read, tool_brain_write
+            import json
+            
+            # Read existing
+            try:
+                content = tool_brain_read("bookmarks.json")
+                bookmarks = json.loads(content) if content else {}
+            except:
+                bookmarks = {}
+            
+            # Update
+            bookmarks[name.lower()] = url
+            
+            # Write back
+            tool_brain_write("bookmarks.json", json.dumps(bookmarks, indent=2), overwrite=True)
+            
+            return LoopResult.success(
+                data={"name": name, "url": url, "message": "Bookmark saved."},
+                operation="add_bookmark"
+            )
+        except Exception as e:
+            return LoopResult.failure(f"Failed to save bookmark: {e}")
+
+    async def _open_bookmark(self, name: str) -> LoopResult:
+        """Open a bookmark from the brain."""
+        try:
+            from companion_ai.tools import tool_brain_read
+            import json
+            
+            try:
+                content = tool_brain_read("bookmarks.json")
+                bookmarks = json.loads(content)
+            except:
+                return LoopResult.failure("No bookmarks file found in brain.")
+            
+            # Fuzzy match
+            target = name.lower()
+            url = bookmarks.get(target)
+            
+            if not url:
+                # Try partial match
+                for k, v in bookmarks.items():
+                    if target in k or k in target:
+                        url = v
+                        break
+            
+            if not url:
+                return LoopResult.failure(f"Bookmark '{name}' not found. Available: {list(bookmarks.keys())}")
+                
+            # Navigate
+            return await self._browser_tool("browser_goto", {"url": url})
+            
+        except Exception as e:
+            return LoopResult.failure(f"Failed to open bookmark: {e}")
+
+    async def _enable_browser_control(self) -> LoopResult:
+        """Restart Chrome in debug mode."""
+        try:
+            import subprocess
+            import os
+            
+            logger.info("Killing Chrome processes...")
+            # Kill Chrome
+            subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"], capture_output=True)
+            
+            # Launch
+            chrome_path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+            local_app_data = os.environ.get('LOCALAPPDATA', '')
+            user_data = os.path.join(local_app_data, r"Google\Chrome\User Data")
+            
+            if not os.path.exists(chrome_path):
+                return LoopResult.failure("Chrome executable not found at standard location.")
+            
+            logger.info("Launching Chrome with debug flag...")
+            subprocess.Popen([
+                chrome_path,
+                "--remote-debugging-port=9222",
+                f"--user-data-dir={user_data}"
+            ])
+            
+            return LoopResult.success("Chrome restarted in AI Mode! You can now use 'Go to...' commands with your profile.", "enable_browser_control")
+        except Exception as e:
+            return LoopResult.failure(f"Failed to enable browser control: {e}")
