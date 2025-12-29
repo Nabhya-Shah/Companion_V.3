@@ -68,7 +68,29 @@ and return the result. Be precise and concise."""
         elif operation == "enable_browser_control":
             return await self._enable_browser_control()
         elif operation == "browser_goto":
-            return await self._browser_tool("browser_goto", {"url": task.get("url", "")})
+            url = task.get("url", "")
+            # Smart bookmark check: if URL looks like a name, check bookmarks first
+            if url and "." not in url and "://" not in url:
+                bookmark_result = await self._open_bookmark(url)
+                if bookmark_result.status == LoopStatus.SUCCESS:
+                    return bookmark_result
+            # Also check if the domain matches a bookmark name (e.g., "bromcom.com" matches bookmark "bromcom")
+            elif url:
+                try:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(url if "://" in url else f"https://{url}")
+                    domain = parsed.netloc or parsed.path
+                    # Extract first part of domain (e.g., "bromcom" from "bromcom.com")
+                    domain_parts = domain.replace("www.", "").split(".")
+                    if domain_parts:
+                        potential_name = domain_parts[0].lower()
+                        bookmark_result = await self._open_bookmark(potential_name)
+                        if bookmark_result.status == LoopStatus.SUCCESS:
+                            logger.info(f"📚 Using bookmark '{potential_name}' instead of guessed URL")
+                            return bookmark_result
+                except Exception:
+                    pass
+            return await self._browser_tool("browser_goto", {"url": url})
         elif operation == "browser_click":
             return await self._browser_tool("browser_click", {"selector": task.get("selector", ""), "text": task.get("text", "")})
         elif operation == "browser_type":
@@ -274,21 +296,28 @@ and return the result. Be precise and concise."""
                 
             # Navigate
             return await self._browser_tool("browser_goto", {"url": url})
-            
         except Exception as e:
             return LoopResult.failure(f"Failed to open bookmark: {e}")
 
     async def _enable_browser_control(self) -> LoopResult:
-        """Restart Chrome in debug mode."""
+        """Restart Chrome in debug mode and reset browser agent to reconnect."""
         try:
             import subprocess
             import os
+            import time
+            import socket
             
+            # STEP 1: Reset Playwright state (discard isolated browser)
+            logger.info("Resetting browser agent state...")
+            from companion_ai.browser_agent import sync_reset
+            sync_reset()
+            
+            # STEP 2: Kill Chrome
             logger.info("Killing Chrome processes...")
-            # Kill Chrome
             subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"], capture_output=True)
+            time.sleep(2)  # Wait for Chrome to fully close
             
-            # Launch
+            # STEP 3: Launch Chrome with debug flag
             chrome_path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
             local_app_data = os.environ.get('LOCALAPPDATA', '')
             user_data = os.path.join(local_app_data, r"Google\Chrome\User Data")
@@ -303,6 +332,23 @@ and return the result. Be precise and concise."""
                 f"--user-data-dir={user_data}"
             ])
             
-            return LoopResult.success("Chrome restarted in AI Mode! You can now use 'Go to...' commands with your profile.", "enable_browser_control")
+            # STEP 4: Wait for port 9222 to become available
+            logger.info("Waiting for Chrome to start on port 9222...")
+            for i in range(10):
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    result = sock.connect_ex(('127.0.0.1', 9222))
+                    sock.close()
+                    if result == 0:
+                        logger.info(f"Port 9222 available after {i+1} attempts")
+                        break
+                except:
+                    pass
+                time.sleep(0.5)
+            
+            return LoopResult.success(
+                "Chrome restarted in AI Mode! Browser agent will now use YOUR Chrome with all your logins and bookmarks.",
+                operation="enable_browser_control"
+            )
         except Exception as e:
             return LoopResult.failure(f"Failed to enable browser control: {e}")

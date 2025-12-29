@@ -132,6 +132,12 @@ For delegating to tools loop (time, math, simple lookups):
 {{"action": "delegate", "loop": "tools", "task": {{"operation": "brain_list", "subdir": ""}}}}
 {{"action": "delegate", "loop": "tools", "task": {{"operation": "brain_read", "path": "notes/file.md"}}}}
 
+For browser automation (ALWAYS include url/text/selector as appropriate):
+{{"action": "delegate", "loop": "tools", "task": {{"operation": "browser_goto", "url": "youtube.com"}}}}
+{{"action": "delegate", "loop": "tools", "task": {{"operation": "browser_click", "text": "Sign in"}}}}
+{{"action": "delegate", "loop": "tools", "task": {{"operation": "browser_click", "selector": "#login-button"}}}}
+{{"action": "delegate", "loop": "tools", "task": {{"operation": "browser_type", "selector": "input[name=email]", "text": "user@example.com"}}}}
+
 For delegating to memory loop (recalling user facts):
 {{"action": "delegate", "loop": "memory", "task": {{"operation": "search", "query": "user name"}}}}
 

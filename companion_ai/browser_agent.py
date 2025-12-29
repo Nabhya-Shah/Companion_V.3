@@ -29,123 +29,68 @@ BROWSER_DATA_DIR = os.path.join(os.path.expanduser("~"), ".companion_browser")
 async def _ensure_browser(headless: bool = False):
     """Ensure browser is launched and page is ready.
     
-    1. Tries to connect to EXISTING Chrome on port 9222 (for full user profile).
-    2. Falls back to persistent context at ~/.companion_browser.
+    Strategy: Launch Chrome with user's REAL profile via Playwright.
+    - Automatically closes existing Chrome (to release profile lock)
+    - Uses launch_persistent_context for direct control
+    - User gets all their logins, bookmarks, extensions
+    - Chrome's "Restore pages" feature preserves tabs on restart
     """
     global _browser, _context, _page, _playwright
     
+    # Check if we already have a valid page
     if _page:
         try:
-            # Check if page is still valid
             await _page.title()
             return _page
         except:
             # Page was closed, need to recreate
             _page = None
             _context = None
+            _browser = None
     
     from playwright.async_api import async_playwright
+    import os
     
     if not _playwright:
         try:
             _playwright = await async_playwright().start()
         except:
-            pass # Might be already started in this process
+            pass
     
-    # ---------------------------------------------------------
-    # STRATEGY 1: Connect to existing Chrome (Port 9222)
-    # ---------------------------------------------------------
-    # ---------------------------------------------------------
-    # STRATEGY 1: Connect to existing Chrome (Port 9222)
-    # ---------------------------------------------------------
-    if not headless:
-        for i in range(3): # Retry loop in case Chrome is just starting
-            try:
-                logger.info(f"Strategy 1 (Attempt {i+1}/3): Connecting to existing Chrome on http://localhost:9222 ...")
-                browser = await _playwright.chromium.connect_over_cdp("http://localhost:9222", timeout=3000)
-                
-                if browser.contexts:
-                    _context = browser.contexts[0]
-                else:
-                    _context = await browser.new_context()
-                    
-                if _context.pages:
-                    _page = _context.pages[0]
-                else:
-                    _page = await _context.new_page()
-                    
-                logger.info("\u2705 SUCCESS: Connected to existing Chrome instance!")
-                return _page
-            except Exception as e:
-                logger.info(f"Strategy 1 attempt {i+1} failed: {e}")
-                if i < 2: await asyncio.sleep(1.5)
+    # Use dedicated AI profile (avoids Chrome's remote debugging restriction)
+    ai_profile_dir = os.path.join(os.path.expanduser("~"), ".companion_chrome")
+    chrome_exe = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
     
-    logger.info("Strategy 1 failed after retries. proceed to fallback.")
-
-    # ---------------------------------------------------------
-    # STRATEGY 2: Launch User's REAL Chrome (if closed)
-    # ---------------------------------------------------------
-    # Try to launch the actual Chrome binary with the real user profile
+    if not os.path.exists(chrome_exe):
+        raise Exception("Chrome not found. Please install Chrome.")
+    
+    # Launch Chrome with AI profile
+    logger.info("Launching Chrome with AI profile...")
     try:
-        if not headless:
-            import os
-            local_app_data = os.environ.get('LOCALAPPDATA', '')
-            real_user_data = os.path.join(local_app_data, r"Google\Chrome\User Data")
-            chrome_exe = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-            
-            if os.path.exists(real_user_data) and os.path.exists(chrome_exe):
-                logger.info("Strategy 2: Attempting to launch REAL Chrome profile...")
-                
-                # We try to launch it exposing the debugging port, so we can reconnect later
-                _context = await _playwright.chromium.launch_persistent_context(
-                    user_data_dir=real_user_data,
-                    executable_path=chrome_exe,
-                    headless=False,
-                    viewport={"width": 1280, "height": 800},
-                    args=[
-                        "--remote-debugging-port=9222", # Enable it for next time!
-                        "--disable-blink-features=AutomationControlled"
-                    ]
-                )
-                
-                if _context.pages:
-                    _page = _context.pages[0]
-                else:
-                    _page = await _context.new_page()
-                    
-                logger.info("\u2705 SUCCESS: Launched REAL Chrome profile!")
-                return _page
-    except Exception as e:
-        # This usually fails if Chrome is ALREADY OPEN (SingletonLock)
-        logger.info(f"Strategy 2 failed (Profile likely locked/open): {e}")
-
-    # ---------------------------------------------------------
-    # STRATEGY 3: Launch dedicated persistent context (Fallback)
-    # ---------------------------------------------------------
-    # This saves cookies in ~/.companion_browser
-    
-    try:
-        logger.info("Strategy 3: Launching isolated browser profile...")
         _context = await _playwright.chromium.launch_persistent_context(
-            user_data_dir=BROWSER_DATA_DIR,
+            user_data_dir=ai_profile_dir,
+            executable_path=chrome_exe,
             headless=headless,
-            viewport={"width": 1280, "height": 800},
+            viewport={"width": 1280, "height": 900},
             args=[
-                "--disable-blink-features=AutomationControlled",  # Less detectable
+                "--disable-blink-features=AutomationControlled",
+                "--no-first-run",
+                "--no-default-browser-check",
             ]
         )
         
-        # Get existing page or create new one
+        # Get existing page or create one
         if _context.pages:
             _page = _context.pages[0]
         else:
             _page = await _context.new_page()
         
-        logger.info(f"Browser launched with persistent profile at {BROWSER_DATA_DIR}")
+        logger.info("✅ Chrome launched! Logins will persist in AI profile.")
         return _page
+        
     except Exception as e:
-        logger.error(f"Failed to launch browser: {e}")
-        raise
+        logger.error(f"Failed to launch Chrome: {e}")
+        raise Exception(f"Could not launch Chrome with your profile: {e}")
 
 
 async def close_browser():
@@ -163,6 +108,35 @@ async def close_browser():
         await _playwright.stop()
         _playwright = None
     logger.info("Browser closed")
+
+
+async def reset_browser():
+    """Reset browser state to force reconnection on next operation.
+    
+    This is called by enable_browser_control to discard the isolated
+    Playwright instance and reconnect to the user's real Chrome.
+    """
+    global _browser, _context, _page, _playwright
+    
+    logger.info("Resetting browser state for reconnection...")
+    
+    # Close existing connections without stopping playwright
+    if _context:
+        try:
+            await _context.close()
+        except:
+            pass
+        _context = None
+        _page = None
+    if _browser:
+        try:
+            await _browser.close()
+        except:
+            pass
+        _browser = None
+    
+    # Keep _playwright alive for reuse, just clear session state
+    logger.info("Browser state reset. Next operation will reconnect.")
 
 
 async def goto(url: str, wait: bool = True) -> str:
@@ -406,6 +380,11 @@ def sync_close() -> str:
     """Sync wrapper for close_browser."""
     _run_async(close_browser())
     return "Browser closed"
+
+def sync_reset():
+    """Sync wrapper for reset_browser - used by enable_browser_control."""
+    _run_async(reset_browser())
+    return "Browser state reset"
 
 
 # Test function
