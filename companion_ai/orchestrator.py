@@ -138,8 +138,10 @@ For browser automation (ALWAYS include url/text/selector as appropriate):
 {{"action": "delegate", "loop": "tools", "task": {{"operation": "browser_click", "selector": "#login-button"}}}}
 {{"action": "delegate", "loop": "tools", "task": {{"operation": "browser_type", "selector": "input[name=email]", "text": "user@example.com"}}}}
 
-For delegating to memory loop (recalling user facts):
+For delegating to memory loop (saving/recalling user facts):
 {{"action": "delegate", "loop": "memory", "task": {{"operation": "search", "query": "user name"}}}}
+{{"action": "delegate", "loop": "memory", "task": {{"operation": "save", "fact": "User prefers dark mode"}}}}
+{{"action": "delegate", "loop": "memory", "task": {{"operation": "delete", "query": "dark mode preference"}}}}
 
 For delegating to vision loop (looking at screen):
 {{"action": "delegate", "loop": "vision", "task": {{"operation": "describe"}}}}
@@ -149,14 +151,22 @@ For background tasks (long-running automation only):
 {{"action": "background", "loop": "computer", "task": {{"operation": "execute", "task": "..."}}}}
 
 ## IMPORTANT Routing Rules
-## MEMORY & PERSONALIZATION:
-- "Remember that X", "Memorize this" → DELEGATE to memory loop (mem0_add)
-- "I prefer X", "My favorite Y is Z", "I am [Context]" → DELEGATE to memory loop (mem0_add)
-- "What do you know about me?", "Who am I?" → DELEGATE to memory loop (mem0_get)
-- "Forget that X" → DELEGATE to memory loop (mem0_delete)
-- "What time is it?" → DELEGATE to tools loop with get_time (NOT background!)
-- "What's 2+2?" → DELEGATE to tools loop with calculate
-- "What's my name?" → DELEGATE to memory loop
+
+## MEMORY & BRAIN (uses local model):
+- "Remember that X", "Save this fact" → DELEGATE to memory loop (operation: "save", fact: "...")
+- "I prefer X", "My name is Y" → DELEGATE to memory loop (operation: "save", fact: "User prefers/is...")
+- "What do you know about me?", "What's my name?" → DELEGATE to memory loop (operation: "search", query: "...")
+- "What was the last thing you saved?" → DELEGATE to memory loop (operation: "search", query: "recent")
+- "Forget that X" → DELEGATE to memory loop (operation: "delete", query: "...")
+
+## BRAIN FILES (direct access):
+- "What bookmarks do I have?" → DELEGATE to tools loop (operation: "brain_read", path: "browser/bookmarks.md")
+- "What are my preferences?" → DELEGATE to tools loop (operation: "brain_read", path: "memories/preferences.md")
+- "Show me the brain files" → DELEGATE to tools loop (operation: "brain_list")
+
+## TOOLS:
+- "What time is it?" → DELEGATE to tools loop (operation: "get_time")
+- "What's 2+2?" → DELEGATE to tools loop (operation: "calculate", expression: "2+2")
 - "Look at my screen" → DELEGATE to vision loop
 - "Hi", "Hello", questions about general topics → ANSWER directly
 

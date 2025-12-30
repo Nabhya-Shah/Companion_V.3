@@ -4,38 +4,55 @@ Brain Manager - Model-controlled persistent memory.
 The brain folder allows the AI to:
 1. Write and update its own personality notes
 2. Store learned rules and preferences
-3. Maintain a scratchpad for multi-turn reasoning
-4. Keep track of user context
+3. Keep track of user context and preferences
+4. Maintain bookmarks and browser-related memory
 
 Structure:
-  data/companion_brain/
-  ├── system/          (read-only, safety rules)
+  C:\Main Folder\BRAIN\
+  ├── system/          (read-only, human-edited)
   │   └── core_rules.md
   ├── memories/        (persistent facts)
+  │   ├── preferences.md
   │   ├── user_context.md
-  │   └── personality.md
-  └── training/        (learning data)
-      └── scratchpad.md
+  │   └── facts/
+  ├── browser/         (browser-related)
+  │   ├── bookmarks.md
+  │   └── logins.md
+  ├── notes/           (scratchpad)
+  ├── learned/         (growth)
+  │   └── corrections.md
+  └── logs/            (session history)
 """
 
 import os
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# Base path for brain folder
-BRAIN_BASE = Path(__file__).parent.parent / "data" / "companion_brain"
+# Base path for brain folder (in project directory for development)
+BRAIN_BASE = Path(__file__).parent.parent / "BRAIN"
 
 # Safety limits
 MAX_FILE_SIZE = 100 * 1024  # 100KB per file
-MAX_FILES = 50
-MAX_TOTAL_SIZE = 5 * 1024 * 1024  # 5MB total
+MAX_FILES = 100
+MAX_TOTAL_SIZE = 10 * 1024 * 1024  # 10MB total
 
 # Protected paths (read-only)
-PROTECTED_PATHS = {"system", "system/core_rules.md"}
+PROTECTED_PATHS = {"system", "system/core_rules.md", "system/config.md"}
+
+# File descriptions for the Brain Map
+FILE_DESCRIPTIONS = {
+    "system/core_rules.md": "Core rules and permissions (READ-ONLY)",
+    "memories/preferences.md": "User likes/dislikes (READ/WRITE)",
+    "memories/user_context.md": "Who the user is (READ/WRITE)",
+    "browser/bookmarks.md": "Saved websites (READ/APPEND)",
+    "browser/logins.md": "Login tips/hints (READ/WRITE)",
+    "learned/corrections.md": "Past errors to avoid (READ/APPEND)",
+    "notes/": "Scratchpad for temporary notes (READ/WRITE)",
+}
 
 
 class BrainManager:
@@ -51,7 +68,8 @@ class BrainManager:
     
     def _ensure_structure(self):
         """Create brain folder structure if it doesn't exist."""
-        for subdir in ["memories", "training", "system"]:
+        subdirs = ["system", "memories", "memories/facts", "browser", "notes", "learned", "logs"]
+        for subdir in subdirs:
             (self.base_path / subdir).mkdir(parents=True, exist_ok=True)
     
     def _validate_path(self, relative_path: str, write: bool = False) -> Path:
@@ -215,30 +233,50 @@ class BrainManager:
             logger.error(f"Brain delete error: {e}")
             return False
     
-    def get_context(self) -> str:
+    def get_file_map(self) -> str:
         """
-        Get all brain context for injection into system prompt.
+        Get a map of brain files for injection into system prompt.
+        
+        This tells the AI what files exist without loading their content.
         
         Returns:
-            Formatted context string
+            Formatted file map string
+        """
+        lines = ["## Brain Map (available files)"]
+        
+        for file_path, description in FILE_DESCRIPTIONS.items():
+            full_path = self.base_path / file_path
+            exists = full_path.exists() if not file_path.endswith('/') else full_path.is_dir()
+            status = "✓" if exists else "○"
+            lines.append(f"- {status} `{file_path}`: {description}")
+        
+        return "\n".join(lines)
+    
+    def get_context(self) -> str:
+        """
+        Get core brain context for injection into system prompt.
+        
+        Uses TIERED approach:
+        - Tier 1 (here): Core rules only (small, always present)
+        - Tier 2: Dynamic RAG via memory search (on demand)
+        - Tier 3: Heavy processing via local loop (delegated)
+        
+        Returns:
+            Formatted context string (minimal, just essentials)
         """
         context_parts = []
         
-        # Read key files
-        key_files = [
-            ("memories/personality.md", "PERSONALITY"),
-            ("memories/user_context.md", "USER CONTEXT"),
-            ("training/learned_rules.md", "LEARNED RULES"),
-        ]
+        # TIER 1: Core rules only (always loaded, small)
+        core_rules = self.read("system/core_rules.md")
+        if core_rules:
+            # Strip comments
+            lines = [l for l in core_rules.split("\n") if not l.strip().startswith("<!--")]
+            clean = "\n".join(lines).strip()
+            if clean:
+                context_parts.append(f"[CORE RULES]\n{clean}")
         
-        for file_path, label in key_files:
-            content = self.read(file_path)
-            if content:
-                # Strip HTML comments and clean up
-                lines = [l for l in content.split("\n") if not l.strip().startswith("<!--")]
-                clean = "\n".join(lines).strip()
-                if clean:
-                    context_parts.append(f"[{label}]\n{clean}")
+        # Add file map so AI knows what's available
+        context_parts.append(self.get_file_map())
         
         return "\n\n".join(context_parts)
 
@@ -284,3 +322,9 @@ def brain_list(subdir: str = "") -> str:
 def get_brain_context() -> str:
     """Get brain context for system prompt."""
     return get_brain().get_context()
+
+
+def get_brain_file_map() -> str:
+    """Get brain file map for system prompt."""
+    return get_brain().get_file_map()
+

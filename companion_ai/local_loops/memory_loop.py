@@ -58,7 +58,7 @@ relevant memories from the provided list. Return the indices of relevant memorie
         logger.info(f"MemoryLoop configured with endpoint: {self._model_endpoint}")
     
     def _get_supported_operations(self) -> List[str]:
-        return ["search", "extract", "save"]
+        return ["search", "extract", "save", "delete"]
     
     async def execute(self, task: Dict[str, Any]) -> LoopResult:
         """Execute a memory task.
@@ -67,6 +67,7 @@ relevant memories from the provided list. Return the indices of relevant memorie
             {"operation": "search", "query": "user's name"}
             {"operation": "extract", "text": "conversation text..."}
             {"operation": "save", "fact": "User's name is Bob"}
+            {"operation": "delete", "query": "fact to forget"}
         """
         operation = task.get("operation")
         
@@ -76,6 +77,8 @@ relevant memories from the provided list. Return the indices of relevant memorie
             return await self._extract(task.get("text", ""))
         elif operation == "save":
             return await self._save(task.get("fact", ""))
+        elif operation == "delete":
+            return await self._delete(task.get("query", ""))
         else:
             return LoopResult.failure(f"Unknown operation: {operation}")
     
@@ -169,7 +172,11 @@ relevant memories from the provided list. Return the indices of relevant memorie
             return LoopResult.failure(str(e))
     
     async def _save(self, fact: str) -> LoopResult:
-        """Save a fact to memory.
+        """Save a fact to memory - DUAL STORAGE.
+        
+        Writes to:
+        1. Mem0 (vector database for semantic search)
+        2. Brain folder (readable markdown files)
         
         Called by 120B after it decides something is worth saving.
         """
@@ -179,20 +186,70 @@ relevant memories from the provided list. Return the indices of relevant memorie
         try:
             from companion_ai import memory_v2
             from companion_ai.core import config as core_config
+            from companion_ai.brain_manager import get_brain
+            from datetime import datetime
             
-            # Add to Mem0
-            result = memory_v2.add_memory(
-                text=fact,
+            # 1. Add to Mem0 (for vector search)
+            messages = [{"role": "user", "content": fact}]
+            mem0_result = memory_v2.add_memory(
+                messages=messages,
                 user_id=core_config.MEM0_USER_ID,
-                metadata={"source": "120b_decision"}
+                metadata={"source": "brain_save"}
             )
             
-            logger.info(f"Saved fact via MemoryLoop: {fact[:50]}...")
+            # 2. Add to Brain folder (for readable storage)
+            brain = get_brain()
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+            
+            # Append to memories/facts.md (create if needed)
+            fact_entry = f"- [{timestamp}] {fact}\n"
+            brain.write("memories/facts.md", fact_entry, append=True)
+            
+            logger.info(f"Saved fact to BOTH Mem0 and brain: {fact[:50]}...")
             
             return LoopResult.success(
-                data={"saved": True, "fact": fact},
+                data={"saved": True, "fact": fact, "mem0": mem0_result, "brain": "memories/facts.md"},
                 operation="save"
             )
         except Exception as e:
             logger.error(f"Memory save failed: {e}")
+            return LoopResult.failure(str(e))
+    
+    async def _delete(self, query: str) -> LoopResult:
+        """Delete/forget a memory matching the query.
+        
+        Searches for matching memories and removes them.
+        """
+        if not query:
+            return LoopResult.failure("No query provided for deletion")
+        
+        try:
+            from companion_ai import memory_v2
+            from companion_ai.core import config as core_config
+            
+            # First search for matching memories
+            results = memory_v2.search_memories(query, user_id=core_config.MEM0_USER_ID, limit=3)
+            
+            if not results:
+                return LoopResult.success(
+                    data={"deleted": 0, "message": f"No memories found matching: {query}"},
+                    operation="delete"
+                )
+            
+            # Delete matching memories
+            deleted_count = 0
+            for mem in results:
+                mem_id = mem.get("id")
+                if mem_id:
+                    memory_v2.delete_memory(mem_id)
+                    deleted_count += 1
+            
+            logger.info(f"Deleted {deleted_count} memories matching: {query}")
+            
+            return LoopResult.success(
+                data={"deleted": deleted_count, "query": query},
+                operation="delete"
+            )
+        except Exception as e:
+            logger.error(f"Memory delete failed: {e}")
             return LoopResult.failure(str(e))

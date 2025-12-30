@@ -17,10 +17,11 @@ __pycache__/
 # Runtime data & logs - may contain personal conversations
 data/
 !data/.gitkeep
-!data/companion_brain/
-data/companion_brain/*
-!data/companion_brain/system/
-!data/companion_brain/system/core_rules.md
+
+# Brain folder - contains personal memories
+BRAIN/
+!BRAIN/system/
+!BRAIN/system/core_rules.md
 
 # Memory exports - contain personal data
 memory_export_*.txt

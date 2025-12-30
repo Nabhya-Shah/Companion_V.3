@@ -95,7 +95,40 @@ def shutdown():
     if not core_config.require_auth(token):
         return jsonify({'error': 'Unauthorized'}), 401
         
-    logger.info("🛑 Shutdown requested. Triggering persona evolution...")
+    logger.info("🛑 Shutdown requested. Saving session log and triggering persona evolution...")
+    
+    # Save session log to brain folder
+    try:
+        from companion_ai.brain_manager import get_brain
+        brain = get_brain()
+        
+        # Build session summary
+        session_date = datetime.now().strftime("%Y-%m-%d")
+        session_time = datetime.now().strftime("%H:%M")
+        
+        # Get conversation summary
+        history = conversation_session.conversation_history
+        msg_count = len(history)
+        
+        # Build log entry
+        log_content = f"# Session Log - {session_date} {session_time}\n\n"
+        log_content += f"**Messages:** {msg_count}\n\n"
+        
+        if history:
+            log_content += "## Conversation Summary\n\n"
+            # Just save last 10 exchanges as summary
+            for msg in history[-10:]:
+                role = msg.get('role', 'unknown')
+                content = msg.get('content', '')[:200]  # Truncate long messages
+                log_content += f"- **{role}**: {content}...\n" if len(msg.get('content', '')) > 200 else f"- **{role}**: {content}\n"
+        
+        # Write to logs folder
+        log_file = f"logs/session_{session_date}.md"
+        brain.write(log_file, log_content + "\n---\n\n", append=True)
+        logger.info(f"📝 Session log saved: {log_file}")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to save session log: {e}")
     
     # Trigger Persona Evolution (Synchronous to ensure completion)
     try:

@@ -1,4 +1,4 @@
-"""Memory V2 - Mem0 Integration with Groq Backend.
+"""Memory V2 - Mem0 Integration with Ollama Backend.
 
 Provides a hybrid memory system that:
 1. Auto-retrieves relevant memories for context
@@ -6,7 +6,7 @@ Provides a hybrid memory system that:
 3. Provides memory_search tool for deep digs
 4. Stores new facts from conversations
 
-Uses Groq as LLM backend (no extra API key needed).
+Uses local Ollama as LLM backend (no cloud API needed for memory operations).
 """
 from __future__ import annotations
 import os
@@ -19,11 +19,13 @@ from companion_ai.core import config as core_config
 
 logger = logging.getLogger(__name__)
 
-# Primary / fallback Mem0 LLMs (override with MEM0_LLM_MODEL / MEM0_FALLBACK_LLM_MODEL env vars)
-# Use a supported model by default to avoid decommission errors.
-PRIMARY_MEM0_LLM = os.getenv("MEM0_LLM_MODEL", "llama-3.1-8b-instant")
-FALLBACK_MEM0_LLM = os.getenv("MEM0_FALLBACK_LLM_MODEL", PRIMARY_MEM0_LLM)
-ACTIVE_MEM0_LLM = PRIMARY_MEM0_LLM
+# Ollama model for memory operations (local, fast, private)
+OLLAMA_MEM0_MODEL = os.getenv("OLLAMA_MEM0_MODEL", "qwen3:14b")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+
+# Fallback to Groq if Ollama not available
+USE_OLLAMA = os.getenv("MEM0_USE_OLLAMA", "true").lower() == "true"
+FALLBACK_GROQ_MODEL = os.getenv("MEM0_LLM_MODEL", "llama-3.1-8b-instant")
 
 # Lazy import - only load Mem0 when actually used
 _memory_instance = None
@@ -44,31 +46,44 @@ class MemoryContext:
     has_memories: bool
 
 
-def _get_mem0_config(llm_model: Optional[str] = None) -> dict:
-    """Build Mem0 configuration with Groq backend and local embeddings."""
-    model = llm_model or ACTIVE_MEM0_LLM
-
+def _get_mem0_config(use_ollama: bool = True) -> dict:
+    """Build Mem0 configuration with Ollama or Groq backend."""
+    
     # Use a dedicated path in the data folder for Qdrant storage
     qdrant_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "mem0_qdrant")
 
-    # Mem0 doesn't support key rotation natively; prefer a dedicated memory key if set.
-    api_key = (
-        os.getenv("GROQ_MEMORY_API_KEY")
-        or (core_config.GROQ_API_KEYS[0] if core_config.GROQ_API_KEYS else None)
-        or core_config.GROQ_API_KEY
-    )
-
-    return {
-        "llm": {
+    if use_ollama and USE_OLLAMA:
+        # Use local Ollama model
+        llm_config = {
+            "provider": "ollama",
+            "config": {
+                "model": OLLAMA_MEM0_MODEL,
+                "ollama_base_url": OLLAMA_URL,
+                "temperature": 0.1,
+                "max_tokens": 1000,
+            }
+        }
+        logger.info(f"🦙 Mem0 using Ollama: {OLLAMA_MEM0_MODEL}")
+    else:
+        # Fallback to Groq
+        api_key = (
+            os.getenv("GROQ_MEMORY_API_KEY")
+            or (core_config.GROQ_API_KEYS[0] if core_config.GROQ_API_KEYS else None)
+            or core_config.GROQ_API_KEY
+        )
+        llm_config = {
             "provider": "groq",
             "config": {
-                # Higher-quality merge model to reduce bad UPDATE/DELETEs
-                "model": model,
+                "model": FALLBACK_GROQ_MODEL,
                 "temperature": 0.1,
                 "max_tokens": 1000,
                 "api_key": api_key,
             }
-        },
+        }
+        logger.info(f"☁️ Mem0 using Groq: {FALLBACK_GROQ_MODEL}")
+
+    return {
+        "llm": llm_config,
         "embedder": {
             "provider": "huggingface",
             "config": {
@@ -89,16 +104,13 @@ def _get_mem0_config(llm_model: Optional[str] = None) -> dict:
     }
 
 
-def _reset_memory(llm_model: Optional[str] = None):
-    """(Re)initialize Mem0 with the given model."""
-    global _memory_instance, ACTIVE_MEM0_LLM
+def _reset_memory(use_ollama: bool = True):
+    """(Re)initialize Mem0 with the configured backend."""
+    global _memory_instance
 
     from mem0 import Memory
 
-    target_model = llm_model or PRIMARY_MEM0_LLM
-    ACTIVE_MEM0_LLM = target_model
-    config = _get_mem0_config(target_model)
-    logger.info(f"🧠 Creating Mem0 instance with model: {target_model}")
+    config = _get_mem0_config(use_ollama)
     _memory_instance = Memory.from_config(config)
     return _memory_instance
 
@@ -109,14 +121,25 @@ def get_memory() -> Any:
     
     if _memory_instance is None:
         try:
-            _reset_memory()
-            logger.info("✅ Mem0 initialized with Groq backend")
+            _reset_memory(use_ollama=USE_OLLAMA)
+            backend = "Ollama" if USE_OLLAMA else "Groq"
+            logger.info(f"✅ Mem0 initialized with {backend} backend")
         except ImportError:
             logger.error("Mem0 not installed. Run: pip install mem0ai")
             raise
         except Exception as e:
             logger.error(f"Failed to initialize Mem0: {e}")
-            raise
+            # Try falling back to Groq if Ollama fails
+            if USE_OLLAMA:
+                logger.warning("🔄 Ollama failed, falling back to Groq...")
+                try:
+                    _reset_memory(use_ollama=False)
+                    logger.info("✅ Mem0 initialized with Groq fallback")
+                except Exception as e2:
+                    logger.error(f"Groq fallback also failed: {e2}")
+                    raise
+            else:
+                raise
     else:
         logger.info("🔄 Reusing existing Mem0 instance")
     
