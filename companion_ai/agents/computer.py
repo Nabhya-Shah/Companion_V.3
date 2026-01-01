@@ -44,84 +44,22 @@ class ComputerAgent:
 
     def locate_element(self, element_description: str) -> Optional[Tuple[int, int]]:
         """
-        Locate a UI element using OmniParser (SOTA) or fallback to Maverick Vision.
+        Locate a UI element using Vision (LLM-based detection).
         Returns: (x, y) or None if not found.
         """
-        logger.info(f"👀 locating element: '{element_description}'")
+        logger.info(f"👀 Locating element: '{element_description}'")
         
-        # 0. Capture screen regardless of method
-        # We need the full resolution image for parsing
-        img = vision_manager.capture_screen(resize_dim=None) # Capture native
+        # Capture screen
+        img = vision_manager.capture_screen(resize_dim=None)
         if not img:
             logger.error("Failed to capture screen.")
             return None
-            
-        native_w, native_h = img.size
-        # For OmniParser/Vision API, we might need to verify resizing needs
-        # OmniParser handles resolution well, but let's base64 it
-        b64_img = vision_manager._image_to_base64(img)
         
-        # --- STRATEGY A: OmniParser (SOTA) ---
-        from companion_ai.omni_parser_client import omni_client
-        
-        omni_data = omni_client.parse_screen(b64_img)
-        if omni_data and "elements" in omni_data:
-            logger.info("Using OmniParser results...")
-            elements = omni_data["elements"]
-            
-            # Simple fuzzy matching (case-insensitive substring)
-            # In future: use embeddings or LLM to match description to list of elements
-            target = element_description.lower()
-            best_match = None
-            
-            for el in elements:
-                content = el.get("content", "").lower()
-                if not content: continue
-                
-                # Check for direct containment
-                if target in content or content in target:
-                     best_match = el
-                     break
-            
-            if not best_match:
-                # Log what we DID see to help debug
-                visible = [e.get('content', '') for e in elements[:10]]
-                logger.warning(f"Target '{target}' not found in OmniParser results. Visible inputs: {visible}")
-            
-            if best_match:
-                bbox = best_match.get("bbox", []) # [x1, y1, x2, y2]
-                if len(bbox) == 4:
-                    # Calculate center
-                    # OmniParser coordinates are usually normalized 0-1 or absolute pixels.
-                    # Assuming they are absolute pixels based on standard output, or [0-1]
-                    # If they are float <= 1.0, they are relative.
-                    x1, y1, x2, y2 = bbox
-                    if x1 <= 1.0 and x2 <= 1.0:
-                         # Normalize to screen
-                         real_x = int(((x1 + x2) / 2) * self.screen_width)
-                         real_y = int(((y1 + y2) / 2) * self.screen_height)
-                    else:
-                         # Absolute pixels (if OmniParser ran on same res)
-                         # We might need to scale if the capture res differed from screen res
-                         scale_x = self.screen_width / native_w
-                         scale_y = self.screen_height / native_h
-                         
-                         center_x = (x1 + x2) / 2
-                         center_y = (y1 + y2) / 2
-                         
-                         real_x = int(center_x * scale_x)
-                         real_y = int(center_y * scale_y)
-                    
-                    logger.info(f"📍 OmniParser found '{best_match['content']}' at ({real_x}, {real_y})")
-                    return (real_x, real_y)
-        
-        # --- STRATEGY B: Maverick Vision (LLM Fallback) ---
-        logger.info("⚠️ OmniParser invalid/missed. Falling back to specific Vision query.")
-        
-        # We assume vision_manager can resize for us if needed for the LLM
+        # Use vision to locate element
         prompt = (
             f"Locate the center of the '{element_description}'. "
-            "Return ONLY a JSON object with 'x' and 'y' integers representing the percentage coordinates (0-100) from top-left. "
+            "Return ONLY a JSON object with 'x' and 'y' integers representing "
+            "the percentage coordinates (0-100) from top-left. "
             "Example: {\"x\": 50, \"y\": 50} for center of screen. "
             "If not visible, return {\"error\": \"not found\"}."
         )
@@ -133,8 +71,8 @@ class ComputerAgent:
             data = json.loads(json_str)
             
             if "error" in data:
-                logger.warning(f"Element '{element_description}' not found (Fallback): {data['error']}")
-                return None
+                logger.warning(f"Element '{element_description}' not found: {data['error']}")
+                return self._get_hardcoded_location(element_description)
                 
             pct_x = data.get("x", 0) / 100.0
             pct_y = data.get("y", 0) / 100.0
@@ -142,14 +80,12 @@ class ComputerAgent:
             real_x = int(pct_x * self.screen_width)
             real_y = int(pct_y * self.screen_height)
             
-            logger.info(f"📍 Mapped '{element_description}' to ({real_x}, {real_y}) via Fallback")
+            logger.info(f"📍 Located '{element_description}' at ({real_x}, {real_y})")
             return (real_x, real_y)
             
         except Exception as e:
-            logger.error(f"Fallback vision failed: {e}")
-            
-        # --- STRATEGY C: Hardcoded Locations (Last Resort) ---
-        return self._get_hardcoded_location(element_description)
+            logger.error(f"Vision location failed: {e}")
+            return self._get_hardcoded_location(element_description)
 
     def _get_hardcoded_location(self, description: str) -> Optional[Tuple[int, int]]:
         """Return hardcoded coordinates for common UI elements if vision fails."""

@@ -6,8 +6,8 @@ function calling for Groq native integration.
 from __future__ import annotations
 import datetime, re, os, json
 from typing import Callable, Dict, Any
-from companion_ai import memory as mem
-from companion_ai import job_manager  # Import job manager
+from companion_ai.memory import sqlite_backend as mem
+from companion_ai.services.jobs import add_job  # Import job manager
 
 try:
     from companion_ai.memory_v2 import search_memories

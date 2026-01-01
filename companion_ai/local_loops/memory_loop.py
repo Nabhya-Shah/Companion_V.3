@@ -121,7 +121,7 @@ relevant memories from the provided list. Return the indices of relevant memorie
             
             # Source 2: Search Mem0 if available
             try:
-                from companion_ai import memory_v2
+                from companion_ai.memory import mem0_backend as memory_v2
                 mem0_results = memory_v2.search_memories(query, limit=5)
                 for mem in mem0_results:
                     results.append({
@@ -184,7 +184,7 @@ relevant memories from the provided list. Return the indices of relevant memorie
             return LoopResult.failure("No fact provided")
         
         try:
-            from companion_ai import memory_v2
+            from companion_ai.memory import mem0_backend as memory_v2
             from companion_ai.core import config as core_config
             from companion_ai.brain_manager import get_brain
             from datetime import datetime
@@ -224,7 +224,7 @@ relevant memories from the provided list. Return the indices of relevant memorie
             return LoopResult.failure("No query provided for deletion")
         
         try:
-            from companion_ai import memory_v2
+            from companion_ai.memory import mem0_backend as memory_v2
             from companion_ai.core import config as core_config
             
             # First search for matching memories

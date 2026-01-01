@@ -8,17 +8,24 @@ V4: Mem0 integration for automatic memory storage from conversations.
 
 import logging
 import re
+from datetime import datetime
 from typing import Dict, List, Tuple
-from companion_ai import memory as db
+from companion_ai.memory.sqlite_backend import (
+    get_all_profile_facts, get_relevant_summaries, get_relevant_insights,
+    add_summary, upsert_profile_fact, add_insight
+)
 from companion_ai.llm_interface import generate_response, generate_response_streaming, groq_memory_client
-from companion_ai.memory_ai import analyze_conversation_importance, extract_smart_profile_facts, generate_smart_summary, generate_contextual_insight, categorize_insight
+from companion_ai.memory.ai_processor import (
+    analyze_conversation_importance, extract_smart_profile_facts,
+    generate_smart_summary, generate_contextual_insight, categorize_insight
+)
 from companion_ai.core import config as core_config
-from companion_ai import persona_evolution
+from companion_ai.services import persona as persona_evolution
 
 # Import Mem0 if enabled
 if core_config.USE_MEM0:
     try:
-        from companion_ai.memory_v2 import add_memory as mem0_add_memory
+        from companion_ai.memory.mem0_backend import add_memory as mem0_add_memory
         MEM0_AVAILABLE = True
     except ImportError:
         MEM0_AVAILABLE = False
@@ -29,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # Import knowledge graph (optional - graceful degradation if not available)
 try:
-    from companion_ai.memory_graph import add_conversation_to_graph, get_graph_stats
+    from companion_ai.memory.knowledge_graph import add_conversation_to_graph, get_graph_stats
     KNOWLEDGE_GRAPH_AVAILABLE = True
     logger.info("✅ Knowledge Graph enabled")
 except ImportError:
@@ -46,9 +53,9 @@ class ConversationSession:
     def _load_initial_memory_context(self) -> Dict:
         """Load initial memory context from database"""
         return {
-            "profile": db.get_all_profile_facts(),
-            "summaries": db.get_relevant_summaries(None, 5),
-            "insights": db.get_relevant_insights(None, 8)
+            "profile": get_all_profile_facts(),
+            "summaries": get_relevant_summaries(None, 5),
+            "insights": get_relevant_insights(None, 8)
         }
     
     def _update_memory_context_with_keywords(self, user_message: str):
@@ -59,8 +66,8 @@ class ConversationSession:
         # Get relevant memories based on keywords
         if keywords:
             self.memory_context.update({
-                "summaries": db.get_relevant_summaries(keywords, 5),
-                "insights": db.get_relevant_insights(keywords, 8)
+                "summaries": get_relevant_summaries(keywords, 5),
+                "insights": get_relevant_insights(keywords, 8)
             })
             logger.info(f"Updated memory context with keywords: {keywords}")
     
@@ -97,7 +104,7 @@ class ConversationSession:
         self.conversation_history.append({
             "user": user_message,
             "ai": ai_response,
-            "timestamp": db.datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat()
         })
         
         # Step 5: Add to Mem0 immediately (V4 hybrid memory)
@@ -174,7 +181,7 @@ class ConversationSession:
         self.conversation_history.append({
             "user": user_message,
             "ai": full_response,
-            "timestamp": db.datetime.now().isoformat(),
+            "timestamp": datetime.now().isoformat(),
             "metadata": final_metadata
         })
         
@@ -239,12 +246,12 @@ class ConversationSession:
             # Generate summary
             summary = self._generate_summary_with_memory_ai(user_msg, ai_msg, importance)
             if summary:
-                db.add_summary(summary, importance)
+                add_summary(summary, importance)
 
             # Extract profile facts (structured)
             facts = self._extract_facts_with_memory_ai(user_msg, ai_msg)
             for key, data in facts.items():
-                db.upsert_profile_fact(
+                upsert_profile_fact(
                     key,
                     data.get('value',''),
                     data.get('confidence',0.5),
@@ -258,7 +265,7 @@ class ConversationSession:
             insight = self._generate_insight_with_memory_ai(user_msg, ai_msg, importance)
             if insight:
                 category = self._categorize_insight_with_memory_ai(insight)
-                db.add_insight(insight, category, importance)
+                add_insight(insight, category, importance)
         else:
             logger.info("🧠 Low importance exchange - minimal storage")
     

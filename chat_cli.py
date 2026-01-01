@@ -20,7 +20,7 @@ import re
 from collections import deque
 from dotenv import load_dotenv
 
-from companion_ai import memory as mem
+from companion_ai.memory import sqlite_backend as mem
 from companion_ai import llm_interface
 from companion_ai.tts_manager import tts_manager
 
@@ -89,13 +89,13 @@ def main():
             print("Commands: /exit /quit /voice [on|off] /memstats /health /help")
             continue
         if cmd == "/memstats":
-            from companion_ai.memory import get_memory_stats
+            from companion_ai.memory.sqlite_backend import get_memory_stats
             stats = get_memory_stats()
             print(f"Memory: profiles={stats['profile_facts']} summaries={stats['summaries']} insights={stats['insights']}")
             continue
         if cmd == "/health":
             from companion_ai.core import metrics
-            from companion_ai.memory import get_memory_stats
+            from companion_ai.memory.sqlite_backend import get_memory_stats
             mstats = metrics.snapshot()
             memstats = get_memory_stats()
             print("Health:")

@@ -345,11 +345,6 @@ def generate_local_response(prompt: str, system_prompt: str = None, max_tokens: 
         logger.error(f"Local generation failed: {e}")
         return None
 
-# Alias for backward compatibility
-def generate_vllm_response(prompt: str, system_prompt: str = None, max_tokens: int = 1024) -> str:
-    """Backward compatibility alias - now uses Ollama."""
-    return generate_local_response(prompt, system_prompt, max_tokens)
-
 # --- Core Generation Functions ---
 # NOTE: Prompt building now handled by companion_ai/core/prompts.py and context_builder.py
 
@@ -1292,35 +1287,6 @@ def generate_groq_response(prompt: str, model: str = "llama-3.1-8b-instant") -> 
     text = sanitize_output(response.choices[0].message.content.strip())
     logger.debug(f"Groq completion model={model} chars={len(text)}")
     return text
-
-def generate_conversation_response(prompt: str) -> str:
-    """Generate conversational response using DeepSeek R1"""
-    return generate_groq_response(prompt, model="deepseek-r1-distill-llama-70b")
-
-def generate_analysis_response(prompt: str) -> str:
-    """Generate analytical response using DeepSeek R1"""
-    return generate_groq_response(prompt, model="deepseek-r1-distill-llama-70b")
-
-def generate_deepseek_response(user_message: str, system_prompt: str = None) -> str:
-    """Generate response using DeepSeek R1 through Groq"""
-    if not groq_client:
-        raise Exception("Groq client not available")
-    
-    messages = [
-        {"role": "system", "content": system_prompt or "You are a helpful AI assistant."},
-        {"role": "user", "content": user_message}
-    ]
-    
-    response = groq_client.chat.completions.create(
-        model="deepseek-r1-distill-llama-70b",
-        messages=messages,
-        temperature=0.8,
-        max_tokens=1024,
-        top_p=0.9,
-        stream=False
-    )
-    
-    return response.choices[0].message.content.strip()
 
 
 

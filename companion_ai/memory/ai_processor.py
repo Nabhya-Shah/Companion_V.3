@@ -288,7 +288,7 @@ def enhance_conversation_context(user_msg: str, current_context: dict) -> dict:
     keywords = [word.lower() for word in user_msg.split() if len(word) > 3][:3]
     
     # Import memory functions
-    from companion_ai import memory as db
+    from companion_ai.memory import sqlite_backend as db
     
     # Get relevant memories based on user's current message
     relevant_summaries = db.get_relevant_summaries(keywords, 5)

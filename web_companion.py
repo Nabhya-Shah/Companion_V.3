@@ -14,14 +14,18 @@ import os
 from companion_ai.llm_interface import generate_response, get_token_stats, reset_token_stats
 from companion_ai.conversation_manager import ConversationSession
 from companion_ai.core import config as core_config
-from companion_ai import memory as db
-from companion_ai.tts_manager import tts_manager
-from companion_ai.vision_manager import vision_manager
+from companion_ai.memory.sqlite_backend import (
+    get_all_profile_facts, upsert_profile_fact, delete_profile_fact,
+    clear_all_memory, list_profile_facts_detailed, list_pending_profile_facts,
+    approve_profile_fact, reject_profile_fact, get_latest_summary, get_latest_insights,
+    search_memory, get_memory_stats
+)
+from companion_ai.memory import mem0_backend as memory_v2
+from companion_ai.services.tts import tts_manager
+from companion_ai.agents.vision import vision_manager
 from companion_ai.tools import run_tool, list_tools
 from companion_ai.core import metrics
-from companion_ai import memory as mem
-from companion_ai import memory_v2
-from companion_ai import job_manager  # Import job manager
+from companion_ai.services import jobs as job_manager_module
 import json, glob
 
 # Configure logging with both console and file output
@@ -67,7 +71,7 @@ logger.info(f"📝 Logs: {LOG_FILE}")
 logger.info("=" * 70)
 
 # Start background job worker
-job_manager.start_worker()
+job_manager_module.start_worker()
 
 app = Flask(__name__)
 
@@ -153,7 +157,7 @@ def shutdown():
     func()
     
     # Stop job worker
-    job_manager.stop_worker()
+    job_manager_module.stop_worker()
     
     return jsonify({'status': 'Server shutting down...'})
 
@@ -165,7 +169,7 @@ def get_active_jobs():
     if not core_config.require_auth(token):
         return jsonify({'error': 'Unauthorized'}), 401
     
-    jobs = job_manager.get_active_jobs()
+    jobs = job_manager_module.get_active_jobs()
     return jsonify({'jobs': jobs})
 
 @app.route('/api/token-budget', methods=['GET'])
@@ -530,7 +534,7 @@ def chat_history_stream():
         # Avoid replaying old job completions on reconnect/startup
         notified_jobs = set()
         try:
-            existing = job_manager.get_active_jobs()
+            existing = job_manager_module.get_active_jobs()
             for job in existing:
                 if job.get('status') in ('COMPLETED', 'FAILED'):
                     notified_jobs.add(job.get('id'))
@@ -562,7 +566,7 @@ def chat_history_stream():
             if now - last_job_check > 2.0:
                 last_job_check = now
                 try:
-                    jobs = job_manager.get_active_jobs()
+                    jobs = job_manager_module.get_active_jobs()
                     for job in jobs:
                         if job['status'] in ('COMPLETED', 'FAILED') and job['id'] not in notified_jobs:
                             # Send job update
@@ -633,13 +637,13 @@ def get_memory():
                 # Let's fallback for safety but log it.
         
         # --- FALLBACK TO SQLITE (Legacy) ---
-        profile = db.get_all_profile_facts()
-        summaries = db.get_latest_summary(10)
-        insights = db.get_latest_insights(10)
+        profile = get_all_profile_facts()
+        summaries = get_latest_summary(10)
+        insights = get_latest_insights(10)
         resp = {'profile': profile, 'summaries': summaries, 'insights': insights}
         if detailed:
             try:
-                resp['profile_detailed'] = db.list_profile_facts_detailed()
+                resp['profile_detailed'] = list_profile_facts_detailed()
             except Exception as inner:
                 logger.warning(f"Detailed profile retrieval failed: {inner}")
         return jsonify(resp)
@@ -653,7 +657,7 @@ def pending_facts():
         from companion_ai.core import config as core_config
         if not getattr(core_config, 'ENABLE_FACT_APPROVAL', False):
             return jsonify({'enabled': False, 'pending': []})
-        pending = db.list_pending_profile_facts()
+        pending = list_pending_profile_facts()
         return jsonify({'enabled': True, 'pending': pending})
     except Exception as e:
         logger.error(f"Pending facts error: {e}")
@@ -665,7 +669,7 @@ def approve_fact(pid: int):
         token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
         if not core_config.require_auth(token):
             return jsonify({'error': 'Unauthorized'}), 401
-        ok = db.approve_profile_fact(pid)
+        ok = approve_profile_fact(pid)
         return jsonify({'approved': ok})
     except Exception as e:
         logger.error(f"Approve fact error: {e}")
@@ -677,7 +681,7 @@ def reject_fact(pid: int):
         token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
         if not core_config.require_auth(token):
             return jsonify({'error': 'Unauthorized'}), 401
-        ok = db.reject_profile_fact(pid)
+        ok = reject_profile_fact(pid)
         return jsonify({'rejected': ok})
     except Exception as e:
         logger.error(f"Reject fact error: {e}")
@@ -695,7 +699,7 @@ def clear_memory():
             return jsonify({'error': 'Unauthorized'}), 401
         
         # Clear SQLite memory
-        db.clear_all_memory()
+        clear_all_memory()
         
         # Clear Mem0 vector memory
         if core_config.USE_MEM0:
@@ -742,7 +746,7 @@ def delete_fact(key: str):
                 else:
                     # Fallback: Try deleting from SQLite if ID not found in Mem0
                     # (This handles legacy facts or if key was actually a SQLite key)
-                    sqlite_deleted = db.delete_profile_fact(key)
+                    sqlite_deleted = delete_profile_fact(key)
                     if sqlite_deleted:
                         deleted = True
                         local_logger.info(f"Deleted SQLite memory for key: {key}")
@@ -751,7 +755,7 @@ def delete_fact(key: str):
                 local_logger.error(f"Failed to delete Mem0 fact: {mem0_err}")
         else:
             # 2. Fallback to SQLite only
-            deleted = db.delete_profile_fact(key)
+            deleted = delete_profile_fact(key)
                 
         return jsonify({'deleted': deleted, 'key': key})
     except Exception as e:
@@ -875,7 +879,7 @@ def computer_stop():
     computer_agent.safe_mode = True
     
     # Cancel all background jobs
-    job_manager.cancel_all_jobs()
+    job_manager_module.cancel_all_jobs()
     
     logger.warning("Computer control STOPPED via API")
     return jsonify({'success': True, 'message': 'Computer control disabled and jobs cancelled'})
@@ -1011,7 +1015,7 @@ def search():
         q = request.args.get('q', '').strip()
         if not q:
             return jsonify({'query': q, 'memory_hits': [], 'web_snippet': None})
-        hits = db.search_memory(q, limit=8)
+        hits = search_memory(q, limit=8)
         web_snippet = None
         try:
             tool_text = run_tool('search', q)
@@ -1029,7 +1033,7 @@ def search():
 @app.route('/api/health')
 def health():
     try:
-        memstats = db.get_memory_stats()
+        memstats = get_memory_stats()
         mstats = metrics.snapshot()
         caps = core_config.model_capability_summary() if getattr(core_config, 'ENABLE_CAPABILITY_ROUTER', False) else None
         return jsonify({

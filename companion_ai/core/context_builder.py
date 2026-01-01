@@ -12,7 +12,7 @@ from typing import Dict, Any, List
 import string
 from . import config
 from .prompts import get_static_system_prompt_safe
-from companion_ai import memory as db
+from companion_ai.memory import sqlite_backend as db
 from .conversation_logger import log_interaction  # may be used externally
 
 _persona_cache: Dict[str, Dict[str, Any]] = {}
