@@ -7,9 +7,10 @@ A personal AI companion with persistent memory, knowledge graph, and intelligent
 | Feature | Description |
 |---------|-------------|
 | **120B Orchestrator** | Groq 120B acts as the brain - understands intent, delegates tasks, synthesizes responses |
-| **Local Loops** | Specialized local models (Docker vLLM) for memory, vision, tools, computer control |
+| **Local Loops** | Specialized local models (Ollama) for memory, vision, tools, computer control |
 | **Knowledge Graph** | NetworkX-based entity/relationship extraction with D3.js visualization |
 | **Persistent Memory** | Only 120B decides what to save - no noise from casual chat |
+| **Per-Step Token Tracking** | See tokens + timing for each pipeline step with model labels |
 | **Background Tasks** | Complex tasks run async with live timeline updates |
 | **Web UI** | Modern chat interface with task panel and memory visualization |
 
@@ -41,8 +42,7 @@ User → Web Server → 120B Orchestrator → Response
             │            │            │
             └────────────┴────────────┘
                          │
-                   Docker vLLM
-                   (Local GPU)
+                   Ollama (Local)
 ```
 
 **Key Principles:**
@@ -54,25 +54,18 @@ User → Web Server → 120B Orchestrator → Response
 
 ```
 companion_ai/
-├── core/
-│   ├── config.py              # Model routing, configuration
-│   ├── context_builder.py     # System prompt construction
-│   └── conversation_logger.py # JSONL logging
-├── llm_interface.py           # LLM calls, tool execution
-├── conversation_manager.py    # Session management
-├── memory.py                  # SQLite storage
-├── memory_v2.py               # Mem0/Qdrant vector memory
-├── memory_graph.py            # NetworkX knowledge graph
-├── local_loops.py             # Local loop implementations (TODO)
-└── tools.py                   # Tool definitions
+├── core/                 # Config, prompts, logging
+├── agents/               # Browser, computer, vision agents
+├── memory/               # SQLite, Mem0, knowledge graph
+├── services/             # TTS, jobs, persona, token budget
+├── local_loops/          # Memory, vision, tool, computer loops
+├── llm_interface.py      # LLM calls & routing
+├── orchestrator.py       # 120B brain
+└── conversation_manager.py
 
-web_companion.py               # Flask server
-templates/
-├── index.html                 # Chat UI
-└── graph.html                 # Knowledge graph viz
-static/
-├── app.js                     # Frontend logic
-└── app.css                    # Styling
+web_companion.py          # Flask server
+templates/                # HTML templates
+static/                   # JS, CSS
 ```
 
 ## 🔧 Configuration
@@ -83,18 +76,19 @@ static/
 # Required
 GROQ_API_KEY=your_groq_api_key
 
-# Optional (for dedicated memory API)
+# Optional
 GROQ_MEMORY_API_KEY=second_groq_key
+USE_MEM0=true
+USE_ORCHESTRATOR=true
 ```
 
 ### Models
 
-| Role | Model | Description |
-|------|-------|-------------|
-| Orchestrator | `openai/gpt-oss-120b` | Main brain - routing and synthesis |
-| Memory Loop | Qwen 3B (local) | Fact extraction and retrieval |
-| Vision Loop | LLaVA 13B (local) | Screen/image analysis |
-| Computer Loop | Qwen 7B (local) | Complex computer automation |
+| Role | Model | Provider |
+|------|-------|----------|
+| Orchestrator | `openai/gpt-oss-120b` | Groq Cloud |
+| Memory AI | `qwen3:14b` | Ollama (local) |
+| Vision | `llava:7b` | Ollama (local) |
 
 ## 📡 API Endpoints
 
@@ -102,21 +96,11 @@ GROQ_MEMORY_API_KEY=second_groq_key
 |----------|--------|-------------|
 | `/api/chat/send` | POST | Streaming SSE response |
 | `/api/memory` | GET | View stored memories |
+| `/api/tokens/last` | GET | Per-step token breakdown |
 | `/api/graph` | GET | Export knowledge graph |
 | `/graph` | GET | Interactive visualization |
 | `/api/health` | GET | System status |
 
-## 🧠 How Memory Works
-
-1. **120B receives message** → Decides if memory needed
-2. **Delegates to Memory Loop** → Search or extract facts
-3. **After response** → 120B decides what to save (not auto-save everything)
-4. **Learning** → Even loop outputs can be saved if useful
-
 ## 📝 License
 
 MIT
-
----
-
-*Built with Groq, Docker vLLM, NetworkX, Flask, and D3.js*

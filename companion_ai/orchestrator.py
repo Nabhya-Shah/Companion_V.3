@@ -231,6 +231,9 @@ Only save CONCRETE facts, not casual chat.
     
     async def _get_decision(self, user_message: str, context: Dict) -> OrchestratorDecision:
         """Get routing decision from local model (or Groq fallback)."""
+        import time
+        start_time = time.time()
+        
         client, model, is_local = self._get_client_and_model()
         if not client:
             # Fallback to direct answer if no client
@@ -253,17 +256,19 @@ Only save CONCRETE facts, not casual chat.
             )
             
             raw_response = response.choices[0].message.content.strip()
+            duration_ms = int((time.time() - start_time) * 1000)
             
             # DEBUG: Log the raw response from 120B
             logger.info(f"🔍 DEBUG: 120B raw response:\n{raw_response[:500]}...")
             
-            # Log tokens
-            from companion_ai.llm_interface import log_tokens
-            log_tokens(
-                model,
-                response.usage.prompt_tokens if response.usage else 0,
-                response.usage.completion_tokens if response.usage else 0,
-                f"orchestrator_routing_{'local' if is_local else 'groq'}"
+            # Log tokens with step tracking
+            from companion_ai.llm_interface import log_tokens_step
+            log_tokens_step(
+                step_name="orchestrator",
+                model=model,
+                input_tokens=response.usage.prompt_tokens if response.usage else 0,
+                output_tokens=response.usage.completion_tokens if response.usage else 0,
+                duration_ms=duration_ms
             )
             
             # Parse decision
@@ -317,6 +322,8 @@ Only save CONCRETE facts, not casual chat.
         context: Dict
     ) -> Tuple[str, Dict]:
         """Handle delegation to a local loop."""
+        import time
+        
         loop_name = decision.loop
         task = decision.task or {}
         
@@ -331,9 +338,21 @@ Only save CONCRETE facts, not casual chat.
         logger.info(f"✅ DEBUG: Got loop instance: {loop}")
         
         try:
-            # Execute loop
+            # Execute loop with timing
             logger.info(f"🚀 DEBUG: Executing loop.execute({task})")
+            loop_start = time.time()
             result = await loop.execute(task)
+            loop_duration_ms = int((time.time() - loop_start) * 1000)
+            
+            # Log loop execution as a step (no tokens, but has timing)
+            from companion_ai.llm_interface import log_tokens_step
+            log_tokens_step(
+                step_name=f"loop_{loop_name}",
+                model="local" if loop_name != "browser" else "browser_agent",
+                input_tokens=0,
+                output_tokens=0,
+                duration_ms=loop_duration_ms
+            )
             
             if result.status.value == "error":
                 logger.error(f"Loop {loop_name} failed: {result.error}")
@@ -447,6 +466,9 @@ Only save CONCRETE facts, not casual chat.
         context: Dict
     ) -> str:
         """Use local model to synthesize a response from loop output."""
+        import time
+        start_time = time.time()
+        
         client, model, is_local = self._get_client_and_model()
         if not client:
             # Best effort response
@@ -472,7 +494,20 @@ Don't mention "loops" or technical details. Be conversational."""
                 max_tokens=500
             )
             
-            logger.info(f"Synthesis via {'local' if is_local else 'groq'}")
+            duration_ms = int((time.time() - start_time) * 1000)
+            model_label = "local" if is_local else "groq"
+            
+            # Log synthesis as a step with tokens and model info
+            from companion_ai.llm_interface import log_tokens_step
+            log_tokens_step(
+                step_name="synthesis",
+                model=f"{model_label}:{model}",
+                input_tokens=response.usage.prompt_tokens if response.usage else 0,
+                output_tokens=response.usage.completion_tokens if response.usage else 0,
+                duration_ms=duration_ms
+            )
+            
+            logger.info(f"Synthesis via {model_label}: {response.usage.prompt_tokens}+{response.usage.completion_tokens if response.usage else 0} tokens in {duration_ms}ms")
             return response.choices[0].message.content
             
         except Exception as e:

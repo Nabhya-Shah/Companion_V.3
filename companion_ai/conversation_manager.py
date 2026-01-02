@@ -177,7 +177,18 @@ class ConversationSession:
                 full_response += chunk
                 yield chunk
         
-        # Step 4: Store conversation after completion
+        # Step 4: Inject token_steps into metadata for UI display
+        try:
+            from companion_ai.llm_interface import get_last_token_usage
+            token_usage = get_last_token_usage()
+            final_metadata['token_steps'] = token_usage.get('steps', [])
+            final_metadata['total_tokens'] = token_usage.get('total', 0)
+            # Yield updated metadata with token info
+            yield {"type": "token_meta", "data": final_metadata}
+        except Exception as e:
+            logger.warning(f"Failed to inject token_steps: {e}")
+        
+        # Step 5: Store conversation after completion
         self.conversation_history.append({
             "user": user_message,
             "ai": full_response,
@@ -185,7 +196,7 @@ class ConversationSession:
             "metadata": final_metadata
         })
         
-        # Step 5: Add to Mem0 immediately (V4 hybrid memory)
+        # Step 6: Add to Mem0 immediately (V4 hybrid memory)
         if MEM0_AVAILABLE:
             try:
                 messages = [

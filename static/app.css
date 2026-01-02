@@ -1948,3 +1948,45 @@ body {
   background: rgba(239, 68, 68, 0.3);
   transform: scale(1.1);
 }
+
+/* Token Badge Enhanced Styling */
+.token-badge .token-count {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.token-badge .token-count::after {
+  content: ' tok';
+  font-size: 0.85em;
+  color: var(--text-muted);
+  font-weight: normal;
+}
+
+.token-badge .token-time {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  font-size: 0.9em;
+  padding-left: 4px;
+  border-left: 1px solid var(--border);
+}
+
+/* Model Label in Token Badge */
+.token-badge .model-label {
+  font-size: 0.85em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.token-badge .model-label.groq {
+  background: rgba(139, 92, 246, 0.2);
+  color: #a78bfa;
+}
+
+.token-badge .model-label.local {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+}

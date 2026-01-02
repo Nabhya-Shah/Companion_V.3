@@ -117,50 +117,75 @@ function renderPipeline(metadata) {
 
   const steps = [];
 
+  // Get token steps if available
+  const tokenSteps = metadata.token_steps || [];
+  const getTokensForStep = (stepName) => {
+    return tokenSteps.find(s => s.name === stepName || s.name.includes(stepName));
+  };
+
   // 1. Initial Decision
+  const orchTokens = getTokensForStep('orchestrator');
   steps.push({
     type: 'decision',
     title: 'Orchestrator Decision',
     desc: `Route to: ${metadata.source}`,
     data: metadata.source === 'loop_vision' ? 'Visual verification needed' :
       metadata.source === 'loop_tool' ? 'External capabilities required' :
-        'Direct conversation'
+        'Direct conversation',
+    tokens: orchTokens
   });
 
   // 2. Loop Execution
   if (metadata.loop_result) {
     const res = metadata.loop_result;
     const status = res.status || 'unknown';
+    const loopType = metadata.source.replace('loop_', '');
+    const loopTokens = getTokensForStep(loopType) || getTokensForStep('loop');
 
     steps.push({
       type: status === 'success' ? 'result' : 'error',
-      title: `Loop Execution: ${metadata.source.replace('loop_', '')}`,
+      title: `Loop Execution: ${loopType}`,
       desc: `Status: ${status}`,
       data: res.error ? res.error :
-        (res.data ? JSON.stringify(res.data, null, 2) : 'No data returned')
+        (res.data ? JSON.stringify(res.data, null, 2) : 'No data returned'),
+      tokens: loopTokens
     });
   }
 
   // 3. Synthesis
+  const synthTokens = getTokensForStep('synthesis') || getTokensForStep('generate');
   steps.push({
     type: 'tool',
     title: 'Final Synthesis',
     desc: 'Generating response using 120B model',
-    data: null
+    data: null,
+    tokens: synthTokens
   });
 
-  const html = steps.map(step => `
+  const html = steps.map(step => {
+    // Extract model type (groq vs local) from model string
+    const modelLabel = step.tokens?.model?.includes('groq') ? 'groq' :
+      step.tokens?.model?.includes('local') ? 'local' : '';
+    const tokenBadge = step.tokens ?
+      `<span class="token-badge" title="${step.tokens.input} in / ${step.tokens.output} out @ ${step.tokens.ms}ms (${step.tokens.model || 'unknown'})">
+        ${modelLabel ? `<span class="model-label ${modelLabel}">${modelLabel}</span>` : ''}
+        <span class="token-count">${step.tokens.total}</span>
+        <span class="token-time">${step.tokens.ms}ms</span>
+      </span>` : '';
+
+    return `
     <div class="pipeline-step ${step.type}">
       <div class="step-info">
         <div class="step-header">
           <span class="step-type">${step.type}</span>
           <span class="step-title">${step.title}</span>
+          ${tokenBadge}
         </div>
         <div class="step-desc">${step.desc}</div>
         ${step.data ? `<div class="step-data">${escapeHtml(step.data)}</div>` : ''}
       </div>
     </div>
-  `).join('');
+  `}).join('');
 
   return `
     <div class="pipeline-view">
@@ -450,6 +475,12 @@ async function sendMessage(retry = false) {
               receivedMetadata = data.meta;
               // Optional: Show "Processing..." indicator or update status immediately
               console.log("Pipeline metadata received:", receivedMetadata);
+            }
+
+            // Handle token_meta event (sent after streaming with token_steps)
+            if (data.token_meta) {
+              receivedMetadata = { ...receivedMetadata, ...data.token_meta };
+              console.log("Token metadata received:", data.token_meta);
             }
 
             if (data.chunk) {

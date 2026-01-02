@@ -11,7 +11,7 @@ import logging
 from datetime import datetime
 import os
 
-from companion_ai.llm_interface import generate_response, get_token_stats, reset_token_stats
+from companion_ai.llm_interface import generate_response, get_token_stats, reset_token_stats, get_last_token_usage
 from companion_ai.conversation_manager import ConversationSession
 from companion_ai.core import config as core_config
 from companion_ai.memory.sqlite_backend import (
@@ -114,21 +114,39 @@ def shutdown():
         history = conversation_session.conversation_history
         msg_count = len(history)
         
+        # Get token stats
+        from companion_ai.llm_interface import get_token_stats
+        token_stats = get_token_stats()
+        total_tokens = token_stats.get('total_input', 0) + token_stats.get('total_output', 0)
+        request_count = token_stats.get('requests', 0)
+        
         # Build log entry
         log_content = f"# Session Log - {session_date} {session_time}\n\n"
-        log_content += f"**Messages:** {msg_count}\n\n"
+        log_content += f"**Messages:** {msg_count}\n"
+        log_content += f"**Total Tokens:** {total_tokens:,} ({request_count} requests)\n\n"
+        
+        # Add model breakdown
+        if token_stats.get('by_model'):
+            log_content += "## Token Usage by Model\n\n"
+            for model, usage in token_stats['by_model'].items():
+                model_total = usage.get('input', 0) + usage.get('output', 0)
+                log_content += f"- **{model}**: {model_total:,} tokens ({usage.get('count', 0)} calls)\n"
+            log_content += "\n"
         
         if history:
-            log_content += "## Conversation Summary\n\n"
-            # Just save last 10 exchanges as summary
-            for msg in history[-10:]:
-                role = msg.get('role', 'unknown')
-                content = msg.get('content', '')[:200]  # Truncate long messages
-                log_content += f"- **{role}**: {content}...\n" if len(msg.get('content', '')) > 200 else f"- **{role}**: {content}\n"
+            log_content += "## Conversation Highlights\n\n"
+            # Just save last 5 exchanges as summary
+            for msg in history[-5:]:
+                user_msg = msg.get('user', '')[:100]
+                ai_msg = msg.get('ai', '')[:100]
+                if user_msg:
+                    log_content += f"- **User**: {user_msg}...\n" if len(msg.get('user', '')) > 100 else f"- **User**: {user_msg}\n"
+                if ai_msg:
+                    log_content += f"- **AI**: {ai_msg}...\n\n" if len(msg.get('ai', '')) > 100 else f"- **AI**: {ai_msg}\n\n"
         
         # Write to logs folder
         log_file = f"logs/session_{session_date}.md"
-        brain.write(log_file, log_content + "\n---\n\n", append=True)
+        brain.write(log_file, log_content + "---\n\n", append=True)
         logger.info(f"📝 Session log saved: {log_file}")
         
     except Exception as e:
@@ -367,6 +385,9 @@ def chat_streaming():
                     if isinstance(chunk, dict) and chunk.get('type') == 'meta':
                         # Send metadata event
                         yield f"data: {json.dumps({'meta': chunk['data']})}\n\n"
+                    elif isinstance(chunk, dict) and chunk.get('type') == 'token_meta':
+                        # Send token metadata event with token_steps
+                        yield f"data: {json.dumps({'token_meta': chunk['data']})}\n\n"
                     else:
                         full_response += chunk
                         # Send chunk as SSE event
@@ -841,7 +862,7 @@ def vision_status():
 @app.route('/api/computer/status', methods=['GET'])
 def computer_status():
     """Return current computer control status for UI banner."""
-    from companion_ai.computer_agent import computer_agent
+    from companion_ai.agents.computer import computer_agent
     return jsonify({
         'active': computer_agent.is_recently_active(),
         'safe_mode': computer_agent.safe_mode,
@@ -852,7 +873,7 @@ def computer_status():
 def computer_status_stream():
     """Server-sent events stream pushing computer control status changes."""
     def event_stream():
-        from companion_ai.computer_agent import computer_agent
+        from companion_ai.agents.computer import computer_agent
         last_state = None
         while True:
             state = {
@@ -875,7 +896,7 @@ def computer_status_stream():
 @app.route('/api/computer/stop', methods=['POST'])
 def computer_stop():
     """Emergency stop for computer control."""
-    from companion_ai.computer_agent import computer_agent
+    from companion_ai.agents.computer import computer_agent
     computer_agent.safe_mode = True
     
     # Cancel all background jobs
@@ -1069,6 +1090,29 @@ def reset_tokens():
         logger.error(f"Token reset error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/tokens/last')
+def last_request_tokens():
+    """Get token usage breakdown for the last request.
+    
+    Returns per-step breakdown showing:
+    - Step name (orchestrator, memory_loop, tool_loop, etc.)
+    - Model used
+    - Input/output tokens
+    - Duration in milliseconds
+    """
+    try:
+        usage = get_last_token_usage()
+        return jsonify({
+            'total_input': usage.get('input', 0),
+            'total_output': usage.get('output', 0),
+            'total': usage.get('total', 0),
+            'source': usage.get('source', 'unknown'),
+            'steps': usage.get('steps', [])
+        })
+    except Exception as e:
+        logger.error(f"Last token error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/config')
 def config_info():
     return jsonify({'auth_required': bool(core_config.API_AUTH_TOKEN)})
@@ -1251,7 +1295,7 @@ def open_browser():
     time.sleep(1.5)
     webbrowser.open('http://localhost:5000')
 
-def run_web(host: str = 'localhost', port: int = 5000, open_browser_flag: bool = True):
+def run_web(host: str = '0.0.0.0', port: int = 5000, open_browser_flag: bool = True):
     print(f"Starting Companion AI Web Portal on http://{host}:{port}")
     # Start background scheduler (decay + resurfacing)
     def _bg_scheduler():

@@ -40,9 +40,45 @@
         └───────────┴───────────┴───────────┘
                     │
             ┌───────▼───────┐
-            │  Docker vLLM  │
+            │ Ollama / vLLM │
             │  (Local GPU)  │
             └───────────────┘
+```
+
+---
+
+## Folder Structure (V6 Reorganized)
+
+```
+companion_ai/
+├── core/                         # Config & prompts
+│   ├── config.py
+│   ├── context_builder.py
+│   └── conversation_logger.py
+├── agents/                       # Agent implementations
+│   ├── browser.py               # Chrome automation
+│   ├── computer.py              # Computer use
+│   └── vision.py                # Vision/screen analysis
+├── memory/                       # Memory backends
+│   ├── sqlite_backend.py        # SQLite storage
+│   ├── mem0_backend.py          # Mem0 vector memory
+│   ├── knowledge_graph.py       # NetworkX graph
+│   └── ai_processor.py          # Memory AI processing
+├── services/                     # Background services
+│   ├── tts.py                   # Text-to-speech
+│   ├── jobs.py                  # Job queue manager
+│   ├── persona.py               # Persona evolution
+│   └── token_budget.py          # Token tracking
+├── local_loops/                  # Loop implementations
+│   ├── memory_loop.py
+│   ├── vision_loop.py
+│   ├── tool_loop.py
+│   └── computer_loop.py
+├── llm/                          # (Reserved for LLM split)
+├── llm_interface.py              # LLM calls & routing
+├── orchestrator.py               # 120B brain
+├── conversation_manager.py       # Session management
+└── tools.py                      # Tool definitions
 ```
 
 ---
@@ -54,20 +90,20 @@
 - Parses user intent, decides routing, synthesizes outputs
 - Only component that saves to memory
 
-### 2. Local Loops (Docker vLLM)
-Self-contained units with multiple models working together:
-- **Memory Loop**: Extract/retrieve facts
-- **Vision Loop**: Analyze screen/images  
+### 2. Local Loops (Ollama/vLLM)
+Self-contained units with specialized models:
+- **Memory Loop**: Extract/retrieve facts (Ollama qwen3:14b)
+- **Vision Loop**: Analyze screen/images (LLaVA 7B)
 - **Tool Loop**: Execute simple tools
-- **Computer Loop**: Complex automation with mini-overseer
+- **Computer Loop**: Complex automation
 
 ### 3. Memory Management
 - Only 120B decides what to persist
-- Memory save happens AFTER loop output (learns from loops too)
+- Memory save happens AFTER loop output
 
-### 4. Background Task Panel
-- Left slide-in with expandable timeline view
-- Live status updates, notifications on completion
+### 4. Per-Step Token Tracking
+- Each pipeline step shows tokens + timing
+- Model labels: GROQ (purple) / LOCAL (green)
 
 ---
 
@@ -76,12 +112,7 @@ Self-contained units with multiple models working together:
 | Component | Technology |
 |-----------|------------|
 | Orchestrator | Groq Cloud (120B) |
-| Local Inference | Docker vLLM |
-| Text Models | Qwen 3B/7B |
-| Vision Models | LLaVA 13B / InternVL |
+| Memory AI | Ollama (qwen3:14b) |
+| Vision | Ollama (llava:7b) |
 | Web Server | Flask + SSE |
-| Memory Store | Mem0 + Qdrant |
-
----
-
-See full architecture details in the design docs.
+| Memory Store | Mem0 + SQLite |

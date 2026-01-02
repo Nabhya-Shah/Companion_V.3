@@ -34,7 +34,8 @@ _last_request_tokens = {
     'input': 0,
     'output': 0,
     'total': 0,
-    'models': []
+    'models': [],
+    'steps': []  # Per-step breakdown: [{name, model, input, output, ms}]
 }
 
 def reset_last_request_tokens():
@@ -45,12 +46,36 @@ def reset_last_request_tokens():
         'output': 0,
         'total': 0,
         'models': [],
-        'source': 'unknown'  # 'groq', 'local', or 'mixed'
+        'source': 'unknown',  # 'groq', 'local', or 'mixed'
+        'steps': []  # Per-step breakdown
     }
 
 def get_last_token_usage() -> dict:
     """Get token usage for the last request."""
     return _last_request_tokens.copy()
+
+def log_tokens_step(step_name: str, model: str, input_tokens: int, output_tokens: int, duration_ms: int = 0):
+    """Log a single pipeline step with timing.
+    
+    Args:
+        step_name: e.g., 'orchestrator', 'memory_loop', 'tool_loop', 'synthesis'
+        model: Model used for this step
+        input_tokens: Input tokens for this step
+        output_tokens: Output tokens for this step
+        duration_ms: Time taken in milliseconds
+    """
+    step = {
+        'name': step_name,
+        'model': model,
+        'input': input_tokens,
+        'output': output_tokens,
+        'total': input_tokens + output_tokens,
+        'ms': duration_ms
+    }
+    _last_request_tokens['steps'].append(step)
+    
+    # Also update totals via standard log_tokens
+    log_tokens(model, input_tokens, output_tokens, step_name)
 
 def log_tokens(model: str, input_tokens: int, output_tokens: int, context: str = ""):
     """Log token usage for a request."""
