@@ -153,9 +153,8 @@ def add_memory(
 ) -> Dict[str, Any]:
     """Add memories from a conversation.
     
-    We strongly prefer to feed only the user's words to Mem0 so the
-    merge model doesn't try to "fix" facts based on assistant phrasing.
-    If no user-only content is found, we fall back to the full messages.
+    SMART DEDUPLICATION: Before adding, we check if a similar fact already exists.
+    This prevents saving "Name is Bob" when "Name is Nabhya" is already stored.
     
     Args:
         messages: List of {"role": "user/assistant", "content": "..."}
@@ -171,6 +170,46 @@ def add_memory(
         # Snapshot current memories to guard against unsafe UPDATE/DELETE decisions.
         pre_memories = {m.get("id"): m.get("memory", m.get("text")) for m in get_all_memories(user_id)}
         logger.info(f"🧠 Mem0 add start: {len(pre_memories)} existing items for user {user_id}")
+        
+        # SMART DEDUPLICATION: Extract potential fact categories from user message
+        user_content = " ".join([m.get("content", "") for m in messages if m.get("role") == "user"])
+        
+        # Define common fact patterns to check for duplicates
+        fact_patterns = [
+            ("name is", "name"),
+            ("my name is", "name"),
+            ("i am called", "name"),
+            ("live in", "location"),
+            ("i'm from", "location"),
+            ("work at", "job"),
+            ("i work", "job"),
+            ("my job", "job"),
+            ("favorite", "preference"),
+            ("i prefer", "preference"),
+            ("i like", "preference"),
+        ]
+        
+        # Check if message matches a fact pattern
+        message_lower = user_content.lower()
+        for pattern, category in fact_patterns:
+            if pattern in message_lower:
+                # Search for existing facts with this category
+                existing = search_memories(category, user_id=user_id, limit=5)
+                if existing:
+                    # Check for semantic overlap using word tokens
+                    def tokenize(text: str) -> set:
+                        tokens = re.findall(r"[A-Za-z]+", text.lower())
+                        return {t for t in tokens if len(t) > 2}
+                    
+                    new_tokens = tokenize(user_content)
+                    for mem in existing:
+                        mem_text = mem.get("memory", mem.get("text", ""))
+                        mem_tokens = tokenize(mem_text)
+                        overlap = new_tokens & mem_tokens
+                        # If significant overlap (>30%) and same category, skip
+                        if len(overlap) >= 2 and pattern in mem_text.lower():
+                            logger.info(f"🔄 Skipping duplicate {category} fact - already have: {mem_text}")
+                            return {"skipped": True, "reason": f"Similar {category} fact exists", "existing": mem_text}
 
         # Add timestamp to metadata
         from datetime import datetime

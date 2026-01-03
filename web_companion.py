@@ -906,6 +906,44 @@ def computer_stop():
     return jsonify({'success': True, 'message': 'Computer control disabled and jobs cancelled'})
 
 
+# --- Loxone Smart Home API ---
+
+@app.route('/api/loxone/rooms', methods=['GET'])
+def loxone_rooms():
+    """Get all Loxone room statuses for control center UI."""
+    import asyncio
+    from companion_ai.integrations.loxone import get_room_statuses
+    
+    try:
+        result = asyncio.run(get_room_statuses())
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Loxone rooms error: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/loxone/light/<action>', methods=['POST'])
+def loxone_light(action):
+    """Control lights: action = 'on' or 'off'."""
+    import asyncio
+    from companion_ai.integrations.loxone import turn_on_lights, turn_off_lights
+    
+    data = request.get_json() or {}
+    room = data.get('room')
+    
+    try:
+        if action == 'on':
+            result = asyncio.run(turn_on_lights(room))
+        elif action == 'off':
+            result = asyncio.run(turn_off_lights(room))
+        else:
+            return jsonify({'success': False, 'error': f'Unknown action: {action}'})
+        
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Loxone light error: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+
 # --- Tasks API (V6 Architecture) ---
 
 @app.route('/api/tasks', methods=['GET'])

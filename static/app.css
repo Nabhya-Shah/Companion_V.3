@@ -1990,3 +1990,176 @@ body {
   background: rgba(34, 197, 94, 0.2);
   color: #4ade80;
 }
+ 
+ /* =========================================
+   Loxone Control Center
+   ========================================= */
+
+.loxone-control-center {
+  width: 100%;
+  max-width: 720px;
+  margin: 1.5rem auto 2rem;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 1rem;
+  backdrop-filter: blur(var(--glass-blur));
+}
+
+.control-center-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 500;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.control-center-icon {
+  font-size: 1.1rem;
+}
+
+.control-center-rooms {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 0.5rem;
+}
+
+.control-room {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 0.5rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-height: 70px;
+}
+
+.control-room:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+  transform: translateY(-2px);
+}
+
+.control-room.on {
+  background: rgba(250, 204, 21, 0.15);
+  border-color: rgba(250, 204, 21, 0.4);
+}
+
+.control-room.off {
+  background: var(--bg-tertiary);
+}
+
+.control-room.loading {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.control-room-icon {
+  font-size: 1.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.control-room.on .control-room-icon {
+  filter: drop-shadow(0 0 8px rgba(250, 204, 21, 0.6));
+}
+
+.control-room-name {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  text-align: center;
+  line-height: 1.2;
+}
+
+.control-room.on .control-room-name {
+  color: #facc15;
+}
+
+/* Smart Home Modal Specific */
+.smart-home-modal {
+  max-width: 600px;
+  width: 90%;
+}
+
+.smart-home-rooms {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 1rem;
+  padding: 0.5rem;
+}
+
+.room-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem 1rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-light);
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-height: 100px;
+}
+
+.room-card:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+  transform: translateY(-2px);
+}
+
+.room-card.on {
+  background: rgba(250, 204, 21, 0.12);
+  border-color: rgba(250, 204, 21, 0.4);
+  box-shadow: 0 0 20px rgba(250, 204, 21, 0.15);
+}
+
+.room-card.off {
+  background: var(--bg-tertiary);
+}
+
+.room-card.loading {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  grid-column: 1 / -1;
+}
+
+.room-card-icon {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+  transition: filter 0.3s ease;
+}
+
+.room-card.on .room-card-icon {
+  filter: drop-shadow(0 0 12px rgba(250, 204, 21, 0.8));
+}
+
+.room-card-name {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  text-align: center;
+  font-weight: 500;
+}
+
+.room-card.on .room-card-name {
+  color: #facc15;
+}
+
+.room-card-status {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.room-card.on .room-card-status {
+  color: rgba(250, 204, 21, 0.7);
+}

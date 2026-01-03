@@ -196,17 +196,22 @@ class ConversationSession:
             "metadata": final_metadata
         })
         
-        # Step 6: Add to Mem0 immediately (V4 hybrid memory)
+        # Step 6: Add to Mem0 in BACKGROUND (non-blocking for faster UX)
         if MEM0_AVAILABLE:
-            try:
-                messages = [
-                    {"role": "user", "content": user_message},
-                    {"role": "assistant", "content": full_response}
-                ]
-                mem0_add_memory(messages, user_id=core_config.MEM0_USER_ID)
-                logger.info("📝 Mem0: Stored conversation exchange (streaming)")
-            except Exception as e:
-                logger.warning(f"Mem0 storage failed: {e}")
+            import threading
+            def _async_mem0_save():
+                try:
+                    messages = [
+                        {"role": "user", "content": user_message},
+                        {"role": "assistant", "content": full_response}
+                    ]
+                    mem0_add_memory(messages, user_id=core_config.MEM0_USER_ID)
+                    logger.info("📝 Mem0: Stored conversation exchange (async)")
+                except Exception as e:
+                    logger.warning(f"Mem0 storage failed: {e}")
+            
+            # Fire-and-forget - don't block the response
+            threading.Thread(target=_async_mem0_save, daemon=True).start()
         
         logger.info(f"Streaming complete. Session length: {len(self.conversation_history)}")
     

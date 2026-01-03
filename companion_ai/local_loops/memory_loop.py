@@ -83,19 +83,35 @@ relevant memories from the provided list. Return the indices of relevant memorie
             return LoopResult.failure(f"Unknown operation: {operation}")
     
     async def _search(self, query: str) -> LoopResult:
-        """Search for relevant memories from all sources."""
+        """Search for relevant memories from all sources.
+        
+        PRIORITY: Brain files > Mem0
+        Brain files are the source of truth. When searching:
+        1. Check brain files first
+        2. Extract key facts from brain (name, location, job, etc.)
+        3. Search Mem0 for additional context
+        4. Skip Mem0 results that conflict with brain facts
+        """
         if not query:
             return LoopResult.failure("No query provided")
         
         results = []
         query_lower = query.lower()
+        brain_facts = {}  # Store brain facts by category for deduplication
         
         try:
-            # Source 1: Search brain files (preferences, user context)
+            # Source 1: Search brain files FIRST (source of truth)
             from companion_ai.brain_manager import get_brain
+            import re
             brain = get_brain()
             
-            # Check key brain files
+            # Categories to track for deduplication
+            fact_patterns = {
+                "name": r"name[:\s]+(\w+)",
+                "location": r"(live[s]?|based|from)[:\s]+(\w+)",
+                "job": r"(work|job|occupation)[:\s]+(.+)",
+            }
+            
             brain_files = [
                 "memories/preferences.md",
                 "memories/user_context.md", 
@@ -105,39 +121,65 @@ relevant memories from the provided list. Return the indices of relevant memorie
             for brain_file in brain_files:
                 content = brain.read(brain_file)
                 if content:
-                    # Simple keyword matching
                     lines = content.split('\n')
                     for line in lines:
                         line_clean = line.strip()
                         if not line_clean or line_clean.startswith('<!--'):
                             continue
+                        
+                        # Extract category facts from brain
+                        for category, pattern in fact_patterns.items():
+                            if re.search(pattern, line_clean, re.IGNORECASE):
+                                brain_facts[category] = line_clean
+                        
                         # Check if query matches this line
                         if any(word in line_clean.lower() for word in query_lower.split()):
                             results.append({
                                 "source": "brain",
                                 "file": brain_file,
-                                "content": line_clean
+                                "content": line_clean,
+                                "priority": 1  # Brain has priority
                             })
             
-            # Source 2: Search Mem0 if available
+            # Source 2: Search Mem0 for additional context
             try:
                 from companion_ai.memory import mem0_backend as memory_v2
                 mem0_results = memory_v2.search_memories(query, limit=5)
+                
                 for mem in mem0_results:
-                    results.append({
-                        "source": "mem0",
-                        "content": mem.get("text", str(mem))
-                    })
+                    mem_text = mem.get("memory", mem.get("text", str(mem)))
+                    mem_lower = mem_text.lower()
+                    
+                    # Check if this Mem0 result conflicts with brain facts
+                    is_conflicting = False
+                    for category, pattern in fact_patterns.items():
+                        if category in brain_facts and re.search(pattern, mem_lower, re.IGNORECASE):
+                            # Same category exists in brain - check for conflict
+                            if brain_facts[category].lower() not in mem_lower and mem_lower not in brain_facts[category].lower():
+                                logger.info(f"🔄 Skipping conflicting Mem0 fact '{mem_text}' - brain has '{brain_facts[category]}'")
+                                is_conflicting = True
+                                break
+                    
+                    if not is_conflicting:
+                        results.append({
+                            "source": "mem0",
+                            "content": mem_text,
+                            "priority": 2  # Mem0 has lower priority
+                        })
             except Exception as e:
                 logger.debug(f"Mem0 search skipped: {e}")
             
-            logger.info(f"Memory search for '{query}': found {len(results)} results")
+            # Sort by priority (brain first)
+            results.sort(key=lambda x: x.get("priority", 2))
+            
+            logger.info(f"Memory search for '{query}': found {len(results)} results (brain: {len(brain_facts)} key facts)")
             
             return LoopResult.success(
                 data={
                     "memories": results, 
                     "count": len(results),
-                    "query": query
+                    "query": query,
+                    "brain_facts": brain_facts  # Include extracted brain facts
                 },
                 operation="search"
             )
@@ -172,13 +214,15 @@ relevant memories from the provided list. Return the indices of relevant memorie
             return LoopResult.failure(str(e))
     
     async def _save(self, fact: str) -> LoopResult:
-        """Save a fact to memory - DUAL STORAGE.
+        """Save a fact to memory - DUAL STORAGE with CONFLICT DETECTION.
+        
+        CONFLICT DETECTION: Before saving, checks if a similar fact exists.
+        If conflict found (e.g., saving "Name is Bob" when "Name is Nabhya" exists),
+        returns a clarification message instead of silently saving.
         
         Writes to:
         1. Mem0 (vector database for semantic search)
         2. Brain folder (readable markdown files)
-        
-        Called by 120B after it decides something is worth saving.
         """
         if not fact:
             return LoopResult.failure("No fact provided")
@@ -188,7 +232,71 @@ relevant memories from the provided list. Return the indices of relevant memorie
             from companion_ai.core import config as core_config
             from companion_ai.brain_manager import get_brain
             from datetime import datetime
+            import re
             
+            # CONFLICT DETECTION: Check for existing similar facts
+            fact_lower = fact.lower()
+            
+            # Define fact categories and their search terms
+            conflict_patterns = [
+                (r"name is|called|my name", "name"),
+                (r"live in|from|based in|location", "location"),
+                (r"work at|job is|occupation|employed", "job"),
+                (r"favorite|prefer|like", "preference"),
+            ]
+            
+            detected_category = None
+            for pattern, category in conflict_patterns:
+                if re.search(pattern, fact_lower):
+                    detected_category = category
+                    break
+            
+            if detected_category:
+                # Search for existing facts in this category
+                existing = memory_v2.search_memories(detected_category, user_id=core_config.MEM0_USER_ID, limit=5)
+                
+                # Also check brain files
+                brain = get_brain()
+                user_context = brain.read("memories/user_context.md")
+                
+                for mem in existing:
+                    mem_text = mem.get("memory", mem.get("text", ""))
+                    mem_lower = mem_text.lower()
+                    
+                    # Check if this is a conflicting fact (same category, different value)
+                    if re.search(pattern, mem_lower):
+                        # Found existing fact of same type - check if it's different
+                        if mem_text.lower() != fact_lower:
+                            logger.info(f"🔄 Conflict detected: existing '{mem_text}' vs new '{fact}'")
+                            return LoopResult.success(
+                                data={
+                                    "conflict": True,
+                                    "existing_fact": mem_text,
+                                    "new_fact": fact,
+                                    "category": detected_category,
+                                    "question": f"I have '{mem_text}' saved. Should I update this to '{fact}'?"
+                                },
+                                operation="save_conflict"
+                            )
+                
+                # Also check brain user_context.md for conflicts
+                if user_context:
+                    for line in user_context.split("\n"):
+                        if re.search(pattern, line.lower()) and fact_lower not in line.lower():
+                            logger.info(f"🔄 Brain conflict detected: existing '{line}' vs new '{fact}'")
+                            return LoopResult.success(
+                                data={
+                                    "conflict": True,
+                                    "existing_fact": line.strip(),
+                                    "new_fact": fact,
+                                    "category": detected_category,
+                                    "source": "brain",
+                                    "question": f"Your profile says '{line.strip()}'. Should I update this to '{fact}'?"
+                                },
+                                operation="save_conflict"
+                            )
+            
+            # No conflict found - proceed with saving
             # 1. Add to Mem0 (for vector search)
             messages = [{"role": "user", "content": fact}]
             mem0_result = memory_v2.add_memory(

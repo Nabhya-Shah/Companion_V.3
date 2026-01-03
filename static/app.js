@@ -485,9 +485,26 @@ async function sendMessage(retry = false) {
 
             if (data.chunk) {
               queueText(data.chunk);
+              // Reset emergency timeout on each chunk
+              if (window._streamingEmergencyTimeout) {
+                clearTimeout(window._streamingEmergencyTimeout);
+              }
+              window._streamingEmergencyTimeout = setTimeout(() => {
+                if (isStreaming) {
+                  console.warn("Emergency timeout: forcing stream end after 5s of no data");
+                  isStreaming = false;
+                  abortController = null;
+                  if (window.stopBtn) window.stopBtn.style.display = 'none';
+                  if (window.sendBtn) window.sendBtn.style.display = 'flex';
+                }
+              }, 5000);
             }
 
             if (data.done) {
+              // Clear emergency timeout on proper done
+              if (window._streamingEmergencyTimeout) {
+                clearTimeout(window._streamingEmergencyTimeout);
+              }
               // Update token stats in UI
               if (data.tokens && showTokens) {
                 // ... (existing token update logic)
@@ -1560,4 +1577,98 @@ document.addEventListener('DOMContentLoaded', () => {
   // Start job polling (Disabled - using SSE)
   // setInterval(pollJobs, 5000);
 });
+
+// ============================================
+// Smart Home Modal (Loxone)
+// ============================================
+const smartHomeModal = document.getElementById('smartHomeModal');
+const toggleSmartHomeBtn = document.getElementById('toggleSmartHomeBtn');
+const closeSmartHomeBtn = document.getElementById('closeSmartHomeBtn');
+
+toggleSmartHomeBtn?.addEventListener('click', () => {
+  smartHomeModal.classList.add('visible');
+  loadSmartHomeRooms();
+});
+
+closeSmartHomeBtn?.addEventListener('click', () => {
+  smartHomeModal.classList.remove('visible');
+});
+
+smartHomeModal?.addEventListener('click', (e) => {
+  if (e.target === smartHomeModal) {
+    smartHomeModal.classList.remove('visible');
+  }
+});
+
+async function loadSmartHomeRooms() {
+  const container = document.getElementById('smartHomeRooms');
+  if (!container) return;
+
+  container.innerHTML = '<div class="room-card loading">Loading rooms...</div>';
+
+  try {
+    const resp = await fetch('/api/loxone/rooms');
+    const data = await resp.json();
+
+    if (!data.success || !data.rooms) {
+      container.innerHTML = '<div class="room-card loading">Smart home unavailable</div>';
+      return;
+    }
+
+    container.innerHTML = '';
+    data.rooms.forEach(room => {
+      const roomEl = document.createElement('div');
+      roomEl.className = `room-card ${room.status === 'on' ? 'on' : 'off'}`;
+      roomEl.dataset.room = room.id;
+      roomEl.innerHTML = `
+        <span class="room-card-icon">${room.status === 'on' ? '💡' : '🔅'}</span>
+        <span class="room-card-name">${room.name}</span>
+        <span class="room-card-status">${room.status === 'on' ? 'On' : 'Off'}</span>
+      `;
+      roomEl.addEventListener('click', () => toggleSmartHomeRoom(room.id, roomEl));
+      container.appendChild(roomEl);
+    });
+  } catch (err) {
+    console.error('Failed to load Smart Home rooms:', err);
+    container.innerHTML = '<div class="room-card loading">Connection error</div>';
+  }
+}
+
+async function toggleSmartHomeRoom(roomId, roomEl) {
+  const isOn = roomEl.classList.contains('on');
+  const action = isOn ? 'off' : 'on';
+
+  // Optimistic update
+  roomEl.classList.toggle('on');
+  roomEl.classList.toggle('off');
+  const icon = roomEl.querySelector('.room-card-icon');
+  const status = roomEl.querySelector('.room-card-status');
+  icon.textContent = isOn ? '🔅' : '💡';
+  status.textContent = isOn ? 'Off' : 'On';
+
+  try {
+    const resp = await fetch(`/api/loxone/light/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: roomId })
+    });
+    const data = await resp.json();
+
+    if (!data.success) {
+      // Revert on failure
+      roomEl.classList.toggle('on');
+      roomEl.classList.toggle('off');
+      icon.textContent = isOn ? '💡' : '🔅';
+      status.textContent = isOn ? 'On' : 'Off';
+      console.error('Light toggle failed:', data.error);
+    }
+  } catch (err) {
+    // Revert on error
+    roomEl.classList.toggle('on');
+    roomEl.classList.toggle('off');
+    icon.textContent = isOn ? '💡' : '🔅';
+    status.textContent = isOn ? 'On' : 'Off';
+    console.error('Light toggle error:', err);
+  }
+}
 

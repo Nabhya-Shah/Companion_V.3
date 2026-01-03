@@ -39,7 +39,8 @@ and return the result. Be precise and concise."""
         return [
             "get_time", "calculate", "web_search", "wikipedia", "brain_read", "brain_list",
             "browser_goto", "browser_click", "browser_type", "browser_read", "browser_press",
-            "add_bookmark", "open_bookmark", "enable_browser_control"
+            "add_bookmark", "open_bookmark", "enable_browser_control",
+            "light_on", "light_off", "light_dim"  # Loxone smart home
         ]
     
     async def execute(self, task: Dict[str, Any]) -> LoopResult:
@@ -105,6 +106,13 @@ and return the result. Be precise and concise."""
             return await self._brain_read(task.get("path", ""))
         elif operation == "brain_list":
             return await self._brain_list(task.get("subdir", ""))
+        # Loxone Smart Home - Light Control
+        elif operation == "light_on":
+            return await self._light_on(task.get("room", ""))
+        elif operation == "light_off":
+            return await self._light_off(task.get("room", ""))
+        elif operation == "light_dim":
+            return await self._light_dim(task.get("room", ""), task.get("level", 50))
         else:
             return LoopResult.failure(f"Unknown operation: {operation}")
     
@@ -352,3 +360,58 @@ and return the result. Be precise and concise."""
             )
         except Exception as e:
             return LoopResult.failure(f"Failed to enable browser control: {e}")
+    
+    # =========================================================================
+    # Loxone Smart Home - Light Control
+    # =========================================================================
+    
+    async def _light_on(self, room: str) -> LoopResult:
+        """Turn on lights in specified room."""
+        try:
+            from companion_ai.integrations.loxone import turn_on_lights
+            result = await turn_on_lights(room if room else None)
+            
+            if result.get("success"):
+                return LoopResult.success(
+                    data=result,
+                    operation="light_on"
+                )
+            else:
+                return LoopResult.failure(result.get("error", "Failed to turn on lights"))
+        except Exception as e:
+            logger.error(f"Light on failed: {e}")
+            return LoopResult.failure(str(e))
+    
+    async def _light_off(self, room: str) -> LoopResult:
+        """Turn off lights in specified room."""
+        try:
+            from companion_ai.integrations.loxone import turn_off_lights
+            result = await turn_off_lights(room if room else None)
+            
+            if result.get("success"):
+                return LoopResult.success(
+                    data=result,
+                    operation="light_off"
+                )
+            else:
+                return LoopResult.failure(result.get("error", "Failed to turn off lights"))
+        except Exception as e:
+            logger.error(f"Light off failed: {e}")
+            return LoopResult.failure(str(e))
+    
+    async def _light_dim(self, room: str, level: int) -> LoopResult:
+        """Dim lights to specified level."""
+        try:
+            from companion_ai.integrations.loxone import dim_lights
+            result = await dim_lights(room, level)
+            
+            if result.get("success"):
+                return LoopResult.success(
+                    data=result,
+                    operation="light_dim"
+                )
+            else:
+                return LoopResult.failure(result.get("error", "Failed to dim lights"))
+        except Exception as e:
+            logger.error(f"Light dim failed: {e}")
+            return LoopResult.failure(str(e))

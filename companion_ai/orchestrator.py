@@ -110,91 +110,49 @@ class Orchestrator:
     def _build_orchestrator_prompt(self, user_message: str, context: Dict) -> str:
         """Build system prompt for 120B routing decision.
         
-        This prompt tells 120B about available loops and how to decide.
+        OPTIMIZED FOR GROQ PROMPT CACHING:
+        - Static content (routing rules) comes FIRST and is cacheable
+        - Dynamic content (user context) comes LAST
+        - This maximizes Groq's automatic prefix caching (50% discount on cached tokens)
         """
-        capabilities = self._get_capabilities()
-        recent_context = context.get("recent_conversation", "")[:1000]  # Limit context
+        # Static content - cacheable by Groq (put first!)
+        static_rules = """You are the Companion AI orchestrator. Respond with JSON only.
+
+## Decision Format (JSON only, no markdown)
+For direct answers: {"action": "answer", "content": "Your response"}
+For tools: {"action": "delegate", "loop": "tools", "task": {"operation": "get_time"}}
+For memory save: {"action": "delegate", "loop": "memory", "task": {"operation": "save", "fact": "User's name is Bob"}}
+For memory search: {"action": "delegate", "loop": "memory", "task": {"operation": "search", "query": "..."}}
+For vision: {"action": "delegate", "loop": "vision", "task": {"operation": "describe"}}
+
+## Routing Rules
+- "What time?" / "What's today?" → tools (get_time)
+- "Calculate X" / "What's 2+2?" → tools (calculate)
+- "What's my name?" / "Remember about me" → memory (search)
+- "My name is X" / "I am called X" → memory (save) - ALWAYS route to memory!
+- "I live in X" / "I'm from X" → memory (save)
+- "I work at X" / "My job is X" → memory (save)
+- "I prefer X" / "I like X" / "My favorite is X" → memory (save)
+- "Save/Remember that X" → memory (save)
+- "Look at screen" / "What do you see?" → vision (describe)
+- "Go to website" / "Open bookmark" → tools (browser_goto/open_bookmark)
+- "Turn on lights" / "Lights on" → tools (light_on, room: "all" or specific room)
+- "Turn off lights" / "Lights off" → tools (light_off, room: "all" or specific room)
+- "Dim lights to X%" → tools (light_dim, room: "...", level: X)
+- Greetings (hi/hello) without personal info → answer directly
+- General questions → answer directly
+
+IMPORTANT: When user shares ANY personal info (name, location, job, preferences), ALWAYS route to memory loop with save operation!"""
+
+        # Dynamic content - varies per request (put last)
+        recent_context = context.get("recent_conversation", "")
+        # Limit context to reduce tokens
+        if len(recent_context) > 500:
+            recent_context = recent_context[-500:]
         
-        return f"""You are the Companion AI orchestrator. You decide how to handle each user message.
-
-## Available Local Loops
-{capabilities}
-
-## Your Decision Format
-You MUST respond with a JSON object (no markdown, just JSON):
-
-For direct answers (greetings, conversation, questions you can answer):
-{{"action": "answer", "content": "Your response here"}}
-
-For delegating to tools loop (time, math, simple lookups):
-{{"action": "delegate", "loop": "tools", "task": {{"operation": "get_time"}}}}
-{{"action": "delegate", "loop": "tools", "task": {{"operation": "calculate", "expression": "2+2"}}}}
-{{"action": "delegate", "loop": "tools", "task": {{"operation": "brain_list", "subdir": ""}}}}
-{{"action": "delegate", "loop": "tools", "task": {{"operation": "brain_read", "path": "notes/file.md"}}}}
-
-For browser automation (ALWAYS include url/text/selector as appropriate):
-{{"action": "delegate", "loop": "tools", "task": {{"operation": "browser_goto", "url": "youtube.com"}}}}
-{{"action": "delegate", "loop": "tools", "task": {{"operation": "browser_click", "text": "Sign in"}}}}
-{{"action": "delegate", "loop": "tools", "task": {{"operation": "browser_click", "selector": "#login-button"}}}}
-{{"action": "delegate", "loop": "tools", "task": {{"operation": "browser_type", "selector": "input[name=email]", "text": "user@example.com"}}}}
-
-For delegating to memory loop (saving/recalling user facts):
-{{"action": "delegate", "loop": "memory", "task": {{"operation": "search", "query": "user name"}}}}
-{{"action": "delegate", "loop": "memory", "task": {{"operation": "save", "fact": "User prefers dark mode"}}}}
-{{"action": "delegate", "loop": "memory", "task": {{"operation": "delete", "query": "dark mode preference"}}}}
-
-For delegating to vision loop (looking at screen):
-{{"action": "delegate", "loop": "vision", "task": {{"operation": "describe"}}}}
-{{"action": "delegate", "loop": "vision", "task": {{"operation": "find", "element": "submit button"}}}}
-
-For background tasks (long-running automation only):
-{{"action": "background", "loop": "computer", "task": {{"operation": "execute", "task": "..."}}}}
-
-## IMPORTANT Routing Rules
-
-## MEMORY & BRAIN (uses local model):
-- "Remember that X", "Save this fact" → DELEGATE to memory loop (operation: "save", fact: "...")
-- "I prefer X", "My name is Y" → DELEGATE to memory loop (operation: "save", fact: "User prefers/is...")
-- "What do you know about me?", "What's my name?" → DELEGATE to memory loop (operation: "search", query: "...")
-- "What was the last thing you saved?" → DELEGATE to memory loop (operation: "search", query: "recent")
-- "Forget that X" → DELEGATE to memory loop (operation: "delete", query: "...")
-
-## BRAIN FILES (direct access):
-- "What bookmarks do I have?" → DELEGATE to tools loop (operation: "brain_read", path: "browser/bookmarks.md")
-- "What are my preferences?" → DELEGATE to tools loop (operation: "brain_read", path: "memories/preferences.md")
-- "Show me the brain files" → DELEGATE to tools loop (operation: "brain_list")
-
-## TOOLS:
-- "What time is it?" → DELEGATE to tools loop (operation: "get_time")
-- "What's 2+2?" → DELEGATE to tools loop (operation: "calculate", expression: "2+2")
-- "Look at my screen" → DELEGATE to vision loop
-- "Hi", "Hello", questions about general topics → ANSWER directly
-
-**BROWSER AUTOMATION (uses Playwright - fast & reliable):**
-- "Go to google.com" → DELEGATE to tools loop (browser_goto)
-- "Open bookmark X", "Open [Name] (e.g. Open Bromcom)" → DELEGATE to tools loop (open_bookmark)
-- "Go to google.com" → DELEGATE to tools loop (browser_goto)
-- "Save this page as X", "Bookmark this" → DELEGATE to tools loop (add_bookmark)
-- "Open wikipedia", "Open a new tab", "Open Chrome tab" → DELEGATE to tools loop (browser_goto url="about:blank")
-- "Click the login button" → DELEGATE to tools loop (browser_click)
-- "Type my email" → DELEGATE to tools loop (browser_type)
-- "Enable browser control", "Restart Chrome for AI", "Fix Chrome" → DELEGATE to tools loop (enable_browser_control)
-- ANY web browsing task → DELEGATE to tools loop
-
-**DESKTOP AUTOMATION (slower, uses vision):**
-- "Open notepad" → BACKGROUND computer loop
-- "Click on desktop icon" → BACKGROUND computer loop
-- ONLY use computer loop for non-browser desktop tasks (e.g. Spotify, Discord, Explorer)
-
-## Detecting Facts to Save
-If the user shares personal info (name, preferences, facts about themselves), add:
-"save_facts": ["User's name is X", "User likes Y"]
-
-Only save CONCRETE facts, not casual chat.
-
-## Recent Context
-{recent_context if recent_context else "No prior context."}
-"""
+        dynamic_part = f"\n\n## Context\n{recent_context if recent_context else 'No prior context.'}"
+        
+        return static_rules + dynamic_part
     
     async def process(
         self, 
