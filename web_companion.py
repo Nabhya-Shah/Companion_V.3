@@ -947,6 +947,89 @@ def loxone_light(action):
         return jsonify({'success': False, 'error': str(e)})
 
 
+# --- File Upload API ---
+
+UPLOAD_DIR = os.path.join(DATA_DIR, 'uploads')
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf', 'docx', 'txt'}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+@app.route('/api/upload', methods=['POST'])
+def upload_file():
+    """Upload a file and optionally analyze it with vision."""
+    import uuid
+    
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected'}), 400
+    
+    if not allowed_file(file.filename):
+        return jsonify({'success': False, 'error': f'File type not allowed. Allowed: {", ".join(ALLOWED_EXTENSIONS)}'}), 400
+    
+    # Generate unique ID for file
+    file_id = str(uuid.uuid4())[:8]
+    ext = file.filename.rsplit('.', 1)[1].lower()
+    safe_filename = f"{file_id}.{ext}"
+    file_path = os.path.join(UPLOAD_DIR, safe_filename)
+    
+    # Save file
+    file.save(file_path)
+    file_size = os.path.getsize(file_path)
+    
+    if file_size > MAX_FILE_SIZE:
+        os.remove(file_path)
+        return jsonify({'success': False, 'error': 'File too large (max 10MB)'}), 400
+    
+    # Determine file type
+    is_image = ext in {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+    is_pdf = ext == 'pdf'
+    is_doc = ext in {'docx', 'txt'}
+    
+    # Auto-analyze images with Maverick
+    analysis = None
+    if is_image:
+        try:
+            analysis = vision_manager.analyze_image_file(
+                file_path, 
+                prompt="Describe this image concisely. What does it show?"
+            )
+            logger.info(f"Image analyzed: {file_id} - {analysis[:100]}...")
+        except Exception as e:
+            logger.error(f"Image analysis failed: {e}")
+            analysis = None
+    
+    return jsonify({
+        'success': True,
+        'file_id': file_id,
+        'filename': file.filename,
+        'type': 'image' if is_image else 'pdf' if is_pdf else 'document' if is_doc else 'file',
+        'size': file_size,
+        'url': f'/api/upload/{file_id}',
+        'analysis': analysis
+    })
+
+@app.route('/api/upload/<file_id>', methods=['GET'])
+def get_uploaded_file(file_id):
+    """Serve an uploaded file."""
+    from flask import send_from_directory
+    
+    # Find file with any extension
+    for ext in ALLOWED_EXTENSIONS:
+        filename = f"{file_id}.{ext}"
+        filepath = os.path.join(UPLOAD_DIR, filename)
+        if os.path.exists(filepath):
+            return send_from_directory(UPLOAD_DIR, filename)
+    
+    return jsonify({'error': 'File not found'}), 404
+
+
 # --- Tasks API (V6 Architecture) ---
 
 @app.route('/api/tasks', methods=['GET'])

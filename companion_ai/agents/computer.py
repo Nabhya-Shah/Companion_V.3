@@ -5,7 +5,15 @@ import threading
 from typing import Tuple, Optional, Dict, List
 
 import pyautogui
-from companion_ai.vision_manager import vision_manager
+
+# Vision manager is optional (computer use currently shelved)
+try:
+    from companion_ai.vision_manager import vision_manager
+    VISION_AVAILABLE = True
+except ImportError:
+    vision_manager = None
+    VISION_AVAILABLE = False
+
 from companion_ai.core import config as core_config
 
 # Configure logging
@@ -48,6 +56,11 @@ class ComputerAgent:
         Returns: (x, y) or None if not found.
         """
         logger.info(f"👀 Locating element: '{element_description}'")
+        
+        # Check if vision is available
+        if not VISION_AVAILABLE or vision_manager is None:
+            logger.warning("Vision not available, using hardcoded locations")
+            return self._get_hardcoded_location(element_description)
         
         # Capture screen
         img = vision_manager.capture_screen(resize_dim=None)

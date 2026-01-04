@@ -340,5 +340,48 @@ Instructions:
             logger.error(f"Active vision analysis failed: {e}")
             return f"Error analyzing screen: {str(e)}"
 
+    def analyze_image_file(self, image_path: str, prompt: str = "Describe briefly.") -> str:
+        """
+        Analyze an uploaded image file with Maverick vision.
+        OPTIMIZED: 512px images, 150 max_tokens for lower token usage.
+        """
+        try:
+            # Load and resize image (512px saves ~50% tokens vs 1024px)
+            img = Image.open(image_path)
+            img = img.convert('RGB')
+            img.thumbnail((768, 768))  # 768px balances quality + tokens
+            
+            # Skip local vision for speed
+            if not self.client:
+                return "Vision API unavailable - no API key configured"
+            
+            b64_img = self._image_to_base64(img)
+            
+            response = self.client.chat.completions.create(
+                model=self.vision_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": f"Briefly: {prompt}"},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=150,  # Optimized: 150 vs 500
+                temperature=0.2
+            )
+            
+            return response.choices[0].message.content.strip()
+            
+        except FileNotFoundError:
+            return f"Image file not found: {image_path}"
+        except Exception as e:
+            logger.error(f"Image analysis failed: {e}")
+            return f"Error analyzing image: {str(e)}"
+
 # Global instance
 vision_manager = VisionManager()

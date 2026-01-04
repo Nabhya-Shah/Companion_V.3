@@ -351,7 +351,7 @@ def tool_brain_list(subdir: str = "") -> str:
 def tool_browser_goto(url: str) -> str:
     """Navigate browser to URL."""
     try:
-        from companion_ai.browser_agent import sync_goto
+        from companion_ai.agents.browser import sync_goto
         return sync_goto(url)
     except Exception as e:
         return f"Browser error: {str(e)}"
@@ -380,7 +380,7 @@ def tool_browser_goto(url: str) -> str:
 def tool_browser_click(selector: str = "", text: str = None) -> str:
     """Click element by selector or text."""
     try:
-        from companion_ai.browser_agent import sync_click
+        from companion_ai.agents.browser import sync_click
         return sync_click(selector, text)
     except Exception as e:
         return f"Browser click error: {str(e)}"
@@ -409,7 +409,7 @@ def tool_browser_click(selector: str = "", text: str = None) -> str:
 def tool_browser_type(selector: str, text: str) -> str:
     """Type into input field."""
     try:
-        from companion_ai.browser_agent import sync_type
+        from companion_ai.agents.browser import sync_type
         return sync_type(selector, text)
     except Exception as e:
         return f"Browser type error: {str(e)}"
@@ -434,7 +434,7 @@ def tool_browser_type(selector: str, text: str) -> str:
 def tool_browser_read(selector: str = None) -> str:
     """Read text from page/element."""
     try:
-        from companion_ai.browser_agent import sync_get_text
+        from companion_ai.agents.browser import sync_get_text
         return sync_get_text(selector)
     except Exception as e:
         return f"Browser read error: {str(e)}"
@@ -459,7 +459,7 @@ def tool_browser_read(selector: str = None) -> str:
 def tool_browser_press(key: str) -> str:
     """Press keyboard key in browser."""
     try:
-        from companion_ai.browser_agent import sync_press_key
+        from companion_ai.agents.browser import sync_press_key
         return sync_press_key(key)
     except Exception as e:
         return f"Browser press error: {str(e)}"

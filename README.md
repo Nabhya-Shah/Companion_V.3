@@ -15,6 +15,15 @@ A personal AI companion with persistent memory, knowledge graph, and intelligent
 | **Web UI** | Modern chat interface with task panel and memory visualization |
 | **Smart Home** | Loxone integration with live state, dim/bright modes, 15s auto-refresh |
 
+## 🧠 Memory System
+
+| Feature | Description |
+|---------|-------------|
+| **Conflict Detection** | Detects when new facts contradict existing ones (e.g., name change) |
+| **Deduplication** | Hash-based exact match + 70% similarity threshold |
+| **Confidence Scoring** | Facts have confidence levels (high/medium/low) with reaffirmation |
+| **Priority/Staleness** | Surfaces old facts for reaffirmation, applies confidence decay |
+
 ## 🚀 Quick Start
 
 ```bash

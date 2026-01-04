@@ -142,6 +142,8 @@ For vision: {"action": "delegate", "loop": "vision", "task": {"operation": "desc
 - Greetings (hi/hello) without personal info → answer directly
 - General questions → answer directly
 
+EXCEPTION: If the message already contains "[Visual context" then DO NOT delegate to vision - the image has already been analyzed. Just answer directly using the provided visual context.
+
 IMPORTANT: When user shares ANY personal info (name, location, job, preferences), ALWAYS route to memory loop with save operation!"""
 
         # Dynamic content - varies per request (put last)

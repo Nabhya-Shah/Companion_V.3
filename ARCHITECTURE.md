@@ -107,6 +107,14 @@ Self-contained units with specialized models:
 - Each pipeline step shows tokens + timing
 - Model labels: GROQ (purple) / LOCAL (green)
 
+### 5. Memory System
+- **Conflict Detection**: `pending_profile_facts` table with `conflict_with` column
+- **Deduplication**: Hash-based + 70% similarity threshold for summaries/insights
+- **Confidence Scoring**: High (≥0.80), Medium (≥0.50), Low (<0.50)
+- **Reaffirmation**: Same fact restated → confidence boost + reaffirmation count
+- **Staleness**: `get_stale_profile_facts()` surfaces old facts for reconfirmation
+- **Config**: Set `ENABLE_FACT_APPROVAL=true` for manual approval workflow
+
 ---
 
 ## Tech Stack

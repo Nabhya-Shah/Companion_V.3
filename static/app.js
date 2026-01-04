@@ -26,6 +26,14 @@ const tasksList = document.getElementById('tasksList');
 const tasksEmpty = document.getElementById('tasksEmpty');
 const taskCountBadge = document.getElementById('taskCountBadge');
 
+// Attachment elements
+const attachBtn = document.getElementById('attachBtn');
+const fileInput = document.getElementById('fileInput');
+const attachmentPreview = document.getElementById('attachmentPreview');
+const previewImage = document.getElementById('previewImage');
+const previewName = document.getElementById('previewName');
+const removeAttachment = document.getElementById('removeAttachment');
+
 // ============================================
 // State
 // ============================================
@@ -37,6 +45,7 @@ let lastHistoryLength = -1; // Start at -1 to force initial render
 let eventSource = null;
 let isStreaming = false; // Prevents SSE from overwriting during streaming
 let abortController = null; // For stopping generation
+let currentAttachment = null; // Stores current file attachment {file, url, analysis}
 
 // ============================================
 // Utilities
@@ -205,7 +214,7 @@ function renderPipeline(metadata) {
 // ============================================
 // Message Rendering
 // ============================================
-function createMessageElement(role, text, timestamp, tokens, metadata) {
+function createMessageElement(role, text, timestamp, tokens, metadata, attachment) {
   const wrapper = document.createElement('div');
   wrapper.className = 'message-wrapper';
 
@@ -258,7 +267,14 @@ function createMessageElement(role, text, timestamp, tokens, metadata) {
       }
     }
   } else {
-    textDiv.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
+    // User message - show attachment image if present
+    if (attachment && attachment.isImage && attachment.url) {
+      const imgDiv = document.createElement('div');
+      imgDiv.className = 'message-attachment';
+      imgDiv.innerHTML = `<img src="${attachment.url}" alt="Attached image" onclick="window.open(this.src, '_blank')" style="cursor: pointer;" />`;
+      textDiv.appendChild(imgDiv);
+    }
+    textDiv.innerHTML += escapeHtml(text).replace(/\n/g, '<br>');
   }
 
   content.appendChild(roleLabel);
@@ -319,13 +335,13 @@ function createLoadingMessage() {
   return wrapper;
 }
 
-function addMessage(role, text, timestamp, tokens, metadata) {
+function addMessage(role, text, timestamp, tokens, metadata, attachment) {
   // Hide welcome screen on first message
   if (welcomeScreen && welcomeScreen.parentNode) {
     welcomeScreen.remove();
   }
 
-  const messageEl = createMessageElement(role, text, timestamp, tokens, metadata);
+  const messageEl = createMessageElement(role, text, timestamp, tokens, metadata, attachment);
   chatPane.appendChild(messageEl);
   scrollToBottom();
 }
@@ -343,14 +359,37 @@ function scrollToBottom(instant = false) {
 // Chat Functions
 // ============================================
 async function sendMessage(retry = false) {
-  const message = userInput.value.trim();
-  if (!message) return;
+  let message = userInput.value.trim();
+  if (!message && !currentAttachment) return;
 
-  // Add user message
-  addMessage('user', message);
+  // If there's an attachment with analysis, append the context to the message
+  let attachmentContext = '';
+  if (currentAttachment && currentAttachment.analysis) {
+    // Use wording that won't trigger the orchestrator to re-delegate to vision
+    attachmentContext = `\n\n[Visual context from user's uploaded file: ${currentAttachment.analysis}]`;
+    // If user didn't type anything, just ask about the image
+    if (!message) {
+      message = "What can you tell me about this?";
+    }
+  }
+
+  const fullMessage = message + attachmentContext;
+
+  // Save attachment info before clearing (for display in chat)
+  const messageAttachment = currentAttachment ? {
+    isImage: currentAttachment.isImage,
+    url: currentAttachment.url,
+    name: currentAttachment.name
+  } : null;
+
+  // Add user message with attachment preview
+  addMessage('user', message, null, null, null, messageAttachment);
   userInput.value = '';
   resizeTextarea();
   updateSendButton();
+
+  // Clear attachment after sending
+  clearAttachment();
 
   // Create streaming AI message structure
   const wrapper = document.createElement('div');
@@ -437,7 +476,7 @@ async function sendMessage(retry = false) {
     const resp = await fetch('/api/chat/send', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ message, tts_enabled: ttsEnabled }),
+      body: JSON.stringify({ message: fullMessage, tts_enabled: ttsEnabled }),
       signal: abortController.signal
     });
 
@@ -1797,3 +1836,154 @@ async function toggleSmartHomeMode(roomId, newMode) {
     console.error('Mode toggle error:', err);
   }
 }
+
+// ============================================
+// FILE ATTACHMENTS
+// ============================================
+
+// Handle file selection via button or drag-drop
+function handleFileSelect(file) {
+  if (!file) return;
+
+  const isImage = file.type.startsWith('image/');
+
+  // Store file info
+  currentAttachment = {
+    file: file,
+    name: file.name,
+    type: file.type,
+    isImage: isImage,
+    uploading: true
+  };
+
+  // Show preview
+  if (isImage) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      previewImage.src = e.target.result;
+      previewImage.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+  } else {
+    previewImage.style.display = 'none';
+  }
+
+  previewName.textContent = file.name;
+  attachmentPreview.style.display = 'flex';
+
+  // Show analyzing state for images
+  if (isImage) {
+    previewName.innerHTML = `${file.name} <span class="analyzing">⏳ Analyzing...</span>`;
+  }
+
+  // Upload file
+  uploadAttachment(file);
+}
+
+// Upload file to server
+async function uploadAttachment(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const resp = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData
+    });
+
+    const data = await resp.json();
+
+    if (data.success) {
+      currentAttachment = {
+        ...currentAttachment,
+        fileId: data.file_id,
+        url: data.url,
+        analysis: data.analysis,
+        uploading: false
+      };
+
+      // Update preview with uploaded file URL
+      if (currentAttachment.isImage) {
+        previewImage.src = data.url;
+      }
+
+      previewName.textContent = `${file.name} ✓`;
+      console.log('File uploaded:', data);
+    } else {
+      console.error('Upload failed:', data.error);
+      previewName.textContent = `${file.name} (failed)`;
+      currentAttachment = null;
+    }
+  } catch (err) {
+    console.error('Upload error:', err);
+    previewName.textContent = `${file.name} (error)`;
+    currentAttachment = null;
+  }
+}
+
+// Remove current attachment
+function clearAttachment() {
+  currentAttachment = null;
+  attachmentPreview.style.display = 'none';
+  previewImage.src = '';
+  previewName.textContent = '';
+  fileInput.value = '';
+}
+
+// Wire up attachment events
+if (attachBtn) {
+  attachBtn.addEventListener('click', () => fileInput.click());
+}
+
+if (fileInput) {
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+      handleFileSelect(e.target.files[0]);
+    }
+  });
+}
+
+if (removeAttachment) {
+  removeAttachment.addEventListener('click', clearAttachment);
+}
+
+// Drag and drop support
+if (chatPane) {
+  chatPane.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    chatPane.classList.add('drag-over');
+  });
+
+  chatPane.addEventListener('dragleave', () => {
+    chatPane.classList.remove('drag-over');
+  });
+
+  chatPane.addEventListener('drop', (e) => {
+    e.preventDefault();
+    chatPane.classList.remove('drag-over');
+
+    if (e.dataTransfer.files.length > 0) {
+      handleFileSelect(e.dataTransfer.files[0]);
+    }
+  });
+}
+
+// Clipboard paste support (Ctrl+V for screenshots)
+document.addEventListener('paste', (e) => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].type.startsWith('image/')) {
+      e.preventDefault();
+      const file = items[i].getAsFile();
+      if (file) {
+        // Give it a name since clipboard images don't have one
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const namedFile = new File([file], `screenshot-${timestamp}.png`, { type: file.type });
+        handleFileSelect(namedFile);
+      }
+      break;
+    }
+  }
+});

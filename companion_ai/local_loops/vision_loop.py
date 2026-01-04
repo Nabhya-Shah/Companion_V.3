@@ -1,17 +1,18 @@
 # companion_ai/local_loops/vision_loop.py
 """
-Vision Loop - Analyze screen and images using local vision model.
+Vision Loop - Analyze images using Groq Maverick (cloud).
 
 Operations:
-- describe: Describe what's on screen/in image
-- find: Find specific elements on screen
-- ocr: Extract text from image
+- describe: Describe uploaded image
+- analyze: Detailed analysis of image
 
-Uses LLaVA 13B or similar vision model.
+Uses Llama 4 Maverick via Groq for reliable, fast vision.
+Optimized for low token usage.
 """
 
 import logging
 import base64
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from .base import Loop, LoopResult, LoopStatus
@@ -22,184 +23,110 @@ logger = logging.getLogger(__name__)
 
 @register_loop
 class VisionLoop(Loop):
-    """Vision analysis loop using local multimodal model."""
+    """Vision analysis loop using Groq Maverick (cloud)."""
     
     name = "vision"
-    description = "Analyze screenshots and images - describe content, find elements, extract text"
-    
-    system_prompts = {
-        "analyzer": """You are a screen/image analyzer. Describe what you see concisely and accurately.
-
-Focus on:
-- Main content and purpose of the screen
-- Key UI elements (buttons, text fields, menus)
-- Any important text visible
-- Overall layout and state
-
-Be concise but thorough. Do not speculate about things you cannot see.""",
-
-        "finder": """You are looking for specific elements on screen. 
-Describe the location and state of the requested element.
-If not found, say so clearly."""
-    }
+    description = "Analyze images with Maverick - fast cloud vision"
     
     def __init__(self, config: Dict[str, Any] = None):
         super().__init__(config)
-        self._vision_endpoint = None
+        self._client = None
+        self._model = "meta-llama/llama-4-maverick-17b-128e-instruct"
     
     def _setup(self) -> None:
-        """Connect to vision model."""
-        self._vision_endpoint = self.config.get("vision_endpoint", "http://localhost:11434")
-        logger.info(f"VisionLoop configured with endpoint: {self._vision_endpoint}")
+        """Initialize Groq client for vision."""
+        from companion_ai.core.config import GROQ_VISION_API_KEY
+        if GROQ_VISION_API_KEY:
+            from groq import Groq
+            self._client = Groq(api_key=GROQ_VISION_API_KEY)
+            logger.info("VisionLoop: Groq Maverick client ready")
+        else:
+            logger.warning("VisionLoop: No GROQ_VISION_API_KEY, vision disabled")
     
     def _get_supported_operations(self) -> List[str]:
-        return ["describe", "find", "ocr"]
+        return ["describe", "analyze"]
     
     async def execute(self, task: Dict[str, Any]) -> LoopResult:
         """Execute a vision task.
         
         Task format:
-            {"operation": "describe"}  # Captures current screen
             {"operation": "describe", "image_path": "/path/to/image.png"}
-            {"operation": "find", "element": "submit button"}
-            {"operation": "ocr"}
+            {"operation": "analyze", "image_path": "...", "prompt": "What color is..."}
         """
-        operation = task.get("operation")
+        if not self._client:
+            return LoopResult.failure("Vision API not configured")
         
-        if operation == "describe":
-            return await self._describe(task.get("image_path"))
-        elif operation == "find":
-            return await self._find(task.get("element", ""), task.get("image_path"))
-        elif operation == "ocr":
-            return await self._ocr(task.get("image_path"))
-        else:
-            return LoopResult.failure(f"Unknown operation: {operation}")
+        operation = task.get("operation", "describe")
+        image_path = task.get("image_path")
+        prompt = task.get("prompt", "Describe this image briefly.")
+        
+        if not image_path:
+            return LoopResult.failure("No image_path provided")
+        
+        return await self._analyze_image(image_path, prompt, operation)
     
-    async def _capture_screen(self) -> Optional[str]:
-        """Capture current screen and return base64 encoded image."""
-        try:
-            import pyautogui
-            from io import BytesIO
-            
-            screenshot = pyautogui.screenshot()
-            buffer = BytesIO()
-            screenshot.save(buffer, format='PNG')
-            return base64.b64encode(buffer.getvalue()).decode('utf-8')
-        except Exception as e:
-            logger.error(f"Screen capture failed: {e}")
-            return None
-    
-    async def _load_image(self, image_path: Optional[str]) -> Optional[str]:
-        """Load image from path or capture screen."""
-        if image_path:
-            try:
-                path = Path(image_path)
-                if path.exists():
-                    with open(path, 'rb') as f:
-                        return base64.b64encode(f.read()).decode('utf-8')
-                else:
-                    logger.error(f"Image not found: {image_path}")
-                    return None
-            except Exception as e:
-                logger.error(f"Failed to load image: {e}")
-                return None
-        else:
-            return await self._capture_screen()
-    
-    async def _call_vision_model(self, image_b64: str, prompt: str) -> Optional[str]:
-        """Call Ollama llava vision model with image."""
-        import requests
+    async def _analyze_image(self, image_path: str, prompt: str, operation: str) -> LoopResult:
+        """Analyze image with Groq Maverick (optimized for low tokens)."""
+        import time
+        start_time = time.time()
         
         try:
-            ollama_url = self._vision_endpoint or "http://localhost:11434"
+            # Load and encode image
+            path = Path(image_path)
+            if not path.exists():
+                return LoopResult.failure(f"Image not found: {image_path}")
             
-            logger.info("Calling Ollama llava:7b for vision analysis")
+            # Resize image to reduce tokens (512px max)
+            from PIL import Image
+            import io
             
-            response = requests.post(
-                f"{ollama_url}/api/generate",
-                json={
-                    "model": "llava:7b",
-                    "prompt": prompt,
-                    "images": [image_b64],  # Ollama expects base64 images in 'images' array
-                    "stream": False,
-                    "options": {
-                        "num_predict": 512,
-                        "temperature": 0.1
+            img = Image.open(path)
+            img = img.convert('RGB')
+            img.thumbnail((768, 768))  # 768px balances quality + tokens
+            
+            buffer = io.BytesIO()
+            img.save(buffer, format='JPEG', quality=70)
+            image_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            
+            # Short, focused prompt for efficiency
+            system_prompt = "Describe briefly in 1-2 sentences."
+            
+            response = self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": f"{system_prompt} {prompt}"},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}
+                            }
+                        ]
                     }
-                },
-                timeout=120
+                ],
+                max_tokens=150,  # Short responses save tokens
+                temperature=0.2
             )
             
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("response", "")
-            else:
-                logger.error(f"Ollama vision call failed: {response.status_code}")
-                return None
+            description = response.choices[0].message.content.strip()
+            elapsed = int((time.time() - start_time) * 1000)
             
-        except Exception as e:
-            logger.error(f"Vision model call failed: {e}")
-            return None
-    
-    async def _describe(self, image_path: Optional[str] = None) -> LoopResult:
-        """Describe screen or image content."""
-        try:
-            image_b64 = await self._load_image(image_path)
-            if not image_b64:
-                return LoopResult.failure("Failed to capture/load image")
+            # Token tracking
+            tokens_used = {
+                "input": response.usage.prompt_tokens if hasattr(response, 'usage') else 0,
+                "output": response.usage.completion_tokens if hasattr(response, 'usage') else 0,
+                "ms": elapsed,
+                "model": "maverick"
+            }
             
-            description = await self._call_vision_model(image_b64, self.get_system_prompt("analyzer"))
-            
-            if description:
-                return LoopResult.success(
-                    data={"description": description},
-                    operation="describe"
-                )
-            else:
-                return LoopResult.failure("Vision model returned no description")
-            
-        except Exception as e:
-            logger.error(f"Vision describe failed: {e}")
-            return LoopResult.failure(str(e))
-    
-    async def _find(self, element: str, image_path: Optional[str] = None) -> LoopResult:
-        """Find a specific element on screen."""
-        if not element:
-            return LoopResult.failure("No element specified to find")
-        
-        try:
-            image_b64 = await self._load_image(image_path)
-            if not image_b64:
-                return LoopResult.failure("Failed to capture/load image")
-            
-            prompt = f"{self.get_system_prompt('finder')}\n\nFind the element: '{element}'. Return coordinates [x, y] or 'Not found'."
-            result = await self._call_vision_model(image_b64, prompt)
-            
-            # TODO: Parse coordinates from result
-            logger.info(f"Vision find result: {result}")
+            logger.info(f"Vision analysis: {tokens_used['input']+tokens_used['output']} tokens, {elapsed}ms")
             
             return LoopResult.success(
-                data={"found": True if result and "Not found" not in result else False, "raw_result": result},
-                operation="find"
+                data={"description": description, "tokens": tokens_used},
+                operation=operation
             )
-        except Exception as e:
-            logger.error(f"Vision find failed: {e}")
-            return LoopResult.failure(str(e))
-    
-    async def _ocr(self, image_path: Optional[str] = None) -> LoopResult:
-        """Extract text from screen/image."""
-        try:
-            image_b64 = await self._load_image(image_path)
-            if not image_b64:
-                return LoopResult.failure("Failed to capture/load image")
             
-            prompt = "Extract all visible text from this image. Output only the text, observing layout if possible."
-            text = await self._call_vision_model(image_b64, prompt)
-            
-            return LoopResult.success(
-                data={"text": text or ""},
-                operation="ocr"
-            )
         except Exception as e:
-            logger.error(f"Vision OCR failed: {e}")
+            logger.error(f"Vision analysis failed: {e}")
             return LoopResult.failure(str(e))
