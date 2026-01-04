@@ -1584,19 +1584,65 @@ document.addEventListener('DOMContentLoaded', () => {
 const smartHomeModal = document.getElementById('smartHomeModal');
 const toggleSmartHomeBtn = document.getElementById('toggleSmartHomeBtn');
 const closeSmartHomeBtn = document.getElementById('closeSmartHomeBtn');
+let smartHomePollingInterval = null;
+let smartHomeCountdownInterval = null;
+let smartHomeCountdown = 15;
+
+function updateCountdownDisplay() {
+  const countdownEl = document.getElementById('smartHomeCountdown');
+  if (countdownEl) {
+    countdownEl.textContent = `(${smartHomeCountdown}s)`;
+  }
+}
+
+function startSmartHomePolling() {
+  smartHomeCountdown = 15;
+  updateCountdownDisplay();
+
+  // Countdown timer every second
+  smartHomeCountdownInterval = setInterval(() => {
+    smartHomeCountdown--;
+    updateCountdownDisplay();
+    if (smartHomeCountdown <= 0) {
+      smartHomeCountdown = 15;
+    }
+  }, 1000);
+
+  // Refresh every 15 seconds
+  smartHomePollingInterval = setInterval(() => {
+    refreshSmartHomeRooms();
+    smartHomeCountdown = 15;
+  }, 15000);
+}
+
+function stopSmartHomePolling() {
+  if (smartHomePollingInterval) {
+    clearInterval(smartHomePollingInterval);
+    smartHomePollingInterval = null;
+  }
+  if (smartHomeCountdownInterval) {
+    clearInterval(smartHomeCountdownInterval);
+    smartHomeCountdownInterval = null;
+  }
+  const countdownEl = document.getElementById('smartHomeCountdown');
+  if (countdownEl) countdownEl.textContent = '';
+}
 
 toggleSmartHomeBtn?.addEventListener('click', () => {
   smartHomeModal.classList.add('visible');
   loadSmartHomeRooms();
+  startSmartHomePolling();
 });
 
 closeSmartHomeBtn?.addEventListener('click', () => {
   smartHomeModal.classList.remove('visible');
+  stopSmartHomePolling();
 });
 
 smartHomeModal?.addEventListener('click', (e) => {
   if (e.target === smartHomeModal) {
     smartHomeModal.classList.remove('visible');
+    stopSmartHomePolling();
   }
 });
 
@@ -1620,17 +1666,71 @@ async function loadSmartHomeRooms() {
       const roomEl = document.createElement('div');
       roomEl.className = `room-card ${room.status === 'on' ? 'on' : 'off'}`;
       roomEl.dataset.room = room.id;
+      roomEl.dataset.mode = room.mode || 'off';
+      roomEl.dataset.supportsDim = room.supports_dim ? 'true' : 'false';
+
+      const modeLabel = room.mode === 'bright' ? 'Bright' : room.mode === 'dim' ? 'Dim' : '';
+      const toggleLabel = room.mode === 'bright' ? '◐ Dim' : '☀ Bright';
+      const showToggle = room.status === 'on' && room.supports_dim;
+
       roomEl.innerHTML = `
         <span class="room-card-icon">${room.status === 'on' ? '💡' : '🔅'}</span>
         <span class="room-card-name">${room.name}</span>
         <span class="room-card-status">${room.status === 'on' ? 'On' : 'Off'}</span>
+        ${room.status === 'on' ? `<span class="room-card-mode ${room.mode}">${modeLabel}</span>` : ''}
+        ${showToggle ? `<button class="room-card-toggle" data-toggle-mode="${room.mode === 'bright' ? 'dim' : 'bright'}">${toggleLabel}</button>` : ''}
       `;
-      roomEl.addEventListener('click', () => toggleSmartHomeRoom(room.id, roomEl));
+
+      // Click on card to toggle on/off
+      roomEl.addEventListener('click', (e) => {
+        if (e.target.classList.contains('room-card-toggle')) return;
+        toggleSmartHomeRoom(room.id, roomEl);
+      });
+
+      // Click on toggle button to switch mode
+      const toggleBtn = roomEl.querySelector('.room-card-toggle');
+      if (toggleBtn) {
+        toggleBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleSmartHomeMode(room.id, toggleBtn.dataset.toggleMode);
+        });
+      }
+
       container.appendChild(roomEl);
     });
   } catch (err) {
     console.error('Failed to load Smart Home rooms:', err);
     container.innerHTML = '<div class="room-card loading">Connection error</div>';
+  }
+}
+
+// Refresh room states without rebuilding the entire list (for polling)
+async function refreshSmartHomeRooms() {
+  try {
+    const resp = await fetch('/api/loxone/rooms');
+    const data = await resp.json();
+
+    if (!data.success || !data.rooms) return;
+
+    data.rooms.forEach(room => {
+      const roomEl = document.querySelector(`.room-card[data-room="${room.id}"]`);
+      if (!roomEl) return;
+
+      const isCurrentlyOn = roomEl.classList.contains('on');
+      const shouldBeOn = room.status === 'on';
+
+      // Only update if state changed
+      if (isCurrentlyOn !== shouldBeOn) {
+        roomEl.classList.toggle('on', shouldBeOn);
+        roomEl.classList.toggle('off', !shouldBeOn);
+        const icon = roomEl.querySelector('.room-card-icon');
+        const status = roomEl.querySelector('.room-card-status');
+        icon.textContent = shouldBeOn ? '💡' : '🔅';
+        status.textContent = shouldBeOn ? 'On' : 'Off';
+      }
+    });
+  } catch (err) {
+    console.error('Failed to refresh Smart Home rooms:', err);
   }
 }
 
@@ -1661,6 +1761,9 @@ async function toggleSmartHomeRoom(roomId, roomEl) {
       icon.textContent = isOn ? '💡' : '🔅';
       status.textContent = isOn ? 'On' : 'Off';
       console.error('Light toggle failed:', data.error);
+    } else {
+      // Refresh to get updated mode after 500ms
+      setTimeout(loadSmartHomeRooms, 500);
     }
   } catch (err) {
     // Revert on error
@@ -1672,3 +1775,25 @@ async function toggleSmartHomeRoom(roomId, roomEl) {
   }
 }
 
+// Toggle between dim and bright modes
+async function toggleSmartHomeMode(roomId, newMode) {
+  const brightness = newMode === 'dim' ? 30 : 100;
+
+  try {
+    const resp = await fetch('/api/loxone/light/brightness', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: roomId, brightness: brightness })
+    });
+    const data = await resp.json();
+
+    if (data.success) {
+      // Refresh to show new state
+      setTimeout(loadSmartHomeRooms, 500);
+    } else {
+      console.error('Mode toggle failed:', data.error);
+    }
+  } catch (err) {
+    console.error('Mode toggle error:', err);
+  }
+}

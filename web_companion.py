@@ -923,9 +923,9 @@ def loxone_rooms():
 
 @app.route('/api/loxone/light/<action>', methods=['POST'])
 def loxone_light(action):
-    """Control lights: action = 'on' or 'off'."""
+    """Control lights: action = 'on', 'off', or 'brightness'."""
     import asyncio
-    from companion_ai.integrations.loxone import turn_on_lights, turn_off_lights
+    from companion_ai.integrations.loxone import turn_on_lights, turn_off_lights, set_brightness
     
     data = request.get_json() or {}
     room = data.get('room')
@@ -935,6 +935,9 @@ def loxone_light(action):
             result = asyncio.run(turn_on_lights(room))
         elif action == 'off':
             result = asyncio.run(turn_off_lights(room))
+        elif action == 'brightness':
+            brightness = data.get('brightness', 100)
+            result = asyncio.run(set_brightness(room, brightness))
         else:
             return jsonify({'success': False, 'error': f'Unknown action: {action}'})
         

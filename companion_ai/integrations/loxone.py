@@ -19,59 +19,48 @@ LOXONE_HOST = os.getenv("LOXONE_HOST", "192.168.0.200")
 LOXONE_USER = os.getenv("LOXONE_USER", "")
 LOXONE_PASSWORD = os.getenv("LOXONE_PASSWORD", "")
 
-# Room configuration with UUID and preferred moods
-# on_mood: Prefer "Dim" if exists, else "Bright"
-# off_mood: Always "Off"
+# Room configuration with UUID and brightness levels
+# brightness_on: 100 = Bright (full), 30 = Dim (estimated from Loxone)
 ROOM_CONFIG = {
     "bedroom front": {
         "uuid": "10c3dd45-019a-8a3d-ffff01708c6be426",
-        "on_mood": "Dim",  # Will fallback to Bright if Dim not available
-        "fallback_mood": "Bright",
+        "brightness_on": 30,  # Dim mode
     },
     "bedroom rear": {
         "uuid": "10c3dd7e-035c-bb81-ffff01708c6be426",
-        "on_mood": "Bright",  # Only has Bright/Off based on screenshot
-        "fallback_mood": "Bright",
+        "brightness_on": 100,  # Bright only
     },
     "dining room": {
         "uuid": "10e8f3b2-01ae-1079-ffff01708c6be426",
-        "on_mood": "Dim",
-        "fallback_mood": "Bright",
+        "brightness_on": 30,  # Dim mode
     },
     "entrance hall": {
         "uuid": "10c95df9-00e9-3b6e-ffff01708c6be426",
-        "on_mood": "Dim",
-        "fallback_mood": "Bright",
+        "brightness_on": 30,  # Dim mode
     },
     "kitchen": {
         "uuid": "10c3dce5-01aa-6967-ffff01708c6be426",
-        "on_mood": "Dim",
-        "fallback_mood": "Bright",
+        "brightness_on": 30,  # Dim mode
     },
     "landing": {
         "uuid": "10c3d421-0150-3f30-ffff01708c6be426",
-        "on_mood": "Dim",
-        "fallback_mood": "Bright",
+        "brightness_on": 30,  # Dim mode
     },
     "living room front": {
         "uuid": "10c3d458-0316-510c-ffff01708c6be426",
-        "on_mood": "Dim",
-        "fallback_mood": "Bright",
+        "brightness_on": 30,  # Dim mode
     },
     "living room rear": {
         "uuid": "10c3dd4e-01db-9c0d-ffff01708c6be426",
-        "on_mood": "Dim",
-        "fallback_mood": "Bright",
+        "brightness_on": 30,  # Dim mode
     },
     "loft": {
         "uuid": "10e8b9c6-03ae-9fa2-ffff01708c6be426",
-        "on_mood": "Dim",
-        "fallback_mood": "Bright",
+        "brightness_on": 30,  # Dim mode
     },
     "loft landing": {
         "uuid": "10c3dd33-015d-795b-ffff01708c6be426",
-        "on_mood": "Dim",
-        "fallback_mood": "Bright",
+        "brightness_on": 30,  # Dim mode
     },
 }
 
@@ -115,7 +104,7 @@ def _get_room_config(room_query: str) -> Optional[Dict]:
 async def turn_on_lights(room: Optional[str] = None) -> Dict[str, Any]:
     """
     Turn on lights in specified room using dimmer sub-controls.
-    Sets AI1 and AI2 dimmers to 100% brightness.
+    Sets AI1 and AI2 dimmers to room's configured brightness level.
     """
     if not LOXONE_USER or not LOXONE_PASSWORD:
         return {"success": False, "error": "Loxone credentials not configured"}
@@ -132,19 +121,76 @@ async def turn_on_lights(room: Optional[str] = None) -> Dict[str, Any]:
     # Handle "all lights"
     if room.lower() in ["all", "all lights", "everything"]:
         # For all lights, iterate through all rooms
-        results = []
         async with httpx.AsyncClient(timeout=10.0) as client:
             for room_name, config in ROOM_CONFIG.items():
                 uuid = config["uuid"]
-                # Turn on AI1 and AI2 dimmers to 100%
+                brightness = config.get("brightness_on", 100)
                 for sub in ["AI1", "AI2"]:
-                    url = f"{base_url}/jdev/sps/io/{uuid}/{sub}/100"
+                    url = f"{base_url}/jdev/sps/io/{uuid}/{sub}/{brightness}"
                     try:
                         await client.get(url)
                     except:
                         pass
-                results.append(room_name)
-        return {"success": True, "room": "all", "status": "on", "message": f"Turned on all lights"}
+        return {"success": True, "room": "all", "status": "on", "message": "Turned on all lights"}
+    
+    config = _get_room_config(room)
+    if not config:
+        return {"success": False, "error": f"Unknown room: {room}"}
+    
+    uuid = config["uuid"]
+    room_name = config["name"]
+    brightness = config.get("brightness_on", 100)
+    
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            success = False
+            # Turn on AI1 and AI2 dimmers to configured brightness
+            for sub in ["AI1", "AI2"]:
+                url = f"{base_url}/jdev/sps/io/{uuid}/{sub}/{brightness}"
+                response = await client.get(url)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("LL", {}).get("value") == "1":
+                        success = True
+            
+            if success:
+                logger.info(f"✅ Turned on {room_name} at {brightness}%")
+                return {
+                    "success": True, 
+                    "room": room_name, 
+                    "brightness": brightness,
+                    "status": "on", 
+                    "message": f"Turned on {room_name} lights at {brightness}%"
+                }
+            else:
+                return {"success": False, "error": "Dimmer command failed"}
+        except Exception as e:
+            logger.error(f"❌ Error turning on {room_name}: {e}")
+            return {"success": False, "error": str(e)}
+
+async def turn_off_lights(room: Optional[str] = None) -> Dict[str, Any]:
+    """Turn off lights using dimmer sub-controls (set to 0)."""
+    if not LOXONE_USER or not LOXONE_PASSWORD:
+        return {"success": False, "error": "Loxone credentials not configured"}
+    
+    if not room:
+        return {"success": False, "error": "Please specify which room to turn off"}
+    
+    base_url = _get_base_url()
+    
+    # Handle "all lights"
+    if room.lower() in ["all", "all lights", "everything"]:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            for room_name, config in ROOM_CONFIG.items():
+                uuid = config["uuid"]
+                for sub in ["AI1", "AI2"]:
+                    url = f"{base_url}/jdev/sps/io/{uuid}/{sub}/0"
+                    try:
+                        await client.get(url)
+                    except:
+                        pass
+        return {"success": True, "room": "all", "status": "off", "message": "Turned off all lights"}
     
     config = _get_room_config(room)
     if not config:
@@ -155,71 +201,52 @@ async def turn_on_lights(room: Optional[str] = None) -> Dict[str, Any]:
     
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            success = False
-            # Turn on AI1 and AI2 dimmers to 100%
+            # Turn off AI1 and AI2 dimmers (set to 0)
             for sub in ["AI1", "AI2"]:
-                url = f"{base_url}/jdev/sps/io/{uuid}/{sub}/100"
-                response = await client.get(url)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get("LL", {}).get("value") == "1":
-                        success = True
+                url = f"{base_url}/jdev/sps/io/{uuid}/{sub}/0"
+                await client.get(url)
             
-            if success:
-                logger.info(f"✅ Turned on {room_name}")
-                return {
-                    "success": True, 
-                    "room": room_name, 
-                    "status": "on", 
-                    "message": f"Turned on {room_name} lights"
-                }
-            else:
-                return {"success": False, "error": "Dimmer command failed"}
+            logger.info(f"✅ Turned off: {room_name}")
+            return {"success": True, "room": room_name, "status": "off", "message": f"Turned off {room_name} lights"}
         except Exception as e:
-            logger.error(f"❌ Error turning on {room_name}: {e}")
+            logger.error(f"❌ Error turning off {room_name}: {e}")
             return {"success": False, "error": str(e)}
 
-async def turn_off_lights(room: Optional[str] = None) -> Dict[str, Any]:
-    """Turn off lights using changeTo/Off mood."""
+async def set_brightness(room: str, brightness: int) -> Dict[str, Any]:
+    """Set a specific brightness level for a room (0-100)."""
     if not LOXONE_USER or not LOXONE_PASSWORD:
         return {"success": False, "error": "Loxone credentials not configured"}
     
     if not room:
-        return {"success": False, "error": "Please specify which room to turn off"}
+        return {"success": False, "error": "Please specify which room"}
     
+    brightness = max(0, min(100, brightness))  # Clamp to 0-100
+    
+    config = _get_room_config(room)
+    if not config:
+        return {"success": False, "error": f"Unknown room: {room}"}
+    
+    uuid = config["uuid"]
+    room_name = config["name"]
     base_url = _get_base_url()
-    
-    if room.lower() in ["all", "all lights", "everything"]:
-        uuid = CENTRAL_CONTROLLER_UUID
-        room_name = "all"
-    else:
-        config = _get_room_config(room)
-        if not config:
-            return {"success": False, "error": f"Unknown room: {room}"}
-        uuid = config["uuid"]
-        room_name = config["name"]
     
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            # Use changeTo/Off mood
-            url = f"{base_url}/jdev/sps/io/{uuid}/changeTo/Off"
-            response = await client.get(url)
+            for sub in ["AI1", "AI2"]:
+                url = f"{base_url}/jdev/sps/io/{uuid}/{sub}/{brightness}"
+                await client.get(url)
             
-            if response.status_code == 200:
-                data = response.json()
-                code = data.get("LL", {}).get("Code", "")
-                value = data.get("LL", {}).get("value", "")
-                
-                if code == "200":
-                    logger.info(f"✅ Turned off: {room_name}")
-                    return {"success": True, "room": room_name, "status": "off", "message": f"Turned off {room_name} lights"}
-                else:
-                    return {"success": False, "error": f"Command failed: code={code}"}
-            else:
-                return {"success": False, "error": f"HTTP {response.status_code}"}
+            mode = "bright" if brightness >= 80 else "dim" if brightness > 0 else "off"
+            logger.info(f"✅ Set {room_name} to {brightness}% ({mode})")
+            return {
+                "success": True, 
+                "room": room_name, 
+                "brightness": brightness,
+                "mode": mode,
+                "message": f"Set {room_name} to {brightness}%"
+            }
         except Exception as e:
-            logger.error(f"❌ Error turning off {room_name}: {e}")
+            logger.error(f"❌ Error setting brightness for {room_name}: {e}")
             return {"success": False, "error": str(e)}
 
 async def get_room_statuses() -> Dict[str, Any]:
@@ -232,30 +259,46 @@ async def get_room_statuses() -> Dict[str, Any]:
     
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            # Fetch structure file for current states
-            r = await client.get(f"{base_url}/data/LoxAPP3.json")
-            data = r.json()
-            rooms_data = data.get("rooms", {})
-            
             for room_name, config in ROOM_CONFIG.items():
                 uuid = config["uuid"]
-                room_uuid = None
+                display_name = room_name.title()
+                brightness_on = config.get("brightness_on", 100)
+                supports_dim = brightness_on < 100  # If configured for <100, supports dim
                 
-                # Find display name from rooms
-                for ctrl in data.get("controls", {}).values():
-                    if ctrl.get("uuidAction") == uuid:
-                        room_uuid = ctrl.get("room")
-                        break
+                # Fetch live state using /all endpoint
+                brightness = 0
+                try:
+                    url = f"{base_url}/jdev/sps/io/{uuid}/all"
+                    r = await client.get(url)
+                    if r.status_code == 200:
+                        data = r.json().get("LL", {})
+                        value_str = data.get("value", "0")
+                        try:
+                            brightness = int(float(value_str))
+                        except:
+                            brightness = 0
+                except:
+                    brightness = 0
                 
-                display_name = rooms_data.get(room_uuid, {}).get("name", room_name.title())
+                # Determine mode based on brightness
+                if brightness == 0:
+                    status = "off"
+                    mode = "off"
+                elif brightness >= 80:
+                    status = "on"
+                    mode = "bright"
+                else:
+                    status = "on"
+                    mode = "dim"
                 
                 statuses.append({
                     "id": room_name,
                     "name": display_name,
                     "uuid": uuid,
-                    # Status would require websocket connection to get live updates
-                    # For now, return unknown
-                    "status": "unknown"
+                    "status": status,
+                    "brightness": brightness,
+                    "mode": mode,
+                    "supports_dim": supports_dim
                 })
             
             return {"success": True, "rooms": statuses}

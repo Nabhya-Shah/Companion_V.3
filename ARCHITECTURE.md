@@ -59,6 +59,8 @@ companion_ai/
 │   ├── browser.py               # Chrome automation
 │   ├── computer.py              # Computer use
 │   └── vision.py                # Vision/screen analysis
+├── integrations/                 # External integrations
+│   └── loxone.py                # Loxone smart home
 ├── memory/                       # Memory backends
 │   ├── sqlite_backend.py        # SQLite storage
 │   ├── mem0_backend.py          # Mem0 vector memory
@@ -116,3 +118,4 @@ Self-contained units with specialized models:
 | Vision | Ollama (llava:7b) |
 | Web Server | Flask + SSE |
 | Memory Store | Mem0 + SQLite |
+| Smart Home | Loxone Miniserver |

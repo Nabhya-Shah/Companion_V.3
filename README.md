@@ -13,6 +13,7 @@ A personal AI companion with persistent memory, knowledge graph, and intelligent
 | **Per-Step Token Tracking** | See tokens + timing for each pipeline step with model labels |
 | **Background Tasks** | Complex tasks run async with live timeline updates |
 | **Web UI** | Modern chat interface with task panel and memory visualization |
+| **Smart Home** | Loxone integration with live state, dim/bright modes, 15s auto-refresh |
 
 ## 🚀 Quick Start
 
@@ -80,6 +81,11 @@ GROQ_API_KEY=your_groq_api_key
 GROQ_MEMORY_API_KEY=second_groq_key
 USE_MEM0=true
 USE_ORCHESTRATOR=true
+
+# Loxone Smart Home (optional)
+LOXONE_HOST=192.168.x.x
+LOXONE_USER=your_username
+LOXONE_PASSWORD=your_password
 ```
 
 ### Models
@@ -100,6 +106,8 @@ USE_ORCHESTRATOR=true
 | `/api/graph` | GET | Export knowledge graph |
 | `/graph` | GET | Interactive visualization |
 | `/api/health` | GET | System status |
+| `/api/loxone/rooms` | GET | Smart home room states |
+| `/api/loxone/light/<action>` | POST | Control lights (on/off/brightness) |
 
 ## 📝 License
 

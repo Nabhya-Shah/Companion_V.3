@@ -2163,3 +2163,57 @@ body {
 .room-card.on .room-card-status {
   color: rgba(250, 204, 21, 0.7);
 }
+
+/* Countdown timer in modal header */
+.refresh-countdown {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-left: 0.5rem;
+  font-weight: 400;
+  opacity: 0.7;
+}
+
+/* Room mode badge */
+.room-card-mode {
+  font-size: 0.65rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  margin-top: 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+}
+
+.room-card-mode.bright {
+  background: rgba(250, 204, 21, 0.2);
+  color: #facc15;
+}
+
+.room-card-mode.dim {
+  background: rgba(139, 92, 246, 0.2);
+  color: #a78bfa;
+}
+
+.room-card-mode.off {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+}
+
+/* Mode toggle button */
+.room-card-toggle {
+  font-size: 0.6rem;
+  padding: 0.2rem 0.4rem;
+  margin-top: 0.3rem;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.room-card-toggle:hover {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+  color: var(--accent-hover);
+}

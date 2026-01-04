@@ -112,3 +112,17 @@ All tests via browser agent:
 - Keep current models for now (user will review later)
 - Focus on clean architecture over features
 - Test each phase before moving on
+
+---
+
+## Phase 6: Loxone Smart Home Integration ✅
+
+*Completed: January 4, 2026*
+
+- [x] Loxone API integration with dimmer control
+- [x] Smart Home modal UI with room cards
+- [x] Live state sync (15s polling)
+- [x] Countdown timer display
+- [x] Dim/Bright mode badges
+- [x] Mode toggle buttons
+- [x] Voice control via chat ("turn on bedroom")
