@@ -399,8 +399,18 @@ def chat_streaming():
                 
                 # Signal completion and update history
                 memory_saved = core_config.USE_MEM0
-                # We don't need to pass metadata here as it's already sent, but let's be safe?
-                # Actually, conversation_manager saved it in history already.
+                
+                # Check if TTS enabled in request
+                tts_enabled = data.get('tts_enabled', False)
+                
+                # TTS: Speak response if enabled
+                if tts_enabled and tts_manager.is_enabled and full_response.strip():
+                    try:
+                        # Non-blocking speech
+                        tts_manager.speak_text(full_response, blocking=False)
+                    except Exception as tts_error:
+                        logger.warning(f"TTS error: {tts_error}")
+
                 yield f"data: {json.dumps({'done': True, 'full_response': full_response, 'tokens': token_usage, 'memory_saved': memory_saved})}\n\n"
                 
                 # Store in history (redundant? No, conversation_session does it, but web_companion updates its own list too?)
@@ -858,52 +868,9 @@ def vision_status():
         'last_update': vision_manager.visual_log[-1]['timestamp'] if vision_manager.visual_log else None
     })
 
-# --- Computer Control Endpoints ---
-@app.route('/api/computer/status', methods=['GET'])
-def computer_status():
-    """Return current computer control status for UI banner."""
-    from companion_ai.agents.computer import computer_agent
-    return jsonify({
-        'active': computer_agent.is_recently_active(),
-        'safe_mode': computer_agent.safe_mode,
-        'screen': f"{computer_agent.screen_width}x{computer_agent.screen_height}"
-    })
-
-@app.route('/api/computer/stream')
-def computer_status_stream():
-    """Server-sent events stream pushing computer control status changes."""
-    def event_stream():
-        from companion_ai.agents.computer import computer_agent
-        last_state = None
-        while True:
-            state = {
-                'active': computer_agent.is_recently_active(),
-                'safe_mode': computer_agent.safe_mode,
-            }
-            if state != last_state:
-                payload = json.dumps({'type': 'computer_status', 'status': state})
-                yield f"data: {payload}\n\n"
-                last_state = state
-            # Keep-alive + low CPU usage
-            yield ": keep-alive\n\n"
-            time.sleep(1.0)
-
-    response = Response(stream_with_context(event_stream()), mimetype='text/event-stream')
-    response.headers['Cache-Control'] = 'no-cache'
-    response.headers['X-Accel-Buffering'] = 'no'
-    return response
-
-@app.route('/api/computer/stop', methods=['POST'])
-def computer_stop():
-    """Emergency stop for computer control."""
-    from companion_ai.agents.computer import computer_agent
-    computer_agent.safe_mode = True
-    
-    # Cancel all background jobs
-    job_manager_module.cancel_all_jobs()
-    
-    logger.warning("Computer control STOPPED via API")
-    return jsonify({'success': True, 'message': 'Computer control disabled and jobs cancelled'})
+# --- Computer Control Endpoints REMOVED ---
+# Endpoints removed as part of Agent-S cleanup.
+# See companion_ai/agents/computer.py removal.
 
 
 # --- Loxone Smart Home API ---
@@ -998,7 +965,7 @@ def upload_file():
         try:
             analysis = vision_manager.analyze_image_file(
                 file_path, 
-                prompt="Describe this image concisely. What does it show?"
+                prompt="DESCRIBE ONLY - don't solve or interpret. Just describe what you see: text, numbers, objects, layout. If there's math/text, transcribe it exactly. Let someone else solve it."
             )
             logger.info(f"Image analyzed: {file_id} - {analysis[:100]}...")
         except Exception as e:
@@ -1034,72 +1001,20 @@ def get_uploaded_file(file_id):
 
 @app.route('/api/tasks', methods=['GET'])
 def get_tasks():
-    """Get list of active background tasks."""
-    try:
-        from companion_ai.local_loops import get_loop
-        
-        computer_loop = get_loop('computer')
-        if computer_loop:
-            tasks = computer_loop.get_active_tasks()
-            return jsonify({'tasks': tasks, 'count': len(tasks)})
-        else:
-            return jsonify({'tasks': [], 'count': 0})
-    except Exception as e:
-        logger.error(f"Error getting tasks: {e}")
-        return jsonify({'tasks': [], 'count': 0, 'error': str(e)})
+    """Get list of active background tasks. (Computer loop removed)"""
+    return jsonify({'tasks': [], 'count': 0})
 
 
 @app.route('/api/tasks/<task_id>', methods=['GET'])
 def get_task_status(task_id):
-    """Get detailed status of a specific task with timeline."""
-    try:
-        from companion_ai.local_loops import get_loop
-        import asyncio
-        
-        computer_loop = get_loop('computer')
-        if not computer_loop:
-            return jsonify({'error': 'Computer loop not available'}), 503
-        
-        # Run async in sync context
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(
-                computer_loop.execute({'operation': 'status', 'task_id': task_id})
-            )
-            return jsonify(result.to_dict())
-        finally:
-            loop.close()
-            
-    except Exception as e:
-        logger.error(f"Error getting task {task_id}: {e}")
-        return jsonify({'error': str(e)}), 500
+    """Get detailed status of a specific task. (Computer loop removed)"""
+    return jsonify({'error': 'Background tasks not available'}), 503
 
 
 @app.route('/api/tasks/<task_id>/cancel', methods=['POST'])
 def cancel_task(task_id):
-    """Cancel a running task."""
-    try:
-        from companion_ai.local_loops import get_loop
-        import asyncio
-        
-        computer_loop = get_loop('computer')
-        if not computer_loop:
-            return jsonify({'error': 'Computer loop not available'}), 503
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(
-                computer_loop.execute({'operation': 'cancel', 'task_id': task_id})
-            )
-            return jsonify(result.to_dict())
-        finally:
-            loop.close()
-            
-    except Exception as e:
-        logger.error(f"Error canceling task {task_id}: {e}")
-        return jsonify({'error': str(e)}), 500
+    """Cancel a running task. (Computer loop removed)"""
+    return jsonify({'error': 'Background tasks not available'}), 503
 
 
 @app.route('/api/loops/capabilities', methods=['GET'])

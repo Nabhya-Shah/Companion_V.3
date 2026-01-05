@@ -104,7 +104,7 @@ def _auto_register_loops():
         from . import memory_loop
         from . import vision_loop
         from . import tool_loop
-        from . import computer_loop
+        # computer_loop removed - Agent-S didn't work well
     except ImportError as e:
         logger.debug(f"Some loops not yet implemented: {e}")
 

@@ -120,7 +120,7 @@ class VisionManager:
     def _image_to_base64(self, img: Image.Image) -> str:
         """Convert PIL Image to base64 string."""
         buffered = io.BytesIO()
-        img.save(buffered, format="JPEG", quality=70)
+        img.save(buffered, format="JPEG", quality=90)  # Higher quality for text clarity
         return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
     def _calculate_diff(self, img1: Image.Image, img2: Image.Image) -> float:
@@ -363,7 +363,7 @@ Instructions:
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": f"Briefly: {prompt}"},
+                            {"type": "text", "text": prompt},  # Pass prompt directly, no limiting prefix
                             {
                                 "type": "image_url",
                                 "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}
@@ -371,7 +371,7 @@ Instructions:
                         ]
                     }
                 ],
-                max_tokens=150,  # Optimized: 150 vs 500
+                max_tokens=500,  # More tokens for complex descriptions
                 temperature=0.2
             )
             

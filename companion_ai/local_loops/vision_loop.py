@@ -85,7 +85,7 @@ class VisionLoop(Loop):
             img.thumbnail((768, 768))  # 768px balances quality + tokens
             
             buffer = io.BytesIO()
-            img.save(buffer, format='JPEG', quality=70)
+            img.save(buffer, format='JPEG', quality=90)  # Higher quality for text
             image_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
             
             # Short, focused prompt for efficiency

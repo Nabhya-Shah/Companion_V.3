@@ -196,6 +196,10 @@ relevant memories from the provided list. Return the indices of relevant memorie
         if not text:
             return LoopResult.failure("No text provided")
         
+        # EXCLUDE: Strip [Visual context...] from image analysis - not useful for memory
+        import re
+        text = re.sub(r'\[Visual context from user\'s uploaded file:.*?\]', '', text, flags=re.DOTALL)
+        
         try:
             # TODO: Call local vLLM with extractor prompt
             # For now, placeholder that returns empty
@@ -226,6 +230,14 @@ relevant memories from the provided list. Return the indices of relevant memorie
         """
         if not fact:
             return LoopResult.failure("No fact provided")
+        
+        # EXCLUDE: Skip saving image analysis context
+        if "Visual context from user" in fact or "image shows" in fact.lower():
+            logger.info(f"Skipping image context from memory storage")
+            return LoopResult.success(
+                data={"skipped": True, "reason": "Image context excluded from memory"},
+                operation="save"
+            )
         
         try:
             from companion_ai.memory import mem0_backend as memory_v2

@@ -46,6 +46,7 @@ let eventSource = null;
 let isStreaming = false; // Prevents SSE from overwriting during streaming
 let abortController = null; // For stopping generation
 let currentAttachment = null; // Stores current file attachment {file, url, analysis}
+let lastImageAnalysis = null; // Track last image analysis for pipeline display
 
 // ============================================
 // Utilities
@@ -99,6 +100,25 @@ function renderMarkdown(text) {
   return marked.parse(text);
 }
 
+// Render LaTeX math using KaTeX
+function renderMath(element) {
+  if (typeof renderMathInElement !== 'undefined') {
+    try {
+      renderMathInElement(element, {
+        delimiters: [
+          { left: '$$', right: '$$', display: true },
+          { left: '$', right: '$', display: false },
+          { left: '\\[', right: '\\]', display: true },
+          { left: '\\(', right: '\\)', display: false }
+        ],
+        throwOnError: false
+      });
+    } catch (e) {
+      console.warn('Math rendering failed:', e);
+    }
+  }
+}
+
 // Add copy buttons to code blocks
 function addCopyButtons(container) {
   container.querySelectorAll('pre').forEach(pre => {
@@ -131,6 +151,19 @@ function renderPipeline(metadata) {
   const getTokensForStep = (stepName) => {
     return tokenSteps.find(s => s.name === stepName || s.name.includes(stepName));
   };
+
+  // 0. Image Analysis (if an image was attached)
+  if (lastImageAnalysis) {
+    steps.push({
+      type: 'vision',
+      title: 'Image Analysis',
+      desc: `Analyzed with Maverick vision`,
+      data: lastImageAnalysis.fullText || 'Image processed',
+      tokens: { input: lastImageAnalysis.inputTokens || 0, output: lastImageAnalysis.outputTokens || 0, total: lastImageAnalysis.totalTokens || 0, ms: lastImageAnalysis.ms || 0, model: 'maverick' }
+    });
+    // Clear after use so it doesn't show on subsequent messages
+    lastImageAnalysis = null;
+  }
 
   // 1. Initial Decision
   const orchTokens = getTokensForStep('orchestrator');
@@ -343,6 +376,7 @@ function addMessage(role, text, timestamp, tokens, metadata, attachment) {
 
   const messageEl = createMessageElement(role, text, timestamp, tokens, metadata, attachment);
   chatPane.appendChild(messageEl);
+  renderMath(messageEl);  // Render LaTeX math
   scrollToBottom();
 }
 
@@ -450,6 +484,7 @@ async function sendMessage(retry = false) {
     pendingText = pendingText.slice(charsToType);
     displayedText += chars;
 
+    // Use textContent during streaming for performance
     textEl.textContent = displayedText;
     scrollToBottom();
 
@@ -578,6 +613,7 @@ async function sendMessage(retry = false) {
           // Render markdown final
           textDiv.innerHTML = renderMarkdown(displayedText);
           addCopyButtons(textDiv);
+          renderMath(textDiv);  // Render LaTeX math
 
           // Render Pipeline if metadata exists
           if (receivedMetadata) {
@@ -1901,6 +1937,13 @@ async function uploadAttachment(file) {
         analysis: data.analysis,
         uploading: false
       };
+      // Track for pipeline display (full text, not truncated)
+      if (data.analysis && currentAttachment.isImage) {
+        lastImageAnalysis = {
+          fullText: data.analysis,
+          totalTokens: 1300  // Approximate based on our optimizations
+        };
+      }
 
       // Update preview with uploaded file URL
       if (currentAttachment.isImage) {

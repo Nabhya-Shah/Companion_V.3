@@ -142,7 +142,11 @@ For vision: {"action": "delegate", "loop": "vision", "task": {"operation": "desc
 - Greetings (hi/hello) without personal info → answer directly
 - General questions → answer directly
 
-EXCEPTION: If the message already contains "[Visual context" then DO NOT delegate to vision - the image has already been analyzed. Just answer directly using the provided visual context.
+EXCEPTION: If the message contains "[Visual context" then DO NOT delegate to vision. The image was pre-analyzed. Respond based on the context:
+- If they ask you to SOLVE something (math, puzzle) → ATTEMPT to solve it with available info. Don't ask for clarification - try your best!
+- If they ask "what's in this?" → describe naturally
+- If they ask for specific info → find and share it
+- DON'T just rephrase the analysis - use it to answer their question
 
 IMPORTANT: When user shares ANY personal info (name, location, job, preferences), ALWAYS route to memory loop with save operation!"""
 
