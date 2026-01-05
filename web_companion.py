@@ -1330,6 +1330,43 @@ def search_graph_api():
         logger.error(f"Graph search error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/chat/stop', methods=['POST'])
+def stop_chat():
+    """Stop chat generation and audio"""
+    print(">>> STOP CHAT REQUEST RECEIVED")
+    try:
+        # TODO: Stop LLM generation if possible
+        if tts_manager:
+            tts_manager.stop_speech()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"Stop error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tts/config', methods=['POST'])
+def config_tts():
+    """Update TTS configuration"""
+    print(">>> TTS CONFIG REQUEST RECEIVED")
+    try:
+        data = request.json
+        print(f">>> TTS CONFIG DATA: {data}")
+        if 'enabled' in data:
+            tts_manager.is_enabled = data['enabled']
+            logger.info(f"TTS enabled: {tts_manager.is_enabled}")
+            
+        if 'provider' in data:
+            tts_manager.provider = data['provider']
+            logger.info(f"TTS provider set to: {tts_manager.provider}")
+            print(f">>> TTS PROVIDER SET TO: {tts_manager.provider}")
+            
+        if 'voice' in data:
+            tts_manager.set_voice(data['voice'])
+            
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"TTS Config error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 def open_browser():
     time.sleep(1.5)
     webbrowser.open('http://localhost:5000')

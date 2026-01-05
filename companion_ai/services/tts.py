@@ -34,7 +34,7 @@ class AzureTTSManager:
         self.current_synthesis = None  # Track current synthesis for interruption
         
         # Default settings (initialized even if Azure is not available)
-        self.current_voice = "en-US-JennyNeural"  # Warm, friendly, natural
+        self.current_voice = "en-US-PhoebeMultilingualNeural"  # Default high-quality
         self.speech_rate = "+5%"   # Just slightly faster, not rushed
         self.speech_pitch = "+0%"  # No pitch changes - keep natural
         self.speech_volume = "+0%" # Normal volume
@@ -242,15 +242,14 @@ class AzureTTSManager:
     
     def set_voice(self, voice_name: str) -> bool:
         """Change the TTS voice"""
-        if not self.is_enabled:
-            return False
-        
         try:
             self.current_voice = voice_name
-            self.speech_config.speech_synthesis_voice_name = voice_name
             
-            # Recreate synthesizer with new voice
-            self.synthesizer = speechsdk.SpeechSynthesizer(speech_config=self.speech_config)
+            # Azure logic: Only update Azure synthesizer if not a Groq voice logic (handled in speak_text_groq)
+            # Actually, standard Azure sets voice on the config.
+            if hasattr(self, 'speech_config') and self.speech_config:
+                self.speech_config.speech_synthesis_voice_name = voice_name
+                self.synthesizer = speechsdk.SpeechSynthesizer(speech_config=self.speech_config)
             
             logger.info(f"Voice changed to: {voice_name}")
             return True
@@ -258,6 +257,105 @@ class AzureTTSManager:
         except Exception as e:
             logger.error(f"Failed to change voice: {e}")
             return False
+
+    def speak_text_groq(self, text: str, blocking: bool = False):
+        """Speak text using Groq's Orpheus model (High Speed)"""
+        import requests
+        import os
+        import io
+        import sounddevice as sd
+        import soundfile as sf
+        
+        try:
+            api_key = os.getenv("GROQ_API_KEY") or os.getenv("GROQ_TOOL_API_KEY")
+            if not api_key:
+                logger.error("GROQ_API_KEY not found for TTS")
+                return False
+
+            # Map Azure voices to Groq personas if needed, or default to Hannah
+            groq_voice = "Hannah" 
+            if "male" in self.current_voice.lower() or "guy" in self.current_voice.lower() or "davis" in self.current_voice.lower():
+                groq_voice = "Troy"
+            
+            url = "https://api.groq.com/openai/v1/audio/speech"
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            data = {
+                "model": "canopylabs/orpheus-v1-english",
+                "input": text,
+                "voice": groq_voice
+            }
+            
+            # Execute request
+            response = requests.post(url, headers=headers, json=data)
+            
+            if response.status_code != 200:
+                logger.error(f"Groq TTS Error ({response.status_code}): {response.text}")
+                return False
+                
+            # Play audio
+            audio_data = io.BytesIO(response.content)
+            data, samplerate = sf.read(audio_data)
+            
+            if blocking:
+                sd.play(data, samplerate)
+                sd.wait()
+            else:
+                sd.play(data, samplerate)
+                
+            logger.info("Groq TTS (Orpheus) playback started")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Groq TTS failed: {e}")
+            return False
+
+    def speak_text(self, text: str, blocking: bool = False):
+        """
+        Speak the provided text using the configured TTS provider.
+        """
+        if not self.is_enabled:
+            return
+
+        # Check for Groq provider flag
+        if getattr(self, 'provider', 'azure') == 'groq':
+            # Clean text but keep [brackets] for Orpheus
+            # _clean_text_for_speech removes logic tags but we rely on its basic cleanup
+            clean_text = self._clean_text_for_speech(text)
+            self.current_synthesis = "groq"
+            success = self.speak_text_groq(clean_text, blocking)
+            self.current_synthesis = None
+            
+            if success:
+                return
+            
+            logger.warning("Groq TTS failed or declined, falling back to Azure")
+            # Fall through to Azure implementation below
+
+        # --- Azure Implementation ---
+        if not self.synthesizer:
+            logger.warning("TTS enabled but synthesizer not initialized")
+            return
+
+        try:
+            # Azure specific text cleaning
+            text_to_speak = self._clean_text_for_speech(text)
+            
+            if not text_to_speak:
+                return
+
+            ssml = self._create_mood_adjusted_ssml(text_to_speak)
+            
+            if blocking:
+                result = self.synthesizer.speak_ssml_async(ssml).get()
+            else:
+                result = self.synthesizer.start_speaking_ssml_async(ssml).get()
+                self.current_synthesis = result
+                
+        except Exception as e:
+            logger.error(f"TTS Error: {e}")
     
     def set_speech_rate(self, rate: str) -> bool:
         """Set speech rate (e.g., '-20%', '0%', '+20%')"""
@@ -283,18 +381,27 @@ class AzureTTSManager:
     def get_available_voices(self) -> list:
         """Get list of available voices optimized for companion AI personality"""
         return [
-            "en-US-Phoebe:DragonHDLatestNeural",  # Phoebe Dragon HD Latest (current default)
-            "en-US-Ava:DragonHDLatestNeural",     # Ava Dragon HD Latest (alternative high quality)
-            "en-US-AnaNeural",       # Female, cheerful (playful personality)
-            "en-US-CoraNeural",      # Female, young (alternative playful option)
-            "en-US-AriaNeural",      # Female, friendly (warm and approachable)
-            "en-US-JennyNeural",     # Female, conversational (good for serious mode)
-            "en-US-AmberNeural",     # Female, warm (caring friend vibes)
-            "en-US-ElizabethNeural", # Female, professional (for serious tasks)
-            "en-US-BrandonNeural",   # Male, young (if user prefers male voice)
-            "en-US-GuyNeural",       # Male, conversational
-            "en-US-DavisNeural",     # Male, professional
-            "en-US-ChristopherNeural", # Male, mature
+            # High Quality Neural (Requires West Europe / East US)
+            "en-US-Phoebe:DragonHDLatestNeural",
+            "en-US-Ava:DragonHDLatestNeural",
+            "en-US-Andrew2:DragonHDLatestNeural",
+            
+            # Standard Multilingual (Works everywhere)
+            "en-US-PhoebeMultilingualNeural",
+            "en-US-AvaMultilingualNeural",
+            "en-US-AndrewMultilingualNeural",
+            "en-US-BrianMultilingualNeural",
+            "en-US-EmmaMultilingualNeural",
+            
+            # Standard Neural
+            "en-US-AnaNeural",
+            "en-US-AriaNeural",
+            "en-US-JennyNeural",
+            "en-US-GuyNeural",
+            "en-US-DavisNeural",
+            "en-US-ChristopherNeural",
+            "en-US-NancyMultilingualNeural",
+            "en-US-SerenaMultilingualNeural",
         ]
     
     def test_tts(self) -> bool:
@@ -309,10 +416,18 @@ class AzureTTSManager:
     def stop_speech(self):
         """Stop current speech synthesis"""
         try:
+            import sounddevice as sd
+            # Stop Groq audio (sounddevice)
+            sd.stop()
+            
+            # Stop Azure audio
             if self.synthesizer:
-                # Note: Azure SDK doesn't have a direct stop method
-                # We'd need to implement cancellation tokens for this
-                pass
+                try:
+                    self.synthesizer.stop_speaking_async()
+                except:
+                    pass
+                    
+            logger.info("Speech stopped")
         except Exception as e:
             logger.error(f"Failed to stop speech: {e}")
     

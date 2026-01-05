@@ -625,7 +625,17 @@ async function sendMessage(retry = false) {
 
           isStreaming = false;
           abortController = null;
-          if (stopBtn) stopBtn.style.display = 'none';
+
+          if (stopBtn) {
+            if (ttsEnabled) {
+              // Keep stop visible for audio
+              stopBtn.style.display = 'flex';
+              // Auto-hide after 45s
+              setTimeout(() => { if (stopBtn && !isStreaming) stopBtn.style.display = 'none'; }, 45000);
+            } else {
+              stopBtn.style.display = 'none';
+            }
+          }
           if (sendBtn) sendBtn.style.display = 'flex';
           lastHistoryLength++;
           loadTokenStats();
@@ -2028,5 +2038,148 @@ document.addEventListener('paste', (e) => {
       }
       break;
     }
+  }
+});
+
+// ============================================
+// Voice Input (STT)
+// ============================================
+function setupVoiceInput() {
+  const micBtn = document.getElementById('micBtn');
+  const micIcon = document.getElementById('micIcon');
+  const userInput = document.getElementById('userInput');
+
+  if (!micBtn || !micIcon || !userInput) return;
+
+  // Check browser support
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    console.log('Web Speech API not supported');
+    micBtn.style.opacity = '0.3';
+    micBtn.style.cursor = 'not-allowed';
+    micBtn.title = 'Voice Input (Not supported in this browser - try Chrome/Edge)';
+    micBtn.onclick = () => alert("Your browser doesn't support built-in speech recognition. Please try Chrome or Edge.");
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.lang = 'en-US';
+  recognition.interimResults = true;
+
+  let isListening = false;
+  let finalTranscript = '';
+
+  recognition.onstart = () => {
+    isListening = true;
+    micBtn.classList.add('listening');
+    micIcon.style.stroke = '#EF4444'; // Red
+  };
+
+  recognition.onend = () => {
+    isListening = false;
+    micBtn.classList.remove('listening');
+    micIcon.style.stroke = 'currentColor';
+  };
+
+  recognition.onerror = (event) => {
+    console.error('Speech recognition error', event.error);
+    isListening = false;
+    micBtn.classList.remove('listening');
+    micIcon.style.stroke = 'currentColor';
+  };
+
+  recognition.onresult = (event) => {
+    let interimTranscript = '';
+    let hasFinal = false;
+
+    // Build transcript
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      if (event.results[i].isFinal) {
+        finalTranscript += event.results[i][0].transcript;
+        hasFinal = true;
+      } else {
+        interimTranscript += event.results[i][0].transcript;
+      }
+    }
+
+    // Update input
+    // Strategy: We keep what was there before speech started? 
+    // Complexity: User might type while speaking.
+    // Simple: Just append current speech.
+
+    // Better: Only update if we have something new.
+    // Logic: We need to insert the *current session's* transcript.
+    // But handling cursor pos is hard. 
+    // Let's just append to end for V1.
+
+    if (hasFinal) {
+      if (userInput.value && !userInput.value.endsWith(' ')) {
+        userInput.value += ' ';
+      }
+      userInput.value += finalTranscript;
+      finalTranscript = ''; // Reset for next sentence if continuous (but we are false)
+
+      // Auto-resize
+      userInput.style.height = 'auto';
+      userInput.style.height = userInput.scrollHeight + 'px';
+    }
+  };
+
+  micBtn.addEventListener('click', () => {
+    if (isListening) {
+      recognition.stop();
+    } else {
+      finalTranscript = ''; // Reset buffer
+      recognition.start();
+    }
+  });
+}
+
+// Init Voice Input
+document.addEventListener('DOMContentLoaded', setupVoiceInput);
+
+// ============================================
+// Groq TTS Logic
+// ============================================
+document.addEventListener('DOMContentLoaded', () => {
+  const groqTtsToggle = document.getElementById('groqTtsToggle');
+  if (groqTtsToggle) {
+    groqTtsToggle.addEventListener('change', async (e) => {
+      const isGroq = e.target.checked;
+      try {
+        await fetch('/api/tts/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: isGroq ? 'groq' : 'azure',
+          })
+        });
+        console.log('TTS Provider:', isGroq ? 'Groq' : 'Azure');
+      } catch (err) {
+        console.error('Failed to set TTS provider:', err);
+      }
+    });
+  }
+});
+
+// ============================================
+// Stop Button Logic
+// ============================================
+document.addEventListener('DOMContentLoaded', () => {
+  const stopBtn = document.getElementById('stopBtn');
+  if (stopBtn) {
+    stopBtn.addEventListener('click', async () => {
+      console.log("Stopping generation...");
+      if (stopBtn) stopBtn.style.display = 'none';
+      const sendBtn = document.getElementById('sendBtn');
+      if (sendBtn) sendBtn.style.display = 'flex';
+
+      try {
+        await fetch('/api/chat/stop', { method: 'POST' });
+      } catch (e) {
+        console.error("Stop failed", e);
+      }
+    });
   }
 });
