@@ -265,6 +265,7 @@ class AzureTTSManager:
         import io
         import sounddevice as sd
         import soundfile as sf
+        import re
         
         try:
             api_key = os.getenv("GROQ_API_KEY") or os.getenv("GROQ_TOOL_API_KEY")
@@ -272,10 +273,37 @@ class AzureTTSManager:
                 logger.error("GROQ_API_KEY not found for TTS")
                 return False
 
-            # Map Azure voices to Groq personas if needed, or default to Hannah
-            groq_voice = "Hannah" 
+            # Clean text for Orpheus - keep emotional tags, strip markdown
+            clean_text = text
+            
+            # Remove thinking tags
+            clean_text = re.sub(r'<think>.*?</think>', '', clean_text, flags=re.DOTALL)
+            
+            # Remove markdown bold/italic (but keep content)
+            clean_text = re.sub(r'\*\*(.+?)\*\*', r'\1', clean_text)  # **bold** -> bold
+            clean_text = re.sub(r'\*(.+?)\*', r'\1', clean_text)      # *italic* -> italic
+            clean_text = re.sub(r'_(.+?)_', r'\1', clean_text)        # _italic_ -> italic
+            
+            # Remove code blocks
+            clean_text = re.sub(r'```[\s\S]*?```', '', clean_text)
+            clean_text = re.sub(r'`([^`]+)`', r'\1', clean_text)      # `code` -> code
+            
+            # Remove any SSML-like tags that might have been added
+            clean_text = re.sub(r'<[^>]+>', '', clean_text)
+            
+            # Keep [emotion] tags for Orpheus (e.g., [whisper], [cheerful])
+            # These are already in the format Orpheus expects
+            
+            # Clean up whitespace
+            clean_text = ' '.join(clean_text.split())
+            
+            logger.info(f"Orpheus input: {clean_text[:100]}...")
+            
+
+            # Map Azure voices to Groq personas if needed, or default to hannah
+            groq_voice = "hannah"  # lowercase required by Groq API
             if "male" in self.current_voice.lower() or "guy" in self.current_voice.lower() or "davis" in self.current_voice.lower():
-                groq_voice = "Troy"
+                groq_voice = "troy"
             
             url = "https://api.groq.com/openai/v1/audio/speech"
             headers = {
@@ -284,8 +312,9 @@ class AzureTTSManager:
             }
             data = {
                 "model": "canopylabs/orpheus-v1-english",
-                "input": text,
-                "voice": groq_voice
+                "input": clean_text,
+                "voice": groq_voice,
+                "response_format": "wav"  # Required by Groq API
             }
             
             # Execute request
@@ -316,16 +345,11 @@ class AzureTTSManager:
         """
         Speak the provided text using the configured TTS provider.
         """
-        if not self.is_enabled:
-            return
-
-        # Check for Groq provider flag
+        # Check for Groq provider first - Groq works even if Azure is disabled
         if getattr(self, 'provider', 'azure') == 'groq':
-            # Clean text but keep [brackets] for Orpheus
-            # _clean_text_for_speech removes logic tags but we rely on its basic cleanup
-            clean_text = self._clean_text_for_speech(text)
+            # speak_text_groq does its own cleaning (preserves [emotion] tags, strips markdown)
             self.current_synthesis = "groq"
-            success = self.speak_text_groq(clean_text, blocking)
+            success = self.speak_text_groq(text, blocking)  # Pass raw text
             self.current_synthesis = None
             
             if success:
@@ -416,18 +440,27 @@ class AzureTTSManager:
     def stop_speech(self):
         """Stop current speech synthesis"""
         try:
-            import sounddevice as sd
             # Stop Groq audio (sounddevice)
-            sd.stop()
+            try:
+                import sounddevice as sd
+                sd.stop()
+                logger.info("🔇 Stopped sounddevice playback")
+            except Exception as e:
+                logger.debug(f"sounddevice stop: {e}")
             
-            # Stop Azure audio
+            # Stop Azure audio - must call .get() to actually execute
             if self.synthesizer:
                 try:
-                    self.synthesizer.stop_speaking_async()
-                except:
-                    pass
+                    result = self.synthesizer.stop_speaking_async()
+                    result.get()  # Wait for stop to complete
+                    logger.info("🔇 Stopped Azure TTS playback")
+                except Exception as e:
+                    logger.debug(f"Azure stop: {e}")
+            
+            # Reset synthesis state
+            self.current_synthesis = None
                     
-            logger.info("Speech stopped")
+            logger.info("🛑 Speech stopped")
         except Exception as e:
             logger.error(f"Failed to stop speech: {e}")
     

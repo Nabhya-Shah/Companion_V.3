@@ -404,8 +404,11 @@ def chat_streaming():
                 tts_enabled = data.get('tts_enabled', False)
                 
                 # TTS: Speak response if enabled
-                if tts_enabled and tts_manager.is_enabled and full_response.strip():
+                # Allow Groq even if Azure is_enabled is False
+                tts_available = tts_manager.is_enabled or getattr(tts_manager, 'provider', 'azure') == 'groq'
+                if tts_enabled and tts_available and full_response.strip():
                     try:
+                        logger.info(f"🔊 TTS: Speaking response with provider={getattr(tts_manager, 'provider', 'azure')}")
                         # Non-blocking speech
                         tts_manager.speak_text(full_response, blocking=False)
                     except Exception as tts_error:
@@ -462,7 +465,6 @@ def chat_streaming():
     except Exception as e:
         logger.error(f"Chat streaming error: {e}")
         return jsonify({'error': str(e)}), 500
-
 
 @app.route('/api/debug/chat', methods=['POST'])
 def debug_chat():
@@ -826,7 +828,11 @@ def tts_config():
             voice = data.get('voice')
             rate = data.get('rate')
             pitch = data.get('pitch')
+            provider = data.get('provider')  # 'azure' or 'groq'
             
+            if provider:
+                tts_manager.provider = provider
+                logger.info(f"🔊 TTS provider set to: {provider}")
             if voice:
                 tts_manager.set_voice(voice)
             if rate:

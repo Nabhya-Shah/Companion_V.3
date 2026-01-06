@@ -45,6 +45,8 @@ let lastHistoryLength = -1; // Start at -1 to force initial render
 let eventSource = null;
 let isStreaming = false; // Prevents SSE from overwriting during streaming
 let abortController = null; // For stopping generation
+let stopTyping = false; // Flag to stop typing animation
+let currentCursorEl = null; // Reference to current streaming cursor
 let currentAttachment = null; // Stores current file attachment {file, url, analysis}
 let lastImageAnalysis = null; // Track last image analysis for pipeline display
 
@@ -457,6 +459,7 @@ async function sendMessage(retry = false) {
 
   const textEl = textDiv.querySelector('.text-content');
   const cursorEl = textDiv.querySelector('.streaming-cursor');
+  currentCursorEl = cursorEl; // Store global reference for stop button
 
   // Set streaming flag
   isStreaming = true;
@@ -473,8 +476,9 @@ async function sendMessage(retry = false) {
 
   // Smooth typewriter effect
   async function typeNextChar() {
-    if (pendingText.length === 0) {
+    if (stopTyping || pendingText.length === 0) {
       isTyping = false;
+      stopTyping = false; // Reset for next message
       return;
     }
     isTyping = true;
@@ -1656,6 +1660,9 @@ document.addEventListener('DOMContentLoaded', () => {
   updateSendButton();
   loadTasks(); // Load initial task count
 
+  // Stop any ghost TTS from previous session
+  fetch('/api/chat/stop', { method: 'POST' }).catch(() => { });
+
   // Use SSE for real-time updates (Chat + Jobs)
   startSSE();
 
@@ -2171,12 +2178,31 @@ document.addEventListener('DOMContentLoaded', () => {
   if (stopBtn) {
     stopBtn.addEventListener('click', async () => {
       console.log("Stopping generation...");
+
+      // Abort text streaming
+      if (typeof abortController !== 'undefined' && abortController) {
+        abortController.abort();
+        console.log("Text streaming aborted");
+      }
+
+      // Stop typing animation
+      stopTyping = true;
+
+      // Hide streaming cursor
+      if (currentCursorEl) {
+        currentCursorEl.style.display = 'none';
+        currentCursorEl = null;
+      }
+
+      // Hide stop button, show send button
       if (stopBtn) stopBtn.style.display = 'none';
       const sendBtn = document.getElementById('sendBtn');
       if (sendBtn) sendBtn.style.display = 'flex';
 
+      // Stop audio playback
       try {
         await fetch('/api/chat/stop', { method: 'POST' });
+        console.log("Audio stop request sent");
       } catch (e) {
         console.error("Stop failed", e);
       }

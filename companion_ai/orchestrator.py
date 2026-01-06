@@ -67,8 +67,25 @@ class OrchestratorDecision:
         except Exception as e:
             logger.error(f"❌ DEBUG: Failed to parse orchestrator decision: {e}")
             logger.error(f"❌ DEBUG: Raw input was: {json_str[:200]}...")
-            # Fallback to treating entire response as answer
-            return cls(action=OrchestratorAction.ANSWER, content=json_str)
+            
+            # Try to extract content using regex (handles truncated JSON)
+            import re
+            content_match = re.search(r'"content"\s*:\s*"(.*?)(?:"|$)', json_str, re.DOTALL)
+            if content_match:
+                # Found content field - extract and clean it
+                extracted = content_match.group(1)
+                # Unescape basic JSON escapes
+                extracted = extracted.replace('\\n', '\n').replace('\\t', '\t').replace('\\"', '"')
+                logger.info(f"✅ DEBUG: Extracted content via regex fallback: {extracted[:100]}...")
+                return cls(action=OrchestratorAction.ANSWER, content=extracted)
+            
+            # Last resort - if it doesn't look like JSON, use as-is
+            if not json_str.strip().startswith('{'):
+                return cls(action=OrchestratorAction.ANSWER, content=json_str)
+            
+            # Looks like malformed JSON we can't parse - return error
+            logger.error("❌ DEBUG: Could not extract content from malformed JSON")
+            return cls(action=OrchestratorAction.ANSWER, content="I had trouble processing that. Could you try again?")
 
 class Orchestrator:
     """The 120B brain that orchestrates local loops.
