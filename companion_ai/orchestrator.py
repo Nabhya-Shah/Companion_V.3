@@ -156,6 +156,10 @@ For vision: {"action": "delegate", "loop": "vision", "task": {"operation": "desc
 - "Turn on lights" / "Lights on" → tools (light_on, room: "all" or specific room)
 - "Turn off lights" / "Lights off" → tools (light_off, room: "all" or specific room)
 - "Dim lights to X%" → tools (light_dim, room: "...", level: X)
+- "Read this PDF" / "What's in this PDF?" / path ending in .pdf → tools (read_pdf, file_path: "...")
+- "Read this file" / "Read document" / .docx / .txt files → tools (read_document, file_path: "...")
+- "Find file X" / "Search for file" → tools (find_file, filename: "...")
+- "List files in X" / "What files are in..." → tools (list_files, directory: "...")
 - Greetings (hi/hello) without personal info → answer directly
 - General questions → answer directly
 

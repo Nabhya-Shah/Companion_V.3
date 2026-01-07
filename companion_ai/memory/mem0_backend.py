@@ -467,6 +467,26 @@ def delete_memory(memory_id: str) -> bool:
         return False
 
 
+def update_memory(memory_id: str, new_data: str) -> bool:
+    """Update a specific memory.
+    
+    Args:
+        memory_id: The memory ID to update
+        new_data: The new text content for the memory
+        
+    Returns:
+        True if successful
+    """
+    try:
+        memory = get_memory()
+        # Mem0's update method takes memory_id and new data
+        memory.update(memory_id, data=new_data)
+        logger.info(f"✏️ Updated memory {memory_id}: {new_data[:50]}...")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update memory: {e}")
+        return False
+
 def clear_all_memories(user_id: str = "default") -> bool:
     """Clear all memories for a user.
     

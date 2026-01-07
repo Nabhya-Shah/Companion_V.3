@@ -141,8 +141,96 @@ function addCopyButtons(container) {
 }
 
 // ============================================
-// Pipeline Rendering
+// Pipeline Rendering - Enhanced Tool Display
 // ============================================
+
+// Icons for different step types
+const STEP_ICONS = {
+  decision: '🎯',
+  vision: '👁️',
+  result: '✅',
+  error: '❌',
+  tool: '🔧'
+};
+
+// Format tool result data based on operation type
+function formatToolResult(data, operation) {
+  if (!data) return null;
+
+  // Time operation - show nicely formatted
+  if (operation === 'get_time' || data.formatted || data.time) {
+    return `<div class="tool-result-card time">
+      <div class="tool-result-icon">🕐</div>
+      <div class="tool-result-content">
+        <div class="tool-result-main">${data.formatted || data.time || 'Unknown'}</div>
+        ${data.date ? `<div class="tool-result-sub">${data.date}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  // PDF reading - show file info and content preview
+  if (operation === 'read_pdf' || data.content?.includes('📄 PDF:')) {
+    const content = data.content || '';
+    const preview = content.length > 300 ? content.substring(0, 300) + '...' : content;
+    return `<div class="tool-result-card pdf">
+      <div class="tool-result-icon">📄</div>
+      <div class="tool-result-content">
+        <div class="tool-result-main">PDF Document</div>
+        <div class="tool-result-sub">${data.file_path || 'File read'}</div>
+        <div class="tool-result-preview">${escapeHtml(preview)}</div>
+      </div>
+    </div>`;
+  }
+
+  // File listing
+  if (operation === 'list_files' || data.files) {
+    return `<div class="tool-result-card files">
+      <div class="tool-result-icon">📁</div>
+      <div class="tool-result-content">
+        <div class="tool-result-main">Files Listed</div>
+        <div class="tool-result-sub">${data.directory || 'Directory'}</div>
+      </div>
+    </div>`;
+  }
+
+  // Browser operations
+  if (operation?.includes('browser') || data.url) {
+    return `<div class="tool-result-card browser">
+      <div class="tool-result-icon">🌐</div>
+      <div class="tool-result-content">
+        <div class="tool-result-main">Browser Action</div>
+        <div class="tool-result-sub">${data.url || data.result || 'Completed'}</div>
+      </div>
+    </div>`;
+  }
+
+  // Wikipedia
+  if (operation === 'wikipedia' || data.topic) {
+    return `<div class="tool-result-card wiki">
+      <div class="tool-result-icon">📖</div>
+      <div class="tool-result-content">
+        <div class="tool-result-main">${data.topic || 'Wikipedia'}</div>
+        <div class="tool-result-preview">${escapeHtml((data.result || '').substring(0, 200))}</div>
+      </div>
+    </div>`;
+  }
+
+  // Light control
+  if (operation?.includes('light')) {
+    const icon = operation.includes('off') ? '🌙' : '💡';
+    return `<div class="tool-result-card lights">
+      <div class="tool-result-icon">${icon}</div>
+      <div class="tool-result-content">
+        <div class="tool-result-main">Smart Home</div>
+        <div class="tool-result-sub">${data.message || operation}</div>
+      </div>
+    </div>`;
+  }
+
+  // Generic fallback - still show as JSON but formatted
+  return null;
+}
+
 function renderPipeline(metadata) {
   if (!metadata || !metadata.source) return '';
 
@@ -174,7 +262,7 @@ function renderPipeline(metadata) {
     title: 'Orchestrator Decision',
     desc: `Route to: ${metadata.source}`,
     data: metadata.source === 'loop_vision' ? 'Visual verification needed' :
-      metadata.source === 'loop_tool' ? 'External capabilities required' :
+      metadata.source === 'loop_tools' ? 'Tool execution required' :
         'Direct conversation',
     tokens: orchTokens
   });
@@ -185,13 +273,19 @@ function renderPipeline(metadata) {
     const status = res.status || 'unknown';
     const loopType = metadata.source.replace('loop_', '');
     const loopTokens = getTokensForStep(loopType) || getTokensForStep('loop');
+    const operation = res.metadata?.operation || '';
+
+    // Format the result nicely
+    const formattedResult = formatToolResult(res.data, operation);
 
     steps.push({
       type: status === 'success' ? 'result' : 'error',
-      title: `Loop Execution: ${loopType}`,
+      title: `Tool: ${operation || loopType}`,
       desc: `Status: ${status}`,
       data: res.error ? res.error :
-        (res.data ? JSON.stringify(res.data, null, 2) : 'No data returned'),
+        (formattedResult ? formattedResult :
+          (res.data ? JSON.stringify(res.data, null, 2) : 'Completed')),
+      formatted: !!formattedResult,
       tokens: loopTokens
     });
   }
@@ -201,12 +295,15 @@ function renderPipeline(metadata) {
   steps.push({
     type: 'tool',
     title: 'Final Synthesis',
-    desc: 'Generating response using 120B model',
+    desc: 'Response generation',
     data: null,
     tokens: synthTokens
   });
 
   const html = steps.map(step => {
+    // Get icon for step type
+    const icon = STEP_ICONS[step.type] || '⚡';
+
     // Extract model type (groq vs local) from model string
     const modelLabel = step.tokens?.model?.includes('groq') ? 'groq' :
       step.tokens?.model?.includes('local') ? 'local' : '';
@@ -217,16 +314,22 @@ function renderPipeline(metadata) {
         <span class="token-time">${step.tokens.ms}ms</span>
       </span>` : '';
 
+    // Render data - either formatted HTML or escaped text
+    const dataHtml = step.data ?
+      (step.formatted ? step.data : `<div class="step-data">${escapeHtml(step.data)}</div>`)
+      : '';
+
     return `
     <div class="pipeline-step ${step.type}">
       <div class="step-info">
         <div class="step-header">
-          <span class="step-type">${step.type}</span>
+          <span class="step-icon">${icon}</span>
+          <span class="step-type">${step.type.toUpperCase()}</span>
           <span class="step-title">${step.title}</span>
           ${tokenBadge}
         </div>
         <div class="step-desc">${step.desc}</div>
-        ${step.data ? `<div class="step-data">${escapeHtml(step.data)}</div>` : ''}
+        ${dataHtml}
       </div>
     </div>
   `}).join('');
@@ -245,6 +348,7 @@ function renderPipeline(metadata) {
     </div>
   `;
 }
+
 
 // ============================================
 // Message Rendering
@@ -850,8 +954,10 @@ document.querySelectorAll('.tab').forEach(tab => {
 });
 
 // ============================================
-// Memory Loading
+// Memory Loading - Enhanced UI
 // ============================================
+let allMemoryData = { facts: [], insights: [] }; // Store for filtering
+
 async function loadMemory(retry = false) {
   try {
     const r = await fetch('/api/memory?detailed=1', { headers: authHeaders() });
@@ -868,66 +974,230 @@ async function loadMemory(retry = false) {
     const insights = data.insights || [];
     const summaries = data.summaries || [];
 
+    // Store for filtering
+    allMemoryData = { facts: detailed, insights };
+
     // Update stats
     document.getElementById('memFactCount').textContent = detailed.length;
     document.getElementById('memInsightCount').textContent = insights.length;
     document.getElementById('memSummaryCount').textContent = summaries.length;
 
-    // Profile facts as cards with delete capability
-    const profileDiv = document.getElementById('profileList');
-    if (profileDiv) {
-      profileDiv.innerHTML = '';
-      // Show ALL facts, not just first 10, since Mem0 might have many
-      detailed.forEach(row => {
-        const card = document.createElement('div');
-        card.className = 'fact-card';
-        card.dataset.key = row.key;
-        card.title = 'Click to delete this fact';
+    // Render with current search filter
+    const searchInput = document.getElementById('memorySearchInput');
+    const query = searchInput?.value?.toLowerCase() || '';
+    renderMemoryCards(query);
 
-        const confLabel = row.confidence_label || (row.confidence >= 0.8 ? 'high' : row.confidence >= 0.5 ? 'medium' : 'low');
-
-        card.innerHTML = `
-          <div class="fact-key" style="display:none">${row.key}</div>
-          <div class="fact-value">${row.value}</div>
-          <div class="fact-meta">
-            <span class="fact-confidence ${confLabel}">${confLabel}</span>
-            ${row.reaffirmations ? `<span>×${row.reaffirmations} confirmed</span>` : ''}
-          </div>
-        `;
-
-        card.addEventListener('click', () => deleteFact(row.key, card));
-        profileDiv.appendChild(card);
-      });
-      if (!detailed.length) {
-        profileDiv.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 12px;">No facts stored yet. Chat with me so I can learn about you!</div>';
-      }
-    }
-
-    // Insights as cards
-    const insightDiv = document.getElementById('insightList');
-    if (insightDiv) {
-      insightDiv.innerHTML = '';
-      insights.slice(0, 5).forEach(s => {
-        const card = document.createElement('div');
-        card.className = 'insight-card';
-        card.textContent = s.insight_text;
-        insightDiv.appendChild(card);
-      });
-      if (!insights.length) {
-        insightDiv.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 12px;">No insights yet</div>';
-      }
-    }
   } catch (e) {
     console.error('Failed to load memory:', e);
   }
 }
 
+// Render memory cards with optional filter
+function renderMemoryCards(query = '') {
+  const profileDiv = document.getElementById('profileList');
+  const insightDiv = document.getElementById('insightList');
+  const searchCount = document.getElementById('memorySearchCount');
+
+  let matchCount = 0;
+
+  // Profile facts as enhanced cards
+  if (profileDiv) {
+    profileDiv.innerHTML = '';
+
+    allMemoryData.facts.forEach((row, index) => {
+      const text = row.value.toLowerCase();
+      const matches = !query || text.includes(query);
+
+      if (!matches) return;
+      matchCount++;
+
+      const card = document.createElement('div');
+      card.className = 'memory-card';
+      card.dataset.key = row.key;
+      card.dataset.index = index;
+
+      // Category detection
+      const category = detectCategory(row.value);
+      const confPercent = Math.round((row.confidence || 0.7) * 100);
+      const timeAgo = formatTimeAgo(row.created_at || row.updated_at);
+
+      // Highlight matching text
+      let displayText = escapeHtml(row.value);
+      if (query) {
+        const regex = new RegExp(`(${escapeRegex(query)})`, 'gi');
+        displayText = displayText.replace(regex, '<span class="highlight">$1</span>');
+      }
+
+      card.innerHTML = `
+        <div class="memory-card-header">
+          <span class="memory-category ${category}">${category}</span>
+        </div>
+        <div class="memory-text">${displayText}</div>
+        <div class="memory-meta">
+          <span class="memory-timestamp">${timeAgo}</span>
+          <div class="memory-confidence">
+            <span>${confPercent}%</span>
+            <div class="confidence-bar">
+              <div class="confidence-fill" style="width: ${confPercent}%"></div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Left-click to edit
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.memory-edit-container')) return;
+        toggleEditMode(card, row.key, row.value);
+      });
+
+      // Right-click to delete
+      card.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        deleteFact(row.key, card);
+      });
+
+      profileDiv.appendChild(card);
+    });
+
+    if (!allMemoryData.facts.length) {
+      profileDiv.innerHTML = '<div class="memory-empty">No facts stored yet. Chat with me so I can learn about you!</div>';
+    } else if (!matchCount && query) {
+      profileDiv.innerHTML = '<div class="memory-empty">No memories match your search</div>';
+    }
+  }
+
+  // Insights as cards
+  if (insightDiv) {
+    insightDiv.innerHTML = '';
+    allMemoryData.insights.slice(0, 5).forEach(s => {
+      const text = (s.insight_text || '').toLowerCase();
+      if (query && !text.includes(query)) return;
+
+      const card = document.createElement('div');
+      card.className = 'memory-card';
+
+      let displayText = escapeHtml(s.insight_text);
+      if (query) {
+        const regex = new RegExp(`(${escapeRegex(query)})`, 'gi');
+        displayText = displayText.replace(regex, '<span class="highlight">$1</span>');
+      }
+
+      card.innerHTML = `
+        <div class="memory-card-header">
+          <span class="memory-category insight">insight</span>
+        </div>
+        <div class="memory-text">${displayText}</div>
+      `;
+      insightDiv.appendChild(card);
+    });
+
+    if (!allMemoryData.insights.length) {
+      insightDiv.innerHTML = '<div class="memory-empty">No insights yet</div>';
+    }
+  }
+
+  // Update search count
+  if (searchCount) {
+    searchCount.textContent = query ? `${matchCount} found` : '';
+  }
+}
+
+// Toggle inline edit mode
+function toggleEditMode(card, key, currentValue) {
+  // Remove any existing edit containers
+  document.querySelectorAll('.memory-card.editing').forEach(c => {
+    c.classList.remove('editing');
+    c.querySelector('.memory-edit-container')?.remove();
+  });
+
+  if (card.classList.contains('editing')) {
+    card.classList.remove('editing');
+    return;
+  }
+
+  card.classList.add('editing');
+
+  const editContainer = document.createElement('div');
+  editContainer.className = 'memory-edit-container';
+  editContainer.innerHTML = `
+    <textarea class="memory-edit-textarea">${escapeHtml(currentValue)}</textarea>
+    <div class="memory-edit-actions">
+      <button class="memory-save-btn">Save</button>
+      <button class="memory-cancel-btn">Cancel</button>
+    </div>
+  `;
+
+  card.appendChild(editContainer);
+
+  const textarea = editContainer.querySelector('textarea');
+  textarea.focus();
+  textarea.selectionStart = textarea.value.length;
+
+  // Save button
+  editContainer.querySelector('.memory-save-btn').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const newValue = textarea.value.trim();
+    if (newValue && newValue !== currentValue) {
+      await updateFact(key, newValue, card);
+    }
+    card.classList.remove('editing');
+    editContainer.remove();
+  });
+
+  // Cancel button
+  editContainer.querySelector('.memory-cancel-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    card.classList.remove('editing');
+    editContainer.remove();
+  });
+
+  // Enter to save, Escape to cancel
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      editContainer.querySelector('.memory-save-btn').click();
+    } else if (e.key === 'Escape') {
+      editContainer.querySelector('.memory-cancel-btn').click();
+    }
+  });
+}
+
+// Update a fact
+async function updateFact(key, newValue, cardElement) {
+  try {
+    const r = await fetch(`/api/memory/fact/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ value: newValue })
+    });
+
+    if (r.ok) {
+      // Update in memory
+      const index = parseInt(cardElement.dataset.index);
+      if (allMemoryData.facts[index]) {
+        allMemoryData.facts[index].value = newValue;
+      }
+      // Flash highlight
+      cardElement.classList.add('highlight');
+      setTimeout(() => cardElement.classList.remove('highlight'), 500);
+      // Re-render cards
+      const query = document.getElementById('memorySearchInput')?.value?.toLowerCase() || '';
+      renderMemoryCards(query);
+    } else {
+      const errText = await r.text();
+      console.error('Update failed:', r.status, errText);
+      alert(`Failed to update: ${errText}`);
+    }
+  } catch (e) {
+    console.error('Update fact failed:', e);
+    alert('Failed to update fact');
+  }
+}
+
 // Delete a single fact
 async function deleteFact(key, cardElement) {
-  // For Mem0, the key is a UUID which isn't user friendly.
-  // We'll show the text content in the confirmation dialog instead.
-  const text = cardElement.querySelector('.fact-value').textContent;
-  if (!confirm(`Delete memory: "${text}"?`)) return;
+  const text = cardElement.querySelector('.memory-text')?.textContent || 'this memory';
+  if (!confirm(`Delete: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"?`)) return;
 
   try {
     const r = await fetch(`/api/memory/fact/${encodeURIComponent(key)}`, {
@@ -940,20 +1210,61 @@ async function deleteFact(key, cardElement) {
       cardElement.style.transform = 'translateX(-20px)';
       setTimeout(() => {
         cardElement.remove();
-        // Update count
         const countEl = document.getElementById('memFactCount');
         if (countEl) countEl.textContent = parseInt(countEl.textContent) - 1;
+        // Also remove from local data
+        allMemoryData.facts = allMemoryData.facts.filter(f => f.key !== key);
       }, 200);
     } else {
       const errText = await r.text();
       console.error('Delete failed:', r.status, errText);
-      alert(`Failed to delete fact: ${r.status} ${errText}`);
+      alert(`Failed to delete: ${r.status} ${errText}`);
     }
   } catch (e) {
     console.error('Delete fact failed:', e);
     alert('Failed to delete fact');
   }
 }
+
+// Category detection based on content
+function detectCategory(text) {
+  const lower = text.toLowerCase();
+  if (lower.includes('like') || lower.includes('prefer') || lower.includes('favorite') || lower.includes('enjoy')) {
+    return 'preference';
+  }
+  if (lower.includes('work') || lower.includes('job') || lower.includes('study') || lower.includes('school')) {
+    return 'fact';
+  }
+  return 'fact';
+}
+
+// Format relative time
+function formatTimeAgo(dateStr) {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return 'just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
+}
+
+// Escape regex special chars
+function escapeRegex(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Search input handler
+document.getElementById('memorySearchInput')?.addEventListener('input', (e) => {
+  const query = e.target.value.toLowerCase();
+  renderMemoryCards(query);
+});
 
 document.getElementById('refreshMemoryBtn')?.addEventListener('click', loadMemory);
 

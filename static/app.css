@@ -2398,3 +2398,567 @@ body {
     opacity: 1;
   }
 }
+
+/* ============================================
+   Memory UI Improvements
+   ============================================ */
+
+/* Search Box */
+.memory-search-container {
+  position: relative;
+  margin: 12px 0;
+}
+
+.memory-search-container .search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.memory-search {
+  width: 100%;
+  padding: 10px 12px 10px 38px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.memory-search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+.memory-search::placeholder {
+  color: var(--text-muted);
+}
+
+.search-count {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Memory Cards - Glassmorphism */
+.memory-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  animation: memoryFadeIn 0.3s ease-out;
+}
+
+@keyframes memoryFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.memory-card:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-accent);
+  transform: translateX(4px);
+}
+
+.memory-card.editing {
+  border-color: var(--accent);
+  background: var(--bg-tertiary);
+}
+
+.memory-card.hidden {
+  display: none;
+}
+
+.memory-card.highlight {
+  animation: highlightPulse 0.5s ease;
+}
+
+@keyframes highlightPulse {
+
+  0%,
+  100% {
+    background: var(--glass-bg);
+  }
+
+  50% {
+    background: var(--accent-subtle);
+  }
+}
+
+/* Card Content */
+.memory-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.memory-category {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.memory-category.preference {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.memory-category.fact {
+  background: var(--success-subtle);
+  color: var(--success);
+}
+
+.memory-category.insight {
+  background: var(--warning-subtle);
+  color: var(--warning);
+}
+
+.memory-text {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.memory-text .highlight {
+  background: var(--warning-subtle);
+  color: var(--warning);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.memory-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.memory-timestamp {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.memory-confidence {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.confidence-bar {
+  width: 40px;
+  height: 4px;
+  background: var(--bg-hover);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.confidence-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* Edit Mode */
+.memory-edit-container {
+  margin-top: 10px;
+  animation: editSlideIn 0.2s ease;
+}
+
+@keyframes editSlideIn {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+
+  to {
+    opacity: 1;
+    max-height: 120px;
+  }
+}
+
+.memory-edit-textarea {
+  width: 100%;
+  padding: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  resize: vertical;
+  min-height: 60px;
+}
+
+.memory-edit-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.memory-edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.memory-edit-actions button {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.memory-save-btn {
+  background: var(--accent);
+  color: white;
+}
+
+.memory-save-btn:hover {
+  background: var(--accent-hover);
+}
+
+.memory-cancel-btn {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  border: 1px solid var(--border) !important;
+}
+
+.memory-cancel-btn:hover {
+  background: var(--bg-tertiary);
+}
+
+/* Section styling */
+.memory-section {
+  margin-bottom: 20px;
+}
+
+.section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.section-header-row h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.fact-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Empty state */
+.memory-empty {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ============================================
+   Enhanced Pipeline & Tool Output Display
+   ============================================ */
+
+/* Pipeline container */
+.pipeline-view {
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.pipeline-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.2s;
+}
+
+.pipeline-toggle:hover {
+  color: var(--text-secondary);
+}
+
+.pipeline-toggle svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.2s;
+}
+
+.pipeline-toggle.open svg {
+  transform: rotate(90deg);
+}
+
+.pipeline-content {
+  display: none;
+  padding: 12px 0 0 0;
+}
+
+.pipeline-content.open {
+  display: block;
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Pipeline steps */
+.pipeline-step {
+  position: relative;
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  border-left: 3px solid var(--border);
+}
+
+.pipeline-step.decision {
+  border-left-color: var(--accent);
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), transparent);
+}
+
+.pipeline-step.result {
+  border-left-color: var(--success);
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), transparent);
+}
+
+.pipeline-step.error {
+  border-left-color: var(--error);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), transparent);
+}
+
+.pipeline-step.vision {
+  border-left-color: #06b6d4;
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), transparent);
+}
+
+.pipeline-step.tool {
+  border-left-color: #f59e0b;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), transparent);
+}
+
+/* Step header */
+.step-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.step-icon {
+  font-size: 16px;
+}
+
+.step-type {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+}
+
+.pipeline-step.decision .step-type {
+  color: var(--accent);
+  background: rgba(139, 92, 246, 0.2);
+}
+
+.pipeline-step.result .step-type {
+  color: var(--success);
+  background: rgba(34, 197, 94, 0.2);
+}
+
+.pipeline-step.error .step-type {
+  color: var(--error);
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.pipeline-step.vision .step-type {
+  color: #06b6d4;
+  background: rgba(6, 182, 212, 0.2);
+}
+
+.pipeline-step.tool .step-type {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.2);
+}
+
+.step-title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.step-desc {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.step-data {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  color: var(--text-secondary);
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+/* Token badges */
+.token-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.model-label {
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.model-label.groq {
+  background: rgba(249, 115, 22, 0.2);
+  color: #f97316;
+}
+
+.model-label.local {
+  background: rgba(59, 130, 246, 0.2);
+  color: #3b82f6;
+}
+
+.token-count {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.token-time {
+  color: var(--text-muted);
+}
+
+/* Tool Result Cards */
+.tool-result-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+}
+
+.tool-result-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.tool-result-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.tool-result-main {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.tool-result-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.tool-result-preview {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+/* Card type variations */
+.tool-result-card.time {
+  border-left: 3px solid #06b6d4;
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.05), transparent);
+}
+
+.tool-result-card.pdf {
+  border-left: 3px solid #ef4444;
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.05), transparent);
+}
+
+.tool-result-card.files {
+  border-left: 3px solid #f59e0b;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.05), transparent);
+}
+
+.tool-result-card.browser {
+  border-left: 3px solid #3b82f6;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.05), transparent);
+}
+
+.tool-result-card.wiki {
+  border-left: 3px solid #22c55e;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.05), transparent);
+}
+
+.tool-result-card.lights {
+  border-left: 3px solid #a855f7;
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.05), transparent);
+}

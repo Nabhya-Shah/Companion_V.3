@@ -40,7 +40,8 @@ and return the result. Be precise and concise."""
             "get_time", "calculate", "web_search", "wikipedia", "brain_read", "brain_list",
             "browser_goto", "browser_click", "browser_type", "browser_read", "browser_press",
             "add_bookmark", "open_bookmark", "enable_browser_control",
-            "light_on", "light_off", "light_dim"  # Loxone smart home
+            "light_on", "light_off", "light_dim",  # Loxone smart home
+            "read_pdf", "read_document", "list_files", "find_file"  # File reading
         ]
     
     async def execute(self, task: Dict[str, Any]) -> LoopResult:
@@ -113,6 +114,15 @@ and return the result. Be precise and concise."""
             return await self._light_off(task.get("room", ""))
         elif operation == "light_dim":
             return await self._light_dim(task.get("room", ""), task.get("level", 50))
+        # File Reading
+        elif operation == "read_pdf":
+            return await self._read_pdf(task.get("file_path", ""), task.get("page_number"))
+        elif operation == "read_document":
+            return await self._read_document(task.get("file_path", ""))
+        elif operation == "list_files":
+            return await self._list_files(task.get("directory", "."), task.get("file_type"))
+        elif operation == "find_file":
+            return await self._find_file(task.get("filename", ""), task.get("file_type"))
         else:
             return LoopResult.failure(f"Unknown operation: {operation}")
     
@@ -415,3 +425,77 @@ and return the result. Be precise and concise."""
         except Exception as e:
             logger.error(f"Light dim failed: {e}")
             return LoopResult.failure(str(e))
+
+    # =========================================================================
+    # File Reading Operations
+    # =========================================================================
+    
+    async def _read_pdf(self, file_path: str, page_number: int = None) -> LoopResult:
+        """Read text from a PDF file."""
+        if not file_path:
+            return LoopResult.failure("No file path provided")
+        
+        try:
+            from companion_ai.tools import tool_read_pdf
+            
+            result = tool_read_pdf(file_path, page_number)
+            
+            return LoopResult.success(
+                data={"file_path": file_path, "content": result},
+                operation="read_pdf"
+            )
+        except Exception as e:
+            logger.error(f"Read PDF failed: {e}")
+            return LoopResult.failure(str(e))
+    
+    async def _read_document(self, file_path: str) -> LoopResult:
+        """Read text from a document (docx, txt)."""
+        if not file_path:
+            return LoopResult.failure("No file path provided")
+        
+        try:
+            from companion_ai.tools import tool_read_docx
+            
+            result = tool_read_docx(file_path)
+            
+            return LoopResult.success(
+                data={"file_path": file_path, "content": result},
+                operation="read_document"
+            )
+        except Exception as e:
+            logger.error(f"Read document failed: {e}")
+            return LoopResult.failure(str(e))
+    
+    async def _list_files(self, directory: str, file_type: str = None) -> LoopResult:
+        """List files in a directory."""
+        try:
+            from companion_ai.tools import tool_list_files
+            
+            result = tool_list_files(directory, file_type)
+            
+            return LoopResult.success(
+                data={"directory": directory, "files": result},
+                operation="list_files"
+            )
+        except Exception as e:
+            logger.error(f"List files failed: {e}")
+            return LoopResult.failure(str(e))
+    
+    async def _find_file(self, filename: str, file_type: str = None) -> LoopResult:
+        """Find files matching a name."""
+        if not filename:
+            return LoopResult.failure("No filename provided")
+        
+        try:
+            from companion_ai.tools import tool_find_file
+            
+            result = tool_find_file(filename, file_type)
+            
+            return LoopResult.success(
+                data={"filename": filename, "results": result},
+                operation="find_file"
+            )
+        except Exception as e:
+            logger.error(f"Find file failed: {e}")
+            return LoopResult.failure(str(e))
+

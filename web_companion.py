@@ -795,6 +795,43 @@ def delete_fact(key: str):
         local_logger.error(f"Delete fact error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/memory/fact/<key>', methods=['PUT'])
+def update_fact(key: str):
+    """Update a memory fact by key."""
+    local_logger = logging.getLogger(__name__)
+    try:
+        token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
+        if not core_config.require_auth(token):
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        data = request.get_json()
+        new_value = data.get('value', '').strip()
+        
+        if not new_value:
+            return jsonify({'error': 'Empty value not allowed'}), 400
+        
+        updated = False
+        
+        if core_config.USE_MEM0:
+            try:
+                # Mem0 update_memory takes memory_id and new data
+                updated = memory_v2.update_memory(key, new_value)
+                if updated:
+                    local_logger.info(f"Updated Mem0 memory {key}: {new_value[:50]}...")
+            except Exception as e:
+                local_logger.error(f"Mem0 update error: {e}")
+                # Try SQLite fallback
+                try:
+                    from companion_ai.memory.sqlite_backend import update_profile_fact
+                    updated = update_profile_fact(key, new_value)
+                except:
+                    pass
+        
+        return jsonify({'updated': updated, 'key': key, 'value': new_value})
+    except Exception as e:
+        local_logger.error(f"Update fact error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/tts/toggle', methods=['POST'])
 def toggle_tts():
     try:

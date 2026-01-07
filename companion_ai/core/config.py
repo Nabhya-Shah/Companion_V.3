@@ -25,11 +25,19 @@ GROQ_TOOL_API_KEY = os.getenv("GROQ_TOOL_API_KEY")  # Dedicated key for tool pla
 GROQ_VISION_API_KEY = os.getenv("GROQ_VISION_API_KEY", GROQ_API_KEY)  # Falls back to main key
 
 # Key Rotation Support
-# Load additional keys if present (GROQ_API_KEY_2, GROQ_API_KEY_3, etc.)
+# Load all Groq keys into rotation pool (main + named + numbered)
 GROQ_API_KEYS = [GROQ_API_KEY] if GROQ_API_KEY else []
+
+# Add named keys (these have specific purposes but can be used for rotation)
+for env_var in ["GROQ_VISION_API_KEY", "GROQ_MEMORY_API_KEY", "GROQ_TOOL_API_KEY", "GROQ_VOICE_API_KEY"]:
+    key = os.getenv(env_var)
+    if key and key not in GROQ_API_KEYS and key != GROQ_API_KEY:
+        GROQ_API_KEYS.append(key)
+
+# Add numbered keys (GROQ_API_KEY_2, GROQ_API_KEY_3, etc.)
 for i in range(2, 10):
     key = os.getenv(f"GROQ_API_KEY_{i}")
-    if key:
+    if key and key not in GROQ_API_KEYS:
         GROQ_API_KEYS.append(key)
 
 # External service keys
