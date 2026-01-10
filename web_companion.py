@@ -1040,6 +1040,109 @@ def get_uploaded_file(file_id):
     return jsonify({'error': 'File not found'}), 404
 
 
+# --- Brain Knowledge Base API ---
+
+BRAIN_DIR = os.path.join(os.path.dirname(__file__), 'BRAIN')
+
+@app.route('/api/brain/upload', methods=['POST'])
+def brain_upload():
+    """Upload a file to the brain folder and index it."""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    # Optional subfolder (defaults to 'documents')
+    subfolder = request.form.get('folder', 'documents')
+    
+    # Create target directory
+    target_dir = os.path.join(BRAIN_DIR, subfolder)
+    os.makedirs(target_dir, exist_ok=True)
+    
+    try:
+        from werkzeug.utils import secure_filename
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(target_dir, filename)
+        file.save(filepath)
+        
+        # Index the file
+        from companion_ai.brain_index import get_brain_index
+        index = get_brain_index()
+        chunks = index.index_file(Path(filepath))
+        
+        logger.info(f"📄 Uploaded to brain: {filename} ({chunks} chunks indexed)")
+        
+        return jsonify({
+            'success': True,
+            'filename': filename,
+            'path': f"{subfolder}/{filename}",
+            'chunks_indexed': chunks
+        })
+    except Exception as e:
+        logger.error(f"Brain upload error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/brain/stats', methods=['GET'])
+def brain_stats():
+    """Get brain index statistics."""
+    try:
+        from companion_ai.brain_index import get_brain_index
+        index = get_brain_index()
+        stats = index.get_stats()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"Brain stats error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/brain/reindex', methods=['POST'])
+def brain_reindex():
+    """Trigger full reindex of brain folder."""
+    try:
+        from companion_ai.brain_index import get_brain_index
+        index = get_brain_index()
+        results = index.index_all()
+        return jsonify({
+            'success': True,
+            'files_indexed': len(results),
+            'total_chunks': sum(results.values()),
+            'files': results
+        })
+    except Exception as e:
+        logger.error(f"Brain reindex error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/brain/search', methods=['GET'])
+def brain_search_api():
+    """Search brain documents via API."""
+    query = request.args.get('q', '')
+    if not query:
+        return jsonify({'error': 'No query provided'}), 400
+    
+    try:
+        from companion_ai.brain_index import get_brain_index
+        index = get_brain_index()
+        results = index.search(query, limit=10)
+        return jsonify({'query': query, 'results': results})
+    except Exception as e:
+        logger.error(f"Brain search error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# Start background brain indexing on server start
+def start_brain_indexing():
+    """Start background indexing of brain folder."""
+    try:
+        from companion_ai.brain_index import start_background_indexing
+        start_background_indexing()
+    except Exception as e:
+        logger.warning(f"Could not start brain indexing: {e}")
+
+# Trigger indexing on import
+threading.Thread(target=start_brain_indexing, daemon=True).start()
+
+
 # --- Tasks API (V6 Architecture) ---
 
 @app.route('/api/tasks', methods=['GET'])

@@ -37,7 +37,7 @@ and return the result. Be precise and concise."""
     
     def _get_supported_operations(self) -> List[str]:
         return [
-            "get_time", "calculate", "web_search", "wikipedia", "brain_read", "brain_list",
+            "get_time", "calculate", "web_search", "wikipedia", "brain_read", "brain_list", "brain_search",
             "browser_goto", "browser_click", "browser_type", "browser_read", "browser_press",
             "add_bookmark", "open_bookmark", "enable_browser_control",
             "light_on", "light_off", "light_dim",  # Loxone smart home
@@ -107,6 +107,8 @@ and return the result. Be precise and concise."""
             return await self._brain_read(task.get("path", ""))
         elif operation == "brain_list":
             return await self._brain_list(task.get("subdir", ""))
+        elif operation == "brain_search":
+            return await self._brain_search(task.get("query", ""))
         # Loxone Smart Home - Light Control
         elif operation == "light_on":
             return await self._light_on(task.get("room", ""))
@@ -243,6 +245,24 @@ and return the result. Be precise and concise."""
             )
         except Exception as e:
             logger.error(f"Brain list failed: {e}")
+            return LoopResult.failure(str(e))
+
+    async def _brain_search(self, query: str) -> LoopResult:
+        """Semantic search across brain documents."""
+        if not query:
+            return LoopResult.failure("No query provided")
+        
+        try:
+            from companion_ai.brain_index import brain_search
+            
+            result = brain_search(query)
+            
+            return LoopResult.success(
+                data={"query": query, "results": result},
+                operation="brain_search"
+            )
+        except Exception as e:
+            logger.error(f"Brain search failed: {e}")
             return LoopResult.failure(str(e))
 
     async def _browser_tool(self, tool_name: str, args: Dict) -> LoopResult:

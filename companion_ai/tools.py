@@ -169,6 +169,8 @@ def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
         return tool_fn(arguments.get('path', ''), arguments.get('content', ''), arguments.get('append', False))
     elif function_name == 'brain_list':
         return tool_fn(arguments.get('subdir', ''))
+    elif function_name == 'brain_search':
+        return tool_fn(arguments.get('query', ''))
     elif function_name == 'wikipedia_lookup':
         return tool_fn(arguments.get('query', ''))
     elif function_name == 'read_pdf':
@@ -245,6 +247,31 @@ def tool_memory_search(query: str) -> str:
         return "\n".join(output)
     except Exception as e:
         return f"Error searching memory: {str(e)}"
+
+@tool('brain_search', schema={
+    "type": "function",
+    "function": {
+        "name": "brain_search",
+        "description": "Search across all documents in the brain folder (PDFs, text files, notes) using semantic search. Use this to find specific information from uploaded documents or notes.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What to search for in the brain documents (e.g., 'investment terms', 'meeting notes from last week')"
+                }
+            },
+            "required": ["query"]
+        }
+    }
+})
+def tool_brain_search(query: str) -> str:
+    """Search brain folder documents semantically."""
+    try:
+        from companion_ai.brain_index import brain_search
+        return brain_search(query)
+    except Exception as e:
+        return f"Brain search error: {str(e)}"
 
 # memory_insight tool removed - V5 cleanup (consolidated to memory_search)
 

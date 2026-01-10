@@ -2962,3 +2962,116 @@ body {
   border-left: 3px solid #a855f7;
   background: linear-gradient(135deg, rgba(168, 85, 247, 0.05), transparent);
 }
+
+/* ============================================
+   Knowledge Base Upload Zone
+   ============================================ */
+
+.upload-zone {
+  border: 2px dashed rgba(139, 92, 246, 0.3);
+  border-radius: 12px;
+  padding: 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: rgba(139, 92, 246, 0.05);
+}
+
+.upload-zone:hover {
+  border-color: rgba(139, 92, 246, 0.6);
+  background: rgba(139, 92, 246, 0.1);
+}
+
+.upload-zone.drag-over {
+  border-color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.2);
+  transform: scale(1.02);
+}
+
+.upload-zone svg {
+  color: #8b5cf6;
+  opacity: 0.7;
+  margin-bottom: 8px;
+}
+
+.upload-zone p {
+  margin: 0 0 4px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.upload-zone span {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.brain-files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.brain-file-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.brain-file-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.brain-file-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.brain-file-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.brain-file-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.brain-file-meta {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.brain-empty {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.small-btn {
+  padding: 4px 8px;
+  font-size: 12px;
+  background: rgba(139, 92, 246, 0.15);
+  border: none;
+  border-radius: 4px;
+  color: #8b5cf6;
+  cursor: pointer;
+}
+
+.small-btn:hover {
+  background: rgba(139, 92, 246, 0.25);
+}

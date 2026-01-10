@@ -373,17 +373,36 @@ function createMessageElement(role, text, timestamp, tokens, metadata, attachmen
   // Role label with optional token stats
   const roleName = role === 'user' ? 'You' : 'Companion';
   let tokenHtml = '';
-  if (role === 'ai' && tokens && showTokens) {
-    const total = (tokens.input || 0) + (tokens.output || 0);
-    const source = tokens.source || 'unknown';
-    // Color code source
-    let sourceColor = '#888';
-    if (source === 'groq') sourceColor = '#f97316';
-    else if (source === 'local') sourceColor = '#3b82f6';
+  if (role === 'ai' && showTokens) {
+    // Calculate total tokens for this message (sum all steps)
+    let messageTotal = 0;
+    let primarySource = 'unknown';
 
-    tokenHtml = `<span class="token-badge" title="Input: ${tokens.input} | Output: ${tokens.output}">(${total} tokens)</span>`;
-    if (source !== 'unknown') {
-      tokenHtml += `<span class="source-badge" style="color: ${sourceColor}; margin-left: 6px; font-size: 10px;">${source}</span>`;
+    if (metadata && metadata.token_steps) {
+      for (const step of metadata.token_steps) {
+        messageTotal += (step.total || 0);
+        // Use the synthesis/generate source as primary
+        if (step.name === 'synthesis' || step.name === 'generate') {
+          primarySource = step.model?.includes('groq') ? 'groq' :
+            step.model?.includes('local') ? 'local' : 'unknown';
+        }
+      }
+    } else if (tokens) {
+      // Fallback to tokens object if no metadata
+      messageTotal = (tokens.input || 0) + (tokens.output || 0);
+      primarySource = tokens.source || 'unknown';
+    }
+
+    if (messageTotal > 0) {
+      // Color code source
+      let sourceColor = '#888';
+      if (primarySource === 'groq') sourceColor = '#f97316';
+      else if (primarySource === 'local') sourceColor = '#3b82f6';
+
+      tokenHtml = `<span class="token-badge" title="Total tokens for this message">(${messageTotal} tokens)</span>`;
+      if (primarySource !== 'unknown') {
+        tokenHtml += `<span class="source-badge" style="color: ${sourceColor}; margin-left: 6px; font-size: 10px;">[${primarySource}]</span>`;
+      }
     }
   }
 
@@ -2520,3 +2539,123 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
+// ============================================
+// Knowledge Base (Brain Files)
+// ============================================
+
+async function loadBrainFiles() {
+  const list = document.getElementById('brainFilesList');
+  if (!list) return;
+
+  try {
+    const res = await fetch('/api/brain/stats');
+    const data = await res.json();
+
+    if (!data.files || data.files.length === 0) {
+      list.innerHTML = '<div class="brain-empty">No documents indexed yet.<br>Upload files above to get started!</div>';
+      return;
+    }
+
+    const icons = { '.pdf': '📄', '.md': '📝', '.txt': '📃', '.docx': '📋' };
+
+    list.innerHTML = data.files.map(f => {
+      const ext = '.' + f.path.split('.').pop().toLowerCase();
+      const icon = icons[ext] || '📁';
+      const name = f.path.split('\\').pop();
+      return `
+        <div class="brain-file-card">
+          <div class="brain-file-icon">${icon}</div>
+          <div class="brain-file-info">
+            <div class="brain-file-name">${name}</div>
+            <div class="brain-file-meta">${f.chunks} chunk${f.chunks > 1 ? 's' : ''} indexed</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    list.innerHTML = '<div class="brain-empty">Error loading files</div>';
+  }
+}
+
+// Initialize Knowledge tab handlers
+document.addEventListener('DOMContentLoaded', () => {
+  const uploadZone = document.getElementById('brainUploadZone');
+  const fileInput = document.getElementById('brainFileInput');
+  const reindexBtn = document.getElementById('reindexBrainBtn');
+
+  if (uploadZone && fileInput) {
+    // Click to upload
+    uploadZone.addEventListener('click', () => fileInput.click());
+
+    // Drag and drop
+    uploadZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadZone.classList.add('drag-over');
+    });
+
+    uploadZone.addEventListener('dragleave', () => {
+      uploadZone.classList.remove('drag-over');
+    });
+
+    uploadZone.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      uploadZone.classList.remove('drag-over');
+      const files = Array.from(e.dataTransfer.files);
+      for (const file of files) {
+        await uploadBrainFile(file);
+      }
+    });
+
+    // File input change
+    fileInput.addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files);
+      for (const file of files) {
+        await uploadBrainFile(file);
+      }
+      fileInput.value = '';
+    });
+  }
+
+  if (reindexBtn) {
+    reindexBtn.addEventListener('click', async () => {
+      reindexBtn.disabled = true;
+      reindexBtn.textContent = '...';
+      try {
+        await fetch('/api/brain/reindex', { method: 'POST' });
+        await loadBrainFiles();
+      } finally {
+        reindexBtn.disabled = false;
+        reindexBtn.textContent = '↻';
+      }
+    });
+  }
+
+  // Load files when Knowledge tab is clicked
+  document.querySelectorAll('.tab[data-tab="knowledge"]').forEach(tab => {
+    tab.addEventListener('click', () => loadBrainFiles());
+  });
+});
+
+async function uploadBrainFile(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('folder', 'documents');
+
+  try {
+    const res = await fetch('/api/brain/upload', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      console.log(`Uploaded ${file.name}: ${data.chunks_indexed} chunks indexed`);
+      await loadBrainFiles();
+    } else {
+      console.error('Upload failed:', data.error);
+    }
+  } catch (e) {
+    console.error('Upload error:', e);
+  }
+}

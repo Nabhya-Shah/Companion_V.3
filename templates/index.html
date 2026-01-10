@@ -247,6 +247,7 @@
       </div>
       <nav class="tabs">
         <button class="tab active" data-tab="memory">Memory</button>
+        <button class="tab" data-tab="knowledge">Knowledge</button>
         <button class="tab" data-tab="tokens">Tokens</button>
         <button class="tab" data-tab="models">Models</button>
         <button class="tab" data-tab="metrics">Metrics</button>
@@ -308,6 +309,30 @@
             </svg>
             Refresh
           </button>
+        </div>
+        <div class="pane" id="pane-knowledge">
+          <div class="memory-section">
+            <h4>📁 Upload Documents</h4>
+            <div id="brainUploadZone" class="upload-zone">
+              <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              <p>Drop files here or click to upload</p>
+              <span>PDF, TXT, MD, DOCX supported</span>
+              <input type="file" id="brainFileInput" accept=".pdf,.txt,.md,.docx" multiple hidden />
+            </div>
+          </div>
+          <div class="memory-section">
+            <div class="section-header-row">
+              <h4>🧠 Indexed Files</h4>
+              <button id="reindexBrainBtn" class="small-btn" title="Reindex all documents">↻</button>
+            </div>
+            <div id="brainFilesList" class="brain-files-list">
+              <div class="brain-empty">Loading...</div>
+            </div>
+          </div>
         </div>
         <div class="pane" id="pane-tokens">
           <div class="memory-section">

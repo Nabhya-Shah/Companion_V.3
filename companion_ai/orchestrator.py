@@ -160,6 +160,7 @@ For vision: {"action": "delegate", "loop": "vision", "task": {"operation": "desc
 - "Read this file" / "Read document" / .docx / .txt files → tools (read_document, file_path: "...")
 - "Find file X" / "Search for file" → tools (find_file, filename: "...")
 - "List files in X" / "What files are in..." → tools (list_files, directory: "...")
+- "Search my documents for X" / "What do my notes say about X?" / "Find in brain" → tools (brain_search, query: "...")
 - Greetings (hi/hello) without personal info → answer directly
 - General questions → answer directly
 
