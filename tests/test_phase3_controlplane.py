@@ -1,5 +1,6 @@
 import web_companion
 from web_companion import app
+import companion_ai.web.tools_routes as _tools_mod
 
 
 def test_tasks_endpoint_returns_ui_shape(monkeypatch):
@@ -181,7 +182,7 @@ def test_schedule_create_rejects_bad_cadence(monkeypatch):
 
 def test_plugin_policy_get(monkeypatch):
     monkeypatch.setattr(
-        web_companion,
+        _tools_mod,
         'get_plugin_policy_state',
         lambda: {'source': 'workspace', 'effective_enabled_plugins': ['core']},
     )
@@ -195,7 +196,7 @@ def test_plugin_policy_get(monkeypatch):
 
 def test_plugin_catalog_endpoint(monkeypatch):
     monkeypatch.setattr(
-        web_companion,
+        _tools_mod,
         'get_plugin_catalog',
         lambda: [{'name': 'core', 'tool_count': 1, 'tools': [{'name': 'get_current_time'}]}],
     )
@@ -211,7 +212,7 @@ def test_plugin_catalog_endpoint(monkeypatch):
 def test_plugin_policy_post_requires_auth(monkeypatch):
     monkeypatch.setattr(web_companion.core_config, 'API_AUTH_TOKEN', 'secret')
     monkeypatch.setattr(
-        web_companion,
+        _tools_mod,
         'set_workspace_plugin_policy',
         lambda enabled: {'saved': True, 'effective_enabled_plugins': enabled},
     )
@@ -235,7 +236,7 @@ def test_plugin_policy_post_rejects_unknown_plugin(monkeypatch):
     def fake_set_policy(_enabled):
         raise ValueError('Unknown plugin(s): bad_plugin')
 
-    monkeypatch.setattr(web_companion, 'set_workspace_plugin_policy', fake_set_policy)
+    monkeypatch.setattr(_tools_mod, 'set_workspace_plugin_policy', fake_set_policy)
 
     client = app.test_client()
     res = client.post(

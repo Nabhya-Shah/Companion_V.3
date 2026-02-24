@@ -2,10 +2,11 @@ import io
 
 import web_companion
 from web_companion import app
+import companion_ai.web.files_routes as _files_mod
 
 
 def test_upload_batch_mixed_results(tmp_path, monkeypatch):
-    monkeypatch.setattr(web_companion, 'UPLOAD_DIR', str(tmp_path))
+    monkeypatch.setattr(_files_mod, 'UPLOAD_DIR', str(tmp_path))
 
     client = app.test_client()
     res = client.post(
@@ -29,7 +30,7 @@ def test_upload_batch_mixed_results(tmp_path, monkeypatch):
 
 
 def test_upload_list_returns_recent_files(tmp_path, monkeypatch):
-    monkeypatch.setattr(web_companion, 'UPLOAD_DIR', str(tmp_path))
+    monkeypatch.setattr(_files_mod, 'UPLOAD_DIR', str(tmp_path))
     (tmp_path / 'abc12345.txt').write_text('a', encoding='utf-8')
     (tmp_path / 'def67890.pdf').write_text('b', encoding='utf-8')
 
@@ -44,7 +45,7 @@ def test_upload_list_returns_recent_files(tmp_path, monkeypatch):
 
 
 def test_upload_extract_text(tmp_path, monkeypatch):
-    monkeypatch.setattr(web_companion, 'UPLOAD_DIR', str(tmp_path))
+    monkeypatch.setattr(_files_mod, 'UPLOAD_DIR', str(tmp_path))
     (tmp_path / 'alpha1234.txt').write_text('hello extraction world', encoding='utf-8')
 
     client = app.test_client()
@@ -57,7 +58,7 @@ def test_upload_extract_text(tmp_path, monkeypatch):
 
 
 def test_upload_summarize_text(tmp_path, monkeypatch):
-    monkeypatch.setattr(web_companion, 'UPLOAD_DIR', str(tmp_path))
+    monkeypatch.setattr(_files_mod, 'UPLOAD_DIR', str(tmp_path))
     content = (
         'This is a long test document about project planning. '
         'It includes milestones, task ownership, and risks. '
@@ -77,7 +78,7 @@ def test_upload_summarize_text(tmp_path, monkeypatch):
 
 
 def test_upload_search_matches_text(tmp_path, monkeypatch):
-    monkeypatch.setattr(web_companion, 'UPLOAD_DIR', str(tmp_path))
+    monkeypatch.setattr(_files_mod, 'UPLOAD_DIR', str(tmp_path))
     (tmp_path / 'sea11111.txt').write_text('alpha beta gamma', encoding='utf-8')
     (tmp_path / 'sea22222.txt').write_text('beta only', encoding='utf-8')
 
@@ -109,7 +110,7 @@ class _FakeBrainIndex:
 
 
 def test_brain_upload_batch(tmp_path, monkeypatch):
-    monkeypatch.setattr(web_companion, '_brain_dir_for_workspace', lambda: str(tmp_path))
+    monkeypatch.setattr(_files_mod, '_brain_dir_for_workspace', lambda: str(tmp_path))
     monkeypatch.setattr(web_companion.core_config, 'API_AUTH_TOKEN', 'secret')
 
     import companion_ai.brain_index as brain_index_module
@@ -137,7 +138,7 @@ def test_brain_upload_batch(tmp_path, monkeypatch):
 
 
 def test_brain_files_list(tmp_path, monkeypatch):
-    monkeypatch.setattr(web_companion, '_brain_dir_for_workspace', lambda: str(tmp_path))
+    monkeypatch.setattr(_files_mod, '_brain_dir_for_workspace', lambda: str(tmp_path))
     docs = tmp_path / 'documents'
     docs.mkdir(parents=True, exist_ok=True)
     (docs / 'a.txt').write_text('first', encoding='utf-8')
@@ -158,7 +159,7 @@ def test_brain_files_list(tmp_path, monkeypatch):
 
 
 def test_brain_file_delete(tmp_path, monkeypatch):
-    monkeypatch.setattr(web_companion, '_brain_dir_for_workspace', lambda: str(tmp_path))
+    monkeypatch.setattr(_files_mod, '_brain_dir_for_workspace', lambda: str(tmp_path))
     monkeypatch.setattr(web_companion.core_config, 'API_AUTH_TOKEN', 'secret')
     docs = tmp_path / 'documents'
     docs.mkdir(parents=True, exist_ok=True)

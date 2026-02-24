@@ -1,5 +1,6 @@
 import web_companion
 from web_companion import app
+import companion_ai.web.memory_routes as _mem_mod
 
 
 def test_pending_facts_bulk_requires_auth(monkeypatch):
@@ -12,7 +13,7 @@ def test_pending_facts_bulk_requires_auth(monkeypatch):
 
 def test_pending_facts_bulk_approve(monkeypatch):
     monkeypatch.setattr(web_companion.core_config, 'API_AUTH_TOKEN', 'secret')
-    monkeypatch.setattr(web_companion, 'approve_profile_fact', lambda pid: pid in {1, 2})
+    monkeypatch.setattr(_mem_mod, 'approve_profile_fact', lambda pid: pid in {1, 2})
 
     client = app.test_client()
     res = client.post(
@@ -29,7 +30,7 @@ def test_pending_facts_bulk_approve(monkeypatch):
 
 def test_pending_facts_bulk_reject(monkeypatch):
     monkeypatch.setattr(web_companion.core_config, 'API_AUTH_TOKEN', 'secret')
-    monkeypatch.setattr(web_companion, 'reject_profile_fact', lambda pid: pid == 5)
+    monkeypatch.setattr(_mem_mod, 'reject_profile_fact', lambda pid: pid == 5)
 
     client = app.test_client()
     res = client.post(

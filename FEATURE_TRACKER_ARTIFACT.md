@@ -1,6 +1,6 @@
 # Companion AI Feature Tracker
 
-Date: 2026-02-20
+Date: 2026-02-24
 
 This artifact tracks **user-visible functionality** progress in plain language.
 
@@ -8,11 +8,14 @@ This artifact tracks **user-visible functionality** progress in plain language.
 
 | Component | State | Notes |
 |-----------|-------|-------|
-| Orchestrator | Built, dormant (`USE_ORCHESTRATOR=false`) | Phase 5 activates as default |
-| Local Loops | Built, never invoked in default flow | Phase 5 wires to orchestrator |
-| Quick Tool Path | Not yet implemented | Phase 5 adds Groq zero-shot routing |
-| Unified Knowledge | 5 separate backends | Phase 5 merges into single interface |
-| Persona Evolution | Service exists, minimal wiring | Phase 5 audits and connects to orchestrator |
+| Orchestrator | **Active** (`USE_ORCHESTRATOR=true` default) | Activated in P5-B with fallback resilience |
+| Local Loops | Built, delegation path wired | Full orchestrator→loop routing pending (P5-D) |
+| Quick Tool Path | Not yet implemented | Phase 5-D adds Groq zero-shot routing |
+| Unified Knowledge | 5 separate backends | Phase 5-D merges into single interface |
+| Persona Evolution | Service exists, minimal wiring | Phase 5-E audits and connects to orchestrator |
+| Web Layer | **Split into Flask Blueprints** | 7 blueprints in `companion_ai/web/` (P5-C) |
+| LLM Interface | **Split into `llm/` package** | 5 submodules in `companion_ai/llm/` (P5-C) |
+| Tools | **Split into `tools/` package** | 7 files in `companion_ai/tools/` (P5-C) |
 
 ## Live Now
 
@@ -86,14 +89,14 @@ This artifact tracks **user-visible functionality** progress in plain language.
 
 | ID | Feature | User Value | Acceptance Signal | Status |
 |---|---|---|---|---|
-| P5-01 | Dead code removal | Cleaner codebase, fewer confusing paths | No references to removed functions, tests pass | ⏳ Not started |
-| P5-02 | Legacy chat endpoint removal | Single clear chat path (SSE only) | `/api/chat` returns 404, `/api/chat/send` works | ⏳ Not started |
-| P5-03 | Compatibility shim consolidation | Direct imports, no re-export wrappers | Shim files deleted, all imports updated | ⏳ Not started |
-| P5-04 | Orchestrator activation | Every message routed intelligently | `USE_ORCHESTRATOR=true` default, routing tests pass | ⏳ Not started |
-| P5-05 | Local loop wiring | Specialist tasks delegated to local models | DELEGATE decisions invoke correct loop | ⏳ Not started |
-| P5-06 | Quick tool path | Fast zero-shot tool calls via Groq | Simple tool calls don't hit local models | ⏳ Not started |
-| P5-07 | Web blueprint split | Cleaner server code, easier navigation | Same endpoints, `web/` directory structure | ⏳ Not started |
-| P5-08 | Tools directory split | Modular tool organization | Same tool surface, `tools/` directory structure | ⏳ Not started |
-| P5-09 | LLM directory split | Separated provider concerns | Same LLM behavior, `llm/` directory structure | ⏳ Not started |
-| P5-10 | Unified knowledge interface | One "remember/recall" regardless of backend | Single entry point for all knowledge ops | ⏳ Not started |
-| P5-11 | Persona orchestrator integration | Companion personality in every response | Persona traits reflected in orchestrator context | ⏳ Not started |
+| P5-01 | Dead code removal | Cleaner codebase, fewer confusing paths | No references to removed functions, tests pass | ✅ Completed (P5-A) |
+| P5-02 | Legacy chat endpoint removal | Single clear chat path (SSE only) | `/api/chat` returns 404, `/api/chat/send` works | ✅ Completed (P5-A) |
+| P5-03 | Compatibility shim consolidation | Direct imports, no re-export wrappers | 5 shim files deleted, all imports updated | ✅ Completed (P5-A) |
+| P5-04 | Orchestrator activation | Every message routed intelligently | `USE_ORCHESTRATOR=true` default, 40 routing tests pass | ✅ Completed (P5-B) |
+| P5-05 | Local loop wiring | Specialist tasks delegated to local models | DELEGATE decisions invoke correct loop | ⏳ Not started (P5-D) |
+| P5-06 | Quick tool path | Fast zero-shot tool calls via Groq | Simple tool calls don't hit local models | ⏳ Not started (P5-D) |
+| P5-07 | Web blueprint split | Cleaner server code, easier navigation | Same endpoints, `web/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
+| P5-08 | Tools directory split | Modular tool organization | Same tool surface, `tools/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
+| P5-09 | LLM directory split | Separated provider concerns | Same LLM behavior, `llm/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
+| P5-10 | Unified knowledge interface | One "remember/recall" regardless of backend | Single entry point for all knowledge ops | ⏳ Not started (P5-D) |
+| P5-11 | Persona orchestrator integration | Companion personality in every response | Persona traits reflected in orchestrator context | ⏳ Not started (P5-E) |

@@ -174,7 +174,7 @@ def _build_mem0_context(user_message: str, mem0_user_id: str | None = None) -> s
     - Hint about memory_search tool
     """
     try:
-        from companion_ai.memory_v2 import build_memory_context, format_memory_for_prompt
+        from companion_ai.memory.mem0_backend import build_memory_context, format_memory_for_prompt
         import logging
         logger = logging.getLogger(__name__)
         

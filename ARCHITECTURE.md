@@ -2,7 +2,7 @@
 
 > **Design Philosophy**: The orchestrator is the brain. Local loops are the specialists. Memory is unified. Persona is the soul.
 
-**Last Updated**: Phase 5 kickoff (post-Phase 4 completion)
+**Last Updated**: Phase 5-C complete (monolith splits done, 2026-02-24)
 
 ---
 
@@ -65,17 +65,21 @@ Every user message flows through a single entry point — the **Orchestrator** �
 
 ### Layer 1: Web Layer
 
-The HTTP/SSE surface. Currently a monolithic Flask app (`web_companion.py`, ~2,400 lines) — **target: split into Flask Blueprints**.
+**Package**: `companion_ai/web/` (10 files, ~1,700 lines total)  
+**Entry point**: `create_app()` factory in `companion_ai/web/__init__.py`  
+**Backwards-compat shim**: `web_companion.py` (thin re-export, ~30 lines)
 
-| Blueprint (Target) | Responsibilities |
-|---------------------|------------------|
-| `chat` | `/api/chat/send`, streaming SSE, stop/cancel |
-| `memory` | `/api/memory`, `/api/pending_facts`, review center |
-| `knowledge` | `/api/brain/*`, `/api/upload/*`, file management |
-| `control` | `/api/tasks`, `/api/schedules`, `/api/events` |
-| `system` | `/api/health`, `/api/models`, `/api/routing` |
-| `integrations` | `/api/loxone/*`, `/api/plugins/*` |
-| `settings` | `/api/context`, workspace/profile switching |
+The HTTP/SSE surface is organised as Flask Blueprints with shared state in `state.py`.
+
+| Blueprint | File | Responsibilities |
+|-----------|------|------------------|
+| `chat_bp` | `chat_routes.py` | `/api/chat/send` (SSE streaming + TTS), `/api/chat/history`, `/api/chat/stream`, `/api/chat/stop`, `/api/debug/*` |
+| `memory_bp` | `memory_routes.py` | `/api/memory`, `/api/memory/clear`, `/api/memory/fact/*`, `/api/pending_facts`, `/api/pending_facts/bulk` |
+| `files_bp` | `files_routes.py` | `/api/upload/*` (single, batch, list, extract, summarize, search), `/api/brain/*` (upload, batch, stats, files, delete, reindex, search) |
+| `tools_bp` | `tools_routes.py` | `/api/tools`, `/api/plugins/*`, `/api/context`, `/api/context/switch`, `/api/search` |
+| `media_bp` | `media_routes.py` | `/api/tts/*`, `/api/vision/*`, `/api/voice/change` |
+| `loxone_bp` | `loxone_routes.py` | `/api/loxone/rooms`, `/api/loxone/health`, `/api/loxone/light/*` |
+| `system_bp` | `system_routes.py` | `/`, `/graph`, `/api/shutdown`, `/api/jobs/*`, `/api/token-budget`, `/api/tasks/*`, `/api/schedules/*`, `/api/health`, `/api/tokens/*`, `/api/config`, `/api/models`, `/api/routing/*`, `/api/graph/*` |
 
 ### Layer 2: Orchestrator
 
@@ -93,7 +97,8 @@ The cloud-powered brain that receives **every** user message. It:
 
 ### Layer 3: LLM Interface
 
-**File**: `companion_ai/llm_interface.py` (~1,600 lines) — **target: split into `companion_ai/llm/`**
+**Package**: `companion_ai/llm/` (5 submodules, ~1,300 lines total)  
+**Backwards-compat shim**: `companion_ai/llm_interface.py` (thin re-export, ~60 lines)
 
 Dual-provider router:
 - **Groq Cloud** — primary chat, tool calling, vision
@@ -109,6 +114,14 @@ Dual-provider router:
 | Brain embeddings | `nomic-embed-text` | Ollama |
 | Vision (local) | `llava:7b` | Ollama |
 | Synthesis / compression | `llama3.1` | Ollama |
+
+| Submodule | File | Responsibility |
+|-----------|------|----------------|
+| Token tracking | `token_tracker.py` | Per-step token stats, logging, reset |
+| Groq provider | `groq_provider.py` | Client pool, tool calling, streaming, output sanitisation |
+| Ollama provider | `ollama_provider.py` | Local model calls, embeddings |
+| Router | `router.py` | High-level `generate_response` with complexity classification |
+| Memory extraction | `memory_extraction.py` | Summary, profile facts, insight generation |
 
 ### Layer 4: Local Loops (Specialists)
 
@@ -182,13 +195,12 @@ Each loop:
 
 ---
 
-## File Structure (Current → Target)
+## File Structure
 
-### Current
 ```
 companion_ai/
 ├── core/
-│   ├── config.py              # All configuration
+│   ├── config.py              # All configuration + env vars
 │   ├── context_builder.py     # Prompt context assembly
 │   ├── conversation_logger.py # Chat logging
 │   ├── metrics.py             # Telemetry
@@ -200,7 +212,7 @@ companion_ai/
 │   └── loxone.py              # Loxone smart home
 ├── memory/
 │   ├── sqlite_backend.py      # Fact store
-│   ├── mem0_backend.py        # Vector memory
+│   ├── mem0_backend.py        # Vector memory (Mem0)
 │   ├── knowledge_graph.py     # Entity graph
 │   └── ai_processor.py        # Memory AI
 ├── services/
@@ -214,66 +226,61 @@ companion_ai/
 │   ├── vision_loop.py         # Vision specialist
 │   ├── tool_loop.py           # Tool specialist
 │   └── registry.py            # Loop auto-registration
-├── llm_interface.py           # [to split] LLM router (~1,600 lines)
-├── orchestrator.py            # [to activate] Cloud brain (~560 lines)
+├── llm/                       # ✅ Split from llm_interface.py (P5-C)
+│   ├── __init__.py            # Re-exports all public symbols
+│   ├── token_tracker.py       # Per-step token stats
+│   ├── groq_provider.py       # Groq cloud calls + tool calling
+│   ├── ollama_provider.py     # Ollama local calls + embeddings
+│   ├── router.py              # High-level response routing
+│   └── memory_extraction.py   # Summary + fact extraction
+├── tools/                     # ✅ Split from tools.py (P5-C)
+│   ├── __init__.py            # Re-exports full public API
+│   ├── registry.py            # @tool decorator, plugin system, policy, dispatch
+│   ├── system_tools.py        # Time, memory search, screen, computer
+│   ├── brain_tools.py         # Brain search, read, write, list
+│   ├── browser_tools.py       # Browser automation tools
+│   ├── file_tools.py          # PDF, image, docx, file listing
+│   └── research_tools.py      # Wikipedia
+├── web/                       # ✅ Split from web_companion.py (P5-C)
+│   ├── __init__.py            # App factory (create_app) + run_web
+│   ├── state.py               # Shared globals, security, scope helpers
+│   ├── chat_routes.py         # Chat blueprint (SSE streaming)
+│   ├── memory_routes.py       # Memory blueprint
+│   ├── files_routes.py        # Upload + brain file blueprint
+│   ├── tools_routes.py        # Tools + plugins + context blueprint
+│   ├── media_routes.py        # TTS + vision blueprint
+│   ├── loxone_routes.py       # Smart home blueprint
+│   └── system_routes.py       # System + admin blueprint
+├── llm_interface.py           # Backwards-compat shim → llm/
+├── orchestrator.py            # Cloud brain (USE_ORCHESTRATOR=true)
 ├── conversation_manager.py    # Session coordinator
 ├── brain_index.py             # Embedding index
-├── brain_manager.py           # Brain file management
-└── tools.py                   # [to split] Tool definitions (~1,250 lines)
+└── brain_manager.py           # Brain file management
 
-web_companion.py               # [to split] Flask monolith (~2,400 lines)
-```
-
-### Target (after Phase 5 cleanup)
-```
-companion_ai/
-├── core/                      # Config, prompts, logging, metrics
-├── agents/                    # [shelved] browser, vision
-├── integrations/              # Loxone, future plugins
-├── memory/                    # Unified knowledge backends
-├── services/                  # Persona, jobs, token budget, TTS
-├── local_loops/               # Active specialists (memory, tool, vision)
-├── llm/                       # Split from llm_interface.py
-│   ├── __init__.py
-│   ├── groq_provider.py       # Groq cloud calls
-│   ├── ollama_provider.py     # Ollama local calls
-│   └── router.py              # Model selection + fallbacks
-├── tools/                     # Split from tools.py
-│   ├── __init__.py
-│   ├── registry.py            # Tool registration + discovery
-│   ├── time_tools.py          # Time/date tools
-│   ├── memory_tools.py        # Memory search/save tools
-│   ├── file_tools.py          # File operation tools
-│   └── home_tools.py          # Smart home tools
-├── orchestrator.py            # Active cloud brain
-├── conversation_manager.py    # Session coordinator
-├── brain_index.py             # → merge into memory/
-└── brain_manager.py           # → merge into memory/
-
-web/                           # Split from web_companion.py
-├── __init__.py                # Flask app factory
-├── chat.py                    # Chat blueprint
-├── memory_routes.py           # Memory blueprint
-├── knowledge.py               # Knowledge blueprint
-├── control.py                 # Tasks/schedules blueprint
-├── system.py                  # Health/models blueprint
-├── integrations.py            # Loxone/plugins blueprint
-└── settings.py                # Context/workspace blueprint
+web_companion.py               # Backwards-compat shim → companion_ai/web/
+templates/                     # HTML templates (index.html, graph.html)
+static/                        # JS, CSS (app.js, app.css, toast.*)
+tests/                         # 21 pytest suites, 120+ tests
+scripts/                       # Utility scripts (smoke, setup, check_env)
+prompts/personas/              # Persona YAML definitions
 ```
 
 ---
 
-## Dead Code / Removal Targets
+## Dead Code / Removal Status
 
-| Item | Location | Reason |
-|------|----------|--------|
-| `build_full_prompt()` | `llm_interface.py` | Replaced by `context_builder.py` |
-| `should_use_groq()` | `llm_interface.py` | Always Groq now |
-| `ENABLE_COMPOUND` / `ENABLE_ENSEMBLE` | `config.py` | Never used in current flow |
-| `REASONING_MODEL` / `HEAVY_MODEL` / `FAST_MODEL` aliases | `config.py` | Vestigial aliases |
-| Legacy `/api/chat` (non-streaming) | `web_companion.py` | Replaced by SSE `/api/chat/send` |
-| `computer_loop.py` | `local_loops/` | Shelved — unwire but keep code |
-| Compatibility shims | `memory_v2.py`, `memory_graph.py`, etc. | Remove after import consolidation |
+| Item | Status | Notes |
+|------|--------|-------|
+| `build_full_prompt()` | ✅ Removed (P5-A) | Was in llm_interface.py |
+| `should_use_groq()` | ✅ Removed (P5-A) | Always Groq now |
+| `ENABLE_COMPOUND` / `ENABLE_ENSEMBLE` | ✅ Removed (P5-A) | Vestigial config flags |
+| `REASONING_MODEL` / `HEAVY_MODEL` / `FAST_MODEL` aliases | ✅ Removed (P5-A) | Vestigial aliases |
+| Legacy `/api/chat` (non-streaming) | ✅ Removed (P5-A) | Only SSE `/api/chat/send` remains |
+| Compatibility shims (`memory_v2.py`, `memory_graph.py`, `persona_evolution.py`) | ✅ Deleted (P5-A) | 5 shim files removed, imports updated |
+| `computer_loop.py` | Shelved | Unwired from registry, code kept |
+| `llm_interface.py` monolith | ✅ Split → `llm/` (P5-C) | Thin re-export shim remains |
+| `tools.py` monolith | ✅ Split → `tools/` (P5-C) | Old file deleted |
+| `web_companion.py` monolith | ✅ Split → `web/` (P5-C) | Thin re-export shim remains |
 
 ---
 

@@ -4,6 +4,8 @@ import web_companion
 from web_companion import app
 from companion_ai.memory import sqlite_backend as sqlite_memory
 from companion_ai.memory import mem0_backend
+import companion_ai.web.memory_routes as _mem_mod
+import companion_ai.web.state as _web_state
 
 
 def test_bulk_sync_memory_quality_from_mem0_labels(tmp_path, monkeypatch):
@@ -35,16 +37,16 @@ def test_bulk_sync_memory_quality_from_mem0_labels(tmp_path, monkeypatch):
 
 def test_memory_endpoint_uses_quality_ledger_metadata(monkeypatch):
     monkeypatch.setattr(web_companion.core_config, "USE_MEM0", True)
-    monkeypatch.setattr(web_companion, "_maybe_migrate_legacy_scope", lambda *_: None)
+    monkeypatch.setattr(_web_state, "_maybe_migrate_legacy_scope", lambda *_: None)
 
     monkeypatch.setattr(
         web_companion.memory_v2,
         "get_all_memories",
         lambda user_id=None: [{"id": "m1", "memory": "User prefers tea", "metadata": {"frequency": 2}}],
     )
-    monkeypatch.setattr(web_companion, "bulk_sync_memory_quality_from_mem0", lambda memories, user_scope: 1)
+    monkeypatch.setattr(_mem_mod, "bulk_sync_memory_quality_from_mem0", lambda memories, user_scope: 1)
     monkeypatch.setattr(
-        web_companion,
+        _mem_mod,
         "get_memory_quality_map",
         lambda user_scope: {
             "m1": {
@@ -78,7 +80,7 @@ def test_delete_fact_removes_quality_entry(monkeypatch):
         captured["user_scope"] = user_scope
         return True
 
-    monkeypatch.setattr(web_companion, "delete_memory_quality_entry", fake_delete_quality)
+    monkeypatch.setattr(_mem_mod, "delete_memory_quality_entry", fake_delete_quality)
 
     client = app.test_client()
     response = client.delete("/api/memory/fact/m123?session_id=s2&profile_id=work")

@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 
 from companion_ai.memory import sqlite_backend as mem
 from companion_ai import llm_interface
-from companion_ai.tts_manager import tts_manager
+from companion_ai.services.tts import tts_manager
 
 load_dotenv()
 

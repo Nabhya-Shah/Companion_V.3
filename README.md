@@ -99,18 +99,39 @@ companion_ai/
 ├── memory/               # SQLite, Mem0, knowledge graph, AI processor
 ├── services/             # Persona, jobs/scheduler, token budget, TTS
 ├── local_loops/          # Specialist loops (memory, tool, vision)
-├── llm/                  # [target] Split from llm_interface.py
-├── llm_interface.py      # LLM router (Groq + Ollama)
+├── llm/                  # LLM router — Groq + Ollama providers
+│   ├── groq_provider.py  # Groq cloud calls + tool calling
+│   ├── ollama_provider.py # Ollama local calls + embeddings
+│   ├── router.py         # High-level response routing
+│   ├── token_tracker.py  # Per-step token stats
+│   └── memory_extraction.py # Summary + fact extraction
+├── tools/                # Tool registration + domain tools
+│   ├── registry.py       # @tool decorator, plugin system, policy
+│   ├── system_tools.py   # Time, memory search, screen
+│   ├── brain_tools.py    # Brain search, read, write, list
+│   ├── browser_tools.py  # Browser automation
+│   ├── file_tools.py     # PDF, image, docx, file listing
+│   └── research_tools.py # Wikipedia
+├── web/                  # Flask Blueprints (7 route modules)
+│   ├── __init__.py       # App factory (create_app)
+│   ├── state.py          # Shared globals, security, scope helpers
+│   ├── chat_routes.py    # SSE streaming chat
+│   ├── memory_routes.py  # Memory CRUD + review
+│   ├── files_routes.py   # Upload + brain files
+│   ├── tools_routes.py   # Tools, plugins, context
+│   ├── media_routes.py   # TTS + vision
+│   ├── loxone_routes.py  # Smart home
+│   └── system_routes.py  # Health, config, admin
 ├── orchestrator.py       # Cloud brain — intent classification & routing
 ├── conversation_manager.py # Session coordinator
 ├── brain_index.py        # Document embedding index
-├── brain_manager.py      # Brain file management
-└── tools.py              # Tool definitions & registry
+└── brain_manager.py      # Brain file management
 
-web_companion.py          # Flask server (target: split into blueprints)
+web_companion.py          # Backwards-compat shim → companion_ai/web/
 templates/                # HTML templates
 static/                   # JS, CSS
-tests/                    # pytest suites
+tests/                    # 21 pytest suites, 120+ tests
+scripts/                  # Utility scripts
 ```
 
 ## 🔧 Configuration

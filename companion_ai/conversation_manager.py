@@ -6,6 +6,7 @@ Memory AI processes context BEFORE conversation AI responds
 V4: Mem0 integration for automatic memory storage from conversations.
 """
 
+import concurrent.futures
 import logging
 import re
 from datetime import datetime
@@ -155,19 +156,36 @@ class ConversationSession:
         if core_config.USE_ORCHESTRATOR:
             # V6 Architecture: Use orchestrator for routing
             try:
+                import time as _time
                 from companion_ai.orchestrator import process_message as orchestrator_process
+                from companion_ai.llm_interface import reset_last_request_tokens
+                
+                # Reset token counter — orchestrator bypasses generate_response()
+                reset_last_request_tokens()
+                
+                _orch_start = _time.time()
                 response, metadata = orchestrator_process(user_message, self.memory_context)
-                final_metadata = metadata
+                _orch_ms = int((_time.time() - _orch_start) * 1000)
+                
+                final_metadata = metadata or {}
+                final_metadata['orchestrator_ms'] = _orch_ms
                 
                 # Yield metadata first
-                yield {"type": "meta", "data": metadata}
+                yield {"type": "meta", "data": final_metadata}
                 
-                # Simulate streaming
+                # Simulate streaming (orchestrator returns full text)
                 for word in response.split(' '):
                     yield word + ' '
                     full_response += word + ' '
                 full_response = full_response.strip()
-                logger.info(f"Orchestrator metadata: {metadata}")
+                logger.info(f"Orchestrator completed in {_orch_ms}ms | source={final_metadata.get('source', '?')}")
+            except concurrent.futures.TimeoutError:
+                logger.error("Orchestrator timed out (120s), falling back to direct")
+                final_metadata = {"source": "direct_fallback", "error": "orchestrator_timeout"}
+                yield {"type": "meta", "data": final_metadata}
+                for chunk in generate_response_streaming(user_message, self.memory_context):
+                    full_response += chunk
+                    yield chunk
             except Exception as e:
                 logger.error(f"Orchestrator failed, falling back: {e}")
                 final_metadata = {"source": "direct_fallback", "error": str(e)}
@@ -202,7 +220,9 @@ class ConversationSession:
         })
         
         # Step 6: Add to Mem0 in BACKGROUND (non-blocking for faster UX)
-        if MEM0_AVAILABLE:
+        # Skip if orchestrator already handled memory (avoid duplicate entries)
+        orchestrator_handled_memory = final_metadata.get("source", "").startswith("loop_memory")
+        if MEM0_AVAILABLE and not orchestrator_handled_memory:
             import threading
             def _async_mem0_save():
                 try:
@@ -217,6 +237,8 @@ class ConversationSession:
             
             # Fire-and-forget - don't block the response
             threading.Thread(target=_async_mem0_save, daemon=True).start()
+        elif orchestrator_handled_memory:
+            logger.info("📝 Mem0: Skipped auto-save (orchestrator memory loop already handled it)")
         
         logger.info(f"Streaming complete. Session length: {len(self.conversation_history)}")
     

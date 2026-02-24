@@ -1,20 +1,22 @@
 from companion_ai.core import config as core_config
 from web_companion import app
 import web_companion
+import companion_ai.web.memory_routes as _mem_mod
 
 
 def test_chat_passes_scoped_mem0_user_id(monkeypatch):
     captured = {}
 
-    def fake_process_message(self, user_message, full_conversation_history=None, memory_user_id=None):
+    def fake_process_message_streaming(self, user_message, full_conversation_history=None, memory_user_id=None):
         captured["memory_user_id"] = memory_user_id
-        return "ok", True
+        yield {"type": "meta", "data": {"session_id": "sessA", "profile_id": "home"}}
+        yield "ok"
 
-    monkeypatch.setattr(web_companion.ConversationSession, "process_message", fake_process_message)
+    monkeypatch.setattr(web_companion.ConversationSession, "process_message_streaming", fake_process_message_streaming)
 
     client = app.test_client()
     res = client.post(
-        "/api/chat",
+        "/api/chat/send",
         json={
             "message": "hello",
             "session_id": "sessA",
@@ -23,24 +25,22 @@ def test_chat_passes_scoped_mem0_user_id(monkeypatch):
     )
 
     assert res.status_code == 200
-    data = res.get_json()
-    assert data["session_id"] == "sessA"
-    assert data["profile_id"] == "home"
     assert captured["memory_user_id"] == f"{core_config.MEM0_USER_ID}::p:home::s:sessA"
 
 
 def test_chat_passes_workspace_scoped_mem0_user_id(monkeypatch):
     captured = {}
 
-    def fake_process_message(self, user_message, full_conversation_history=None, memory_user_id=None):
+    def fake_process_message_streaming(self, user_message, full_conversation_history=None, memory_user_id=None):
         captured["memory_user_id"] = memory_user_id
-        return "ok", True
+        yield {"type": "meta", "data": {"session_id": "sessA", "profile_id": "home"}}
+        yield "ok"
 
-    monkeypatch.setattr(web_companion.ConversationSession, "process_message", fake_process_message)
+    monkeypatch.setattr(web_companion.ConversationSession, "process_message_streaming", fake_process_message_streaming)
 
     client = app.test_client()
     res = client.post(
-        "/api/chat",
+        "/api/chat/send",
         json={
             "message": "hello",
             "session_id": "sessA",
@@ -76,7 +76,7 @@ def test_clear_memory_uses_scoped_user_id(monkeypatch):
 
     monkeypatch.setattr(web_companion.core_config, "USE_MEM0", True)
     monkeypatch.setattr(web_companion.core_config, "API_AUTH_TOKEN", "secret")
-    monkeypatch.setattr(web_companion, "clear_all_memory", lambda: None)
+    monkeypatch.setattr(_mem_mod, "clear_all_memory", lambda: None)
     monkeypatch.setattr(web_companion.memory_v2, "_reset_memory", lambda: None)
 
     def fake_clear_all_memories(user_id="default"):

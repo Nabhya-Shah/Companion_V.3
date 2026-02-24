@@ -1,6 +1,6 @@
 # Companion AI Roadmap (Post-Phase 1)
 
-Date: 2026-02-20
+Date: 2026-02-24
 
 ## Current Status
 
@@ -66,8 +66,8 @@ Goal: Move from “good chat app” to “assistant platform”.
 - **Persona as differentiator**: evolving personality, not just a chat wrapper.
 - **Policy-driven safety**: tools, plugins, automations respect explicit controls.
 - **Local-first**: no cloud dependency except Groq for primary chat.
-- **Split monoliths**: `web_companion.py` → blueprints, `tools.py` → directory, `llm_interface.py` → directory.
-- **Remove dead paths**: legacy chat, vestigial configs, unused compatibility shims.
+- **Split monoliths**: `web_companion.py` → blueprints ✅, `tools.py` → directory ✅, `llm_interface.py` → directory ✅
+- **Remove dead paths**: legacy chat, vestigial configs, unused compatibility shims ✅ (P5-A complete)
 
 ## Immediate Sprint Plan (Next 2 Weeks)
 
@@ -253,6 +253,34 @@ Goal: Move from “good chat app” to “assistant platform”.
 - ✅ Consolidated closure regression pass: `74 passed` across Phase 4 + critical Phase 3 guardrail suites.
 - ✅ Web mode startup validated in-session (`run_companion.py --web --no-browser` reaches `Running on http://127.0.0.1:5000`).
 
+### Sprint P5-A (Spring Clean — Completed 2026-02-23)
+
+- [x] Remove `build_full_prompt()`, `should_use_groq()`, and always-true branches from `llm_interface.py`
+- [x] Remove `ENABLE_COMPOUND`, `ENABLE_ENSEMBLE`, vestigial model aliases from `config.py`
+- [x] Remove legacy `/api/chat` (non-streaming) endpoint
+- [x] Unwire `ComputerLoop` from loop registry
+- [x] Delete 5 compatibility shim files (`memory_v2.py`, `memory_graph.py`, `persona_evolution.py`, etc.)
+- [x] Update all imports across codebase to point to real modules
+- [x] Full test suite: 120 passed, 2 pre-existing failures
+
+### Sprint P5-B (Orchestrator Activation — Completed 2026-02-23)
+
+- [x] Set `USE_ORCHESTRATOR=true` as the default
+- [x] Fix double memory saving (orchestrator + `_extract_and_save_memory`)
+- [x] Add fallback resilience (graceful degradation if Groq is down)
+- [x] Fix token tracking through orchestrator path
+- [x] Create 40-test orchestrator test suite
+- [x] Full test suite: 120 passed, 2 pre-existing failures
+
+### Sprint P5-C (Monolith Splitting — Completed 2026-02-24)
+
+- [x] Split `tools.py` (1,248 lines) → `companion_ai/tools/` package (7 files)
+- [x] Split `llm_interface.py` (1,548 lines) → `companion_ai/llm/` package (5 submodules)
+- [x] Split `web_companion.py` (2,367 lines) → `companion_ai/web/` package (10 files, 7 blueprints)
+- [x] Create backwards-compatible shims for all three splits
+- [x] Update 5 test files for blueprint monkeypatch targets
+- [x] Full test suite: 120 passed, 2 pre-existing failures — zero regressions
+
 ## Long-Range Product Vision (2026+)
 
 ### North Star
@@ -275,35 +303,35 @@ Companion AI becomes a trustworthy, local-first personal operations assistant th
 
 Goal: activate the orchestrator-first architecture, clean dead code, split monoliths, and unify knowledge — making the codebase match the documented vision.
 
-### Track A: Spring Clean (Dead Code & Legacy Removal)
+### Track A: Spring Clean (Dead Code & Legacy Removal) ✅ COMPLETE
 
 | Task | Effort | Success Criteria |
 |---|---:|---|
-| Remove `build_full_prompt()` from `llm_interface.py` | 1 day | No references, tests pass |
-| Remove `should_use_groq()` and always-true branches | 1 day | Clean routing logic |
-| Remove `ENABLE_COMPOUND`, `ENABLE_ENSEMBLE`, vestigial model aliases | 1 day | `config.py` only has active settings |
-| Remove legacy `/api/chat` (non-streaming) endpoint | 1 day | Only SSE `/api/chat/send` remains |
-| Unwire `ComputerLoop` from registry (keep code, just shelve) | 1 day | Loop registry only has memory/tool/vision |
-| Consolidate compatibility shims (`memory_v2.py`, `memory_graph.py`, `persona_evolution.py`) | 2-3 days | All imports point to real modules, shims deleted |
+| ~~Remove `build_full_prompt()` from `llm_interface.py`~~ | 1 day | ✅ No references, tests pass |
+| ~~Remove `should_use_groq()` and always-true branches~~ | 1 day | ✅ Clean routing logic |
+| ~~Remove `ENABLE_COMPOUND`, `ENABLE_ENSEMBLE`, vestigial model aliases~~ | 1 day | ✅ `config.py` only has active settings |
+| ~~Remove legacy `/api/chat` (non-streaming) endpoint~~ | 1 day | ✅ Only SSE `/api/chat/send` remains |
+| ~~Unwire `ComputerLoop` from registry (keep code, just shelve)~~ | 1 day | ✅ Loop registry only has memory/tool/vision |
+| ~~Consolidate compatibility shims (`memory_v2.py`, `memory_graph.py`, `persona_evolution.py`)~~ | 2-3 days | ✅ 5 shim files deleted, all imports updated |
 
-### Track B: Orchestrator Activation
-
-| Task | Effort | Success Criteria |
-|---|---:|---|
-| Set `USE_ORCHESTRATOR=true` as default | 1 day | All chat flows go through orchestrator |
-| Wire orchestrator → local loop delegation path | 1-2 weeks | DELEGATE decisions invoke the correct loop |
-| Wire orchestrator → quick tool path (Groq zero-shot) | 1 week | TOOL decisions use fast Groq model |
-| Wire orchestrator → memory operations | 1 week | MEMORY decisions hit unified knowledge system |
-| Add orchestrator fallback (graceful degradation if Groq down) | 2-3 days | Falls back to direct LLM call |
-| Add orchestrator routing tests | 1 week | Each decision type has focused test coverage |
-
-### Track C: Monolith Splitting
+### Track B: Orchestrator Activation ✅ COMPLETE
 
 | Task | Effort | Success Criteria |
 |---|---:|---|
-| Split `web_companion.py` → Flask Blueprints (`web/`) | 2-3 weeks | Same endpoints, cleaner code, all tests pass |
-| Split `tools.py` → `tools/` directory (registry + domain modules) | 1-2 weeks | Same tool surface, modular structure |
-| Split `llm_interface.py` → `llm/` directory (providers + router) | 1-2 weeks | Same LLM behavior, separated concerns |
+| ~~Set `USE_ORCHESTRATOR=true` as default~~ | 1 day | ✅ All chat flows go through orchestrator |
+| ~~Wire orchestrator → local loop delegation path~~ | 1-2 weeks | ✅ DELEGATE decisions invoke the correct loop |
+| Wire orchestrator → quick tool path (Groq zero-shot) | 1 week | TOOL decisions use fast Groq model — moved to P5-D |
+| Wire orchestrator → memory operations | 1 week | MEMORY decisions hit unified knowledge system — moved to P5-D |
+| ~~Add orchestrator fallback (graceful degradation if Groq down)~~ | 2-3 days | ✅ Falls back to direct LLM call |
+| ~~Add orchestrator routing tests~~ | 1 week | ✅ 40 focused tests covering all decision types |
+
+### Track C: Monolith Splitting ✅ COMPLETE
+
+| Task | Effort | Success Criteria |
+|---|---:|---|
+| ~~Split `web_companion.py` → Flask Blueprints (`web/`)~~ | 2-3 weeks | ✅ Same endpoints, 7 blueprints + state.py + factory, all 120 tests pass |
+| ~~Split `tools.py` → `tools/` directory (registry + domain modules)~~ | 1-2 weeks | ✅ Same tool surface, 7 files, all 120 tests pass |
+| ~~Split `llm_interface.py` → `llm/` directory (providers + router)~~ | 1-2 weeks | ✅ Same LLM behavior, 5 submodules, all 120 tests pass |
 
 ### Track D: Unified Knowledge System
 
@@ -382,11 +410,11 @@ Goal: evolve into a proactive but policy-bounded intelligence layer.
 - **Persona**: responses reflect evolving personality traits grounded in conversation history.
 - **Velocity**: each slice ships with tests and artifact updates in the same change window.
 
-## Immediate Next Execution Window (Phase 5 Kickoff)
+## Immediate Next Execution Window (Phase 5 Continuation)
 
-1. Kick off **Phase 5 / Sprint P5-A** (spring clean — dead code and legacy removal).
-2. Run focused test suite after each cleanup step.
-3. Then proceed to **P5-B** (orchestrator activation and wiring).
+1. **P5-A, P5-B, P5-C**: ✅ Complete. Spring clean, orchestrator activation, and all three monolith splits done.
+2. Next up: **P5-D** (knowledge unification — doc pipeline, confidence merge, single entry point).
+3. Then **P5-E** (persona foundation — audit, triggers, orchestrator integration).
 4. Keep this roadmap + `FEATURE_TRACKER_ARTIFACT.md` synchronized per delivered slice.
 5. Promote only validated slices into release-profile checks.
 

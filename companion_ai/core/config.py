@@ -19,7 +19,7 @@ load_dotenv()
 
 # V6 Architecture toggle - Enable local loop orchestration
 # When True, uses the 120B orchestrator to decide if local loops should handle tasks
-USE_ORCHESTRATOR = os.getenv("USE_ORCHESTRATOR", "false").lower() == "true"
+USE_ORCHESTRATOR = os.getenv("USE_ORCHESTRATOR", "true").lower() == "true"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_TOOL_API_KEY = os.getenv("GROQ_TOOL_API_KEY")  # Dedicated key for tool planner
 GROQ_VISION_API_KEY = os.getenv("GROQ_VISION_API_KEY", GROQ_API_KEY)  # Falls back to main key
@@ -309,11 +309,11 @@ ENABLE_KNOWLEDGE_GRAPH = True
 ENABLE_FACT_EXTRACTION = True
 ENABLE_TOOL_CALLING = True
 ENABLE_VISION = True
-ENABLE_COMPOUND = False  # Disabled: User prefers native tool calling
+ENABLE_COMPOUND = False  # Disabled: V5+ uses native tool calling
 ENABLE_AUTO_TOOLS = True  # Auto-detect when tools are needed
 ENABLE_STRUCTURED_FACTS = True  # Use structured outputs for fact extraction
 ENABLE_GROQ_BUILTINS = True  # Allow 120B built-in tools (web/code/browse) alongside custom tools
-ENABLE_COMPUTER_USE = True   # Enable ComputerAgent (PyAutoGUI + Vision)
+ENABLE_COMPUTER_USE = False  # Shelved: ComputerAgent unwired in Phase 5
 
 # Model roles mapping (V4 architecture)
 MODEL_ROLES = {
@@ -387,19 +387,3 @@ def classify_complexity(query: str) -> int:
         return 2
     
     return 1
-
-# ============================================================================
-# DEPRECATED - Kept for backward compatibility, will be removed
-# ============================================================================
-# These are no longer used but kept to prevent import errors
-REASONING_MODEL = PRIMARY_MODEL  # Deprecated: use PRIMARY_MODEL
-HEAVY_MODEL = PRIMARY_MODEL  # Deprecated: use PRIMARY_MODEL
-MEMORY_DEEP_MODEL = PRIMARY_MODEL  # Deprecated: use PRIMARY_MODEL
-FAST_MODEL = PRIMARY_MODEL  # Deprecated: use PRIMARY_MODEL
-
-# Old feature flags - all disabled
-ENABLE_ENSEMBLE = False
-HEAVY_MEMORY = False
-AGGRESSIVE_ESCALATION = False
-ALWAYS_HEAVY_CHAT = False
-ENABLE_ENSEMBLE_FOR_MEMORY = False

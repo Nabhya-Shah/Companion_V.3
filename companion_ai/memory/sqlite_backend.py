@@ -392,7 +392,7 @@ def upsert_profile_fact(key: str, value: str, confidence: float = 1.0, source: s
         if getattr(core_config, 'VERIFY_FACTS_SECOND_PASS', False) and confidence < 0.75:
             # Lightweight guard to avoid repeated verification loops
             from companion_ai.llm_interface import generate_model_response
-            verifier_model = getattr(core_config, 'HEAVY_MODEL', core_config.DEFAULT_CONVERSATION_MODEL)
+            verifier_model = getattr(core_config, 'PRIMARY_MODEL', core_config.DEFAULT_CONVERSATION_MODEL)
             prompt = (
                 f"Evaluate the truthfulness and specificity of this proposed user fact.\n"
                 f"Fact: {key} = {value}\n"
