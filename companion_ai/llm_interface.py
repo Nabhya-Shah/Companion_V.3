@@ -394,7 +394,11 @@ def generate_response(user_message: str, memory_context: dict, model: str | None
         recent_conv = memory_context.get('recent_conversation', '')
         
         # Always use V4 context builder
-        meta = build_system_prompt_with_meta(user_message, recent_conv)
+        meta = build_system_prompt_with_meta(
+            user_message,
+            recent_conv,
+            mem0_user_id=memory_context.get('mem0_user_id')
+        )
         system_prompt = meta['system_prompt']
         mode = meta['mode']
         memory_meta = meta['memory_meta']
@@ -483,7 +487,11 @@ def generate_response_streaming(user_message: str, memory_context: dict, model: 
         recent_conv = memory_context.get('recent_conversation', '')
         
         # Always use V4 context builder
-        meta = build_system_prompt_with_meta(user_message, recent_conv)
+        meta = build_system_prompt_with_meta(
+            user_message,
+            recent_conv,
+            mem0_user_id=memory_context.get('mem0_user_id')
+        )
         system_prompt = meta['system_prompt']
         
         # Check if we need tools (non-streaming for tool execution)
@@ -979,7 +987,8 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
                 if core_config.USE_MEM0:
                     try:
                         from companion_ai.memory_v2 import get_all_memories
-                        memories = get_all_memories(user_id=core_config.MEM0_USER_ID)
+                        mem0_user_id = (memory_context or {}).get('mem0_user_id') or core_config.MEM0_USER_ID
+                        memories = get_all_memories(user_id=mem0_user_id)
                         if memories:
                             mem_list = [m.get('memory', '') for m in memories[:5]]
                             mem0_context = f"\n\n[Personal memories about this user: {', '.join(mem_list)}]"
@@ -1037,7 +1046,11 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
                     full_system_prompt = system_prompt
                 elif memory_context and 'recent_conversation' in memory_context:
                     from companion_ai.core.context_builder import build_system_prompt_with_meta
-                    meta = build_system_prompt_with_meta(user_message, memory_context['recent_conversation'])
+                    meta = build_system_prompt_with_meta(
+                        user_message,
+                        memory_context['recent_conversation'],
+                        mem0_user_id=memory_context.get('mem0_user_id')
+                    )
                     full_system_prompt = meta['system_prompt']
                 else:
                     full_system_prompt = system_prompt

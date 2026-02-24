@@ -107,9 +107,9 @@ class BrainIndex:
     def _extract_pdf(self, path: Path) -> Optional[str]:
         """Extract text from PDF."""
         try:
-            import PyPDF2
+            import pypdf
             with open(path, 'rb') as f:
-                reader = PyPDF2.PdfReader(f)
+                reader = pypdf.PdfReader(f)
                 texts = []
                 for page in reader.pages:
                     text = page.extract_text()
@@ -117,7 +117,7 @@ class BrainIndex:
                         texts.append(text)
                 return '\n\n'.join(texts)
         except ImportError:
-            logger.warning("PyPDF2 not installed for PDF extraction")
+            logger.warning("pypdf not installed for PDF extraction")
             return None
         except Exception as e:
             logger.error(f"PDF extraction failed: {e}")
@@ -281,6 +281,14 @@ class BrainIndex:
                 conn.execute("DELETE FROM brain_chunks")
                 conn.commit()
         logger.info("🗑️ Brain index cleared")
+
+    def remove_file(self, relative_path: str) -> bool:
+        """Remove all indexed chunks for one relative brain file path."""
+        with self._lock:
+            with sqlite3.connect(str(INDEX_DB)) as conn:
+                cur = conn.execute("DELETE FROM brain_chunks WHERE file_path = ?", (relative_path,))
+                conn.commit()
+                return cur.rowcount > 0
 
 
 # Singleton instance

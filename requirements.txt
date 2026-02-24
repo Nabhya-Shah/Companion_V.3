@@ -6,8 +6,8 @@ flask>=2.3.0
 PyYAML>=6.0
 
 # File Processing
-PyPDF2>=3.0.0           # PDF text extraction
-Pillow>=10.0.0          # Image processing
+pypdf>=3.9.0            # PDF text extraction (replaces deprecated PyPDF2)
+Pillow>=12.1.1          # Image processing
 pytesseract>=0.3.10     # OCR for images (requires Tesseract binary)
 python-docx>=0.8.11     # Word document reading
 
@@ -18,6 +18,8 @@ python-docx>=0.8.11     # Word document reading
 pyaudio>=0.2.11
 numpy>=1.24.0
 azure-cognitiveservices-speech>=1.30.0
+# Pin azure-core to patched version (CVE-2026-21226)
+azure-core>=1.38.0
 
 # Optional: Advanced audio processing
 openai-whisper>=20231117

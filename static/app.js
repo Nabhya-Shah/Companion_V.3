@@ -14,6 +14,7 @@ const shutdownBtn = document.getElementById('shutdownBtn');
 const closeMemoryBtn = document.getElementById('closeMemoryBtn');
 const closeSettingsBtn = document.getElementById('closeSettingsBtn');
 const closeTasksBtn = document.getElementById('closeTasksBtn');
+const createScheduleBtn = document.getElementById('createScheduleBtn');
 const memorySidebar = document.getElementById('memorySidebar');
 const tasksSidebar = document.getElementById('tasksSidebar');
 const settingsModal = document.getElementById('settingsModal');
@@ -37,7 +38,7 @@ const removeAttachment = document.getElementById('removeAttachment');
 // ============================================
 // State
 // ============================================
-let API_TOKEN = localStorage.getItem('companion_api_token') || '';
+let API_TOKEN = sessionStorage.getItem('companion_api_token') || '';
 let ttsEnabled = localStorage.getItem('companion_tts_enabled') === 'true';
 let showTokens = localStorage.getItem('companion_show_tokens') === 'true';
 let currentConversation = [];
@@ -49,14 +50,24 @@ let stopTyping = false; // Flag to stop typing animation
 let currentCursorEl = null; // Reference to current streaming cursor
 let currentAttachment = null; // Stores current file attachment {file, url, analysis}
 let lastImageAnalysis = null; // Track last image analysis for pipeline display
+let lastSSESeq = 0;
+let sseGapCount = 0;
+let sseUnknownEvents = 0;
 
 // ============================================
 // Utilities
 // ============================================
 function setApiToken(tok) {
   API_TOKEN = tok || '';
-  if (tok) localStorage.setItem('companion_api_token', tok);
+  if (tok) {
+    sessionStorage.setItem('companion_api_token', tok);
+  } else {
+    sessionStorage.removeItem('companion_api_token');
+  }
 }
+
+// Clean up legacy persistent token from older builds.
+localStorage.removeItem('companion_api_token');
 
 function authHeaders(extra = {}) {
   return {
@@ -1005,9 +1016,116 @@ async function loadMemory(retry = false) {
     const searchInput = document.getElementById('memorySearchInput');
     const query = searchInput?.value?.toLowerCase() || '';
     renderMemoryCards(query);
+    await loadPendingFacts();
 
   } catch (e) {
     console.error('Failed to load memory:', e);
+  }
+}
+
+
+async function loadPendingFacts() {
+  const container = document.getElementById('pendingFactsList');
+  if (!container) return;
+
+  try {
+    const r = await fetch('/api/pending_facts', { headers: authHeaders() });
+    const data = await r.json();
+    if (!data.enabled) {
+      container.innerHTML = '<div class="memory-empty">Fact review is disabled in config</div>';
+      return;
+    }
+
+    const rows = Array.isArray(data.pending) ? data.pending : [];
+    if (rows.length === 0) {
+      container.innerHTML = '<div class="memory-empty">No pending facts</div>';
+      return;
+    }
+
+    container.innerHTML = rows.map(row => {
+      const pid = row.id;
+      const text = escapeHtml(row.fact_value || row.value || '');
+      return `
+        <div class="memory-card" data-pending-id="${pid}">
+          <div class="memory-text">${text}</div>
+          <div class="memory-meta" style="justify-content:flex-end; gap:6px;">
+            <button class="small-btn" onclick="approvePendingFact(${pid})">Approve</button>
+            <button class="small-btn" onclick="rejectPendingFact(${pid})">Reject</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    console.error('Failed to load pending facts:', e);
+    container.innerHTML = '<div class="memory-empty">Failed to load pending facts</div>';
+  }
+}
+
+
+window.approvePendingFact = async function approvePendingFact(pid) {
+  try {
+    const r = await fetch(`/api/pending_facts/${pid}/approve`, {
+      method: 'POST',
+      headers: authHeaders()
+    });
+    const data = await r.json();
+    if (!r.ok || !data.approved) {
+      showToast(data.error || 'Approve failed', 'error');
+      return;
+    }
+    await loadPendingFacts();
+    await loadMemory();
+    showToast('Fact approved', 'success');
+  } catch (e) {
+    showToast('Approve failed', 'error');
+  }
+};
+
+
+window.rejectPendingFact = async function rejectPendingFact(pid) {
+  try {
+    const r = await fetch(`/api/pending_facts/${pid}/reject`, {
+      method: 'POST',
+      headers: authHeaders()
+    });
+    const data = await r.json();
+    if (!r.ok || !data.rejected) {
+      showToast(data.error || 'Reject failed', 'error');
+      return;
+    }
+    await loadPendingFacts();
+    showToast('Fact rejected', 'success');
+  } catch (e) {
+    showToast('Reject failed', 'error');
+  }
+};
+
+
+async function bulkPendingFacts(action) {
+  const ids = [...document.querySelectorAll('#pendingFactsList [data-pending-id]')]
+    .map(el => Number(el.dataset.pendingId))
+    .filter(Boolean);
+  if (!ids.length) {
+    showToast('No pending facts to process', 'info');
+    return;
+  }
+
+  try {
+    const r = await fetch('/api/pending_facts/bulk', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ action, ids })
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      showToast(data.error || 'Bulk action failed', 'error');
+      return;
+    }
+    await loadPendingFacts();
+    await loadMemory();
+    showToast(`${action === 'approve' ? 'Approved' : 'Rejected'} ${data.processed} facts`, 'success');
+  } catch (e) {
+    showToast('Bulk action failed', 'error');
   }
 }
 
@@ -1286,6 +1404,8 @@ document.getElementById('memorySearchInput')?.addEventListener('input', (e) => {
 });
 
 document.getElementById('refreshMemoryBtn')?.addEventListener('click', loadMemory);
+document.getElementById('approveAllPendingBtn')?.addEventListener('click', () => bulkPendingFacts('approve'));
+document.getElementById('rejectAllPendingBtn')?.addEventListener('click', () => bulkPendingFacts('reject'));
 
 // ============================================
 // Models Panel
@@ -1545,6 +1665,157 @@ async function loadTokenBudget() {
 // Load token budget on startup
 loadTokenBudget();
 
+let pluginCatalogState = [];
+
+function renderPluginCatalog(plugins) {
+  const listEl = document.getElementById('pluginCatalogList');
+  const statusEl = document.getElementById('pluginPolicyStatus');
+  if (!listEl) return;
+  if (!plugins || plugins.length === 0) {
+    listEl.textContent = 'No plugins registered.';
+    if (statusEl) statusEl.textContent = 'No plugin policy to apply.';
+    return;
+  }
+
+  listEl.innerHTML = plugins.map((plugin) => {
+    const risk = plugin.risk_tier || 'unknown';
+    const toolCount = Number(plugin.tool_count || 0);
+    const checked = plugin.enabled ? 'checked' : '';
+    const title = escapeHtml(plugin.title || plugin.name);
+    const pluginName = escapeHtml(plugin.name || '');
+    return `
+      <div class="setting-group" style="margin-bottom:8px;">
+        <label class="toggle-label">
+          <input type="checkbox" class="plugin-policy-checkbox" value="${pluginName}" ${checked}>
+          <span>${title}</span>
+        </label>
+        <p class="setting-hint" style="margin:4px 0 0 28px;">${toolCount} tools • risk:${risk}</p>
+      </div>
+    `;
+  }).join('');
+
+  if (statusEl) {
+    const enabledCount = plugins.filter(p => p.enabled).length;
+    statusEl.textContent = `${enabledCount}/${plugins.length} plugin groups enabled. Changes apply when you click Apply Plugin Policy.`;
+  }
+}
+
+async function loadPluginCatalog() {
+  try {
+    const resp = await fetch('/api/plugins/catalog', { headers: authHeaders() });
+    if (!resp.ok) {
+      showToast('Failed to load plugin catalog', 'error');
+      return;
+    }
+    const data = await resp.json();
+    pluginCatalogState = Array.isArray(data.plugins) ? data.plugins : [];
+    renderPluginCatalog(pluginCatalogState);
+  } catch (e) {
+    console.error('Failed to load plugin catalog:', e);
+    showToast('Failed to load plugin catalog', 'error');
+  }
+}
+
+async function applyPluginPolicy() {
+  const listEl = document.getElementById('pluginCatalogList');
+  const statusEl = document.getElementById('pluginPolicyStatus');
+  if (!listEl) return;
+
+  const enabledPlugins = [...listEl.querySelectorAll('.plugin-policy-checkbox:checked')]
+    .map(el => (el.value || '').trim())
+    .filter(Boolean);
+
+  try {
+    const resp = await fetch('/api/plugins/policy', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ enabled_plugins: enabledPlugins })
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      showToast(data.error || 'Failed to apply plugin policy', 'error');
+      return;
+    }
+
+    if (statusEl) {
+      const source = data.source || 'workspace';
+      statusEl.textContent = `Saved plugin policy (${source}). Enabled: ${enabledPlugins.length}.`;
+    }
+    showToast('Plugin policy applied', 'success');
+    await loadPluginCatalog();
+  } catch (e) {
+    console.error('Failed to apply plugin policy:', e);
+    showToast('Failed to apply plugin policy', 'error');
+  }
+}
+
+async function loadContextPanel() {
+  try {
+    const resp = await fetch('/api/context', { headers: authHeaders() });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const workspaceInput = document.getElementById('contextWorkspaceInput');
+    const profileInput = document.getElementById('contextProfileInput');
+    const sessionInput = document.getElementById('contextSessionInput');
+    const badge = document.getElementById('contextCurrentBadge');
+    const known = document.getElementById('knownWorkspacesList');
+
+    if (workspaceInput) workspaceInput.value = data.workspace_id || 'default';
+    if (profileInput) profileInput.value = data.profile_id || 'default';
+    if (sessionInput) sessionInput.value = data.session_id || 'default';
+    if (badge) {
+      badge.textContent = `Current: workspace=${data.workspace_id || 'default'} • profile=${data.profile_id || 'default'} • session=${data.session_id || 'default'}`;
+    }
+    if (known) {
+      const rows = Array.isArray(data.known_workspaces) ? data.known_workspaces : ['default'];
+      known.textContent = rows.join(', ');
+    }
+  } catch (e) {
+    console.error('Failed to load context panel:', e);
+  }
+}
+
+async function applyContextSwitch(newSession = false) {
+  const workspaceInput = document.getElementById('contextWorkspaceInput');
+  const profileInput = document.getElementById('contextProfileInput');
+  const sessionInput = document.getElementById('contextSessionInput');
+  const migrateToggle = document.getElementById('contextMigrateToggle');
+
+  const payload = {
+    workspace_id: (workspaceInput?.value || 'default').trim() || 'default',
+    profile_id: (profileInput?.value || 'default').trim() || 'default',
+    session_id: (sessionInput?.value || 'default').trim() || 'default',
+    migrate_legacy: !!migrateToggle?.checked,
+    new_session: !!newSession,
+  };
+
+  try {
+    const resp = await fetch('/api/context/switch', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      showToast(data.error || 'Failed to switch context', 'error');
+      return;
+    }
+
+    stopSSE();
+    startSSE();
+    lastHistoryLength = -1;
+    currentConversation = [];
+    await syncChatHistory();
+    await loadMemory();
+    await loadTasks();
+    await loadContextPanel();
+    showToast(`Context switched to ${data.workspace_id}/${data.profile_id}`, 'success');
+  } catch (e) {
+    console.error('Failed to switch context:', e);
+    showToast('Failed to switch context', 'error');
+  }
+}
+
 // ============================================
 // Settings
 // ============================================
@@ -1555,6 +1826,10 @@ async function loadSettings() {
   const visionToggle = document.getElementById('visionToggle');
   const visionStatus = document.getElementById('visionStatus');
   const showTokensToggle = document.getElementById('showTokensToggle');
+  const contextApplyBtn = document.getElementById('contextApplyBtn');
+  const contextNewSessionBtn = document.getElementById('contextNewSessionBtn');
+  const pluginCatalogRefreshBtn = document.getElementById('pluginCatalogRefreshBtn');
+  const pluginPolicyApplyBtn = document.getElementById('pluginPolicyApplyBtn');
 
   // Show Tokens toggle
   if (showTokensToggle) {
@@ -1575,6 +1850,26 @@ async function loadSettings() {
       localStorage.setItem('companion_tts_enabled', ttsEnabled);
     });
   }
+
+  contextApplyBtn?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    await applyContextSwitch(false);
+  });
+
+  contextNewSessionBtn?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    await applyContextSwitch(true);
+  });
+
+  pluginCatalogRefreshBtn?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    await loadPluginCatalog();
+  });
+
+  pluginPolicyApplyBtn?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    await applyPluginPolicy();
+  });
 
   try {
     // Load voices
@@ -1638,6 +1933,9 @@ async function loadSettings() {
   } catch (e) {
     console.error('Failed to load settings:', e);
   }
+
+  await loadContextPanel();
+  await loadPluginCatalog();
 }
 
 // ============================================
@@ -1696,7 +1994,27 @@ function startSSE() {
   eventSource.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
-      renderHistory(data.history || []);
+      const eventType = data.event || data.type;
+      const payload = data.payload || {};
+      const seq = Number(data.seq || 0);
+
+      if (seq > 0) {
+        if (lastSSESeq > 0 && seq > (lastSSESeq + 1)) {
+          sseGapCount += (seq - lastSSESeq - 1);
+          console.warn('SSE sequence gap detected', { lastSSESeq, seq, sseGapCount });
+        }
+        lastSSESeq = Math.max(lastSSESeq, seq);
+      }
+
+      if (eventType === 'history.updated' || data.type === 'history') {
+        renderHistory(payload.history || data.history || []);
+      } else if (eventType === 'job.updated' || data.type === 'job_update') {
+        loadTasks();
+      } else {
+        sseUnknownEvents += 1;
+        console.debug('SSE unknown event type', { eventType, sseUnknownEvents });
+        renderHistory(data.history || []);
+      }
     } catch (e) {
       console.error('SSE parse error:', e);
     }
@@ -1780,42 +2098,45 @@ userInput.addEventListener('input', () => {
 // Background Tasks Panel (V6)
 // ============================================
 let lastTasksSig = "";
+let schedulesById = {};
 
 async function loadTasks() {
   try {
-    const response = await fetch('/api/tasks', { headers: authHeaders() });
-    const data = await response.json();
+    const [tasksResponse, schedulesResponse] = await Promise.all([
+      fetch('/api/tasks', { headers: authHeaders() }),
+      fetch('/api/schedules', { headers: authHeaders() })
+    ]);
+    const data = await tasksResponse.json();
+    const scheduleData = await schedulesResponse.json();
+    const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+    const schedules = Array.isArray(scheduleData.schedules) ? scheduleData.schedules : [];
 
-    if (data.tasks && data.tasks.length > 0) {
+    if (tasks.length > 0 || schedules.length > 0) {
       tasksEmpty.style.display = 'none';
       tasksList.style.display = 'flex';
 
-      // Create signature based on task IDs, states, and descriptions
-      // This prevents re-rendering (and killing the cancel button) if nothing basic changed
-      const currentSig = JSON.stringify(data.tasks.map(t => ({ id: t.id, state: t.state, desc: t.description })));
+      const currentSig = JSON.stringify({
+        tasks: tasks.map(t => ({ id: t.id, state: t.state, desc: t.description })),
+        schedules: schedules.map(s => ({ id: s.id, enabled: !!s.enabled, desc: s.description, interval_minutes: s.interval_minutes, blocked_by_policy: !!s.blocked_by_policy }))
+      });
 
-      const expandedIds = [...document.querySelectorAll('.task-card.expanded')]
+      const expandedIds = [...document.querySelectorAll('.task-card.expanded[data-kind="task"]')]
         .map(el => el.dataset.taskId);
 
-      // Only re-render list if headers changed
       if (currentSig !== lastTasksSig) {
         lastTasksSig = currentSig;
-        renderTasks(data.tasks);
+        renderTasks(tasks, schedules);
 
-        // Restore expanded state only after a re-render
         expandedIds.forEach(id => {
-          const card = document.querySelector(`[data-task-id="${id}"]`);
+          const card = document.querySelector(`[data-task-id="${id}"][data-kind="task"]`);
           if (card) {
             card.classList.add('expanded');
           }
         });
       }
 
-      // Always reload the timeline for expanded cards (to show progress)
-      // We do this even if headers didn't change
       expandedIds.forEach(id => {
-        // Only if the task still exists
-        if (data.tasks.find(t => t.id === id)) {
+        if (tasks.find(t => t.id === id)) {
           toggleTaskDetails(id, true);
         }
       });
@@ -1840,9 +2161,14 @@ function updateTaskBadge(count) {
   }
 }
 
-function renderTasks(tasks) {
-  tasksList.innerHTML = tasks.map(task => `
-    <div class="task-card" data-task-id="${task.id}">
+function renderTasks(tasks, schedules = []) {
+  schedulesById = schedules.reduce((acc, schedule) => {
+    acc[schedule.id] = schedule;
+    return acc;
+  }, {});
+
+  const taskCards = tasks.map(task => `
+    <div class="task-card" data-kind="task" data-task-id="${task.id}">
       <div class="task-card-header" onclick="toggleTaskDetails('${task.id}')">
         <div class="task-status-icon ${task.state}">
           ${getTaskIcon(task.state)}
@@ -1864,6 +2190,203 @@ function renderTasks(tasks) {
       </div>
     </div>
   `).join('');
+
+  const scheduleCards = schedules.map(schedule => `
+    <div class="task-card" data-kind="schedule" data-schedule-id="${schedule.id}">
+      <div class="task-card-header">
+        <div class="task-status-icon ${schedule.enabled ? 'running' : 'failed'}">
+          ${schedule.enabled ? '⏱️' : '⏸️'}
+        </div>
+        <span class="task-title">${escapeHtml(schedule.description || 'Scheduled automation')}</span>
+        <button class="task-cancel-btn" onclick="toggleSchedule('${schedule.id}', ${schedule.enabled ? 'false' : 'true'})" title="${schedule.enabled ? 'Pause schedule' : 'Resume schedule'}">
+          ${schedule.enabled ? 'Pause' : 'Resume'}
+        </button>
+        <button class="task-cancel-btn" onclick="runScheduleNow('${schedule.id}')" title="Run schedule now">Run now</button>
+        <button class="task-cancel-btn" onclick="editSchedule('${schedule.id}')" title="Edit schedule">Edit</button>
+        <button class="task-cancel-btn" onclick="deleteSchedule('${schedule.id}')" title="Delete schedule">Delete</button>
+      </div>
+      <div class="task-timeline" style="display:block; max-height:none; padding-top:0.5rem;">
+        <div class="timeline-step">
+          <div class="timeline-dot completed"></div>
+          <div class="timeline-content">
+            <div class="timeline-description">${escapeHtml(schedule.interval_human || `Every ${Number(schedule.interval_minutes || 0)} minute(s)`)} • ${escapeHtml(schedule.timezone || 'UTC')}</div>
+            <div class="timeline-description" style="margin-top: 4px; color: var(--text-secondary, #94a3b8);">Next run: ${escapeHtml(schedule.next_run_at ? formatScheduleTime(schedule.next_run_at) : 'Unknown')}</div>
+            ${Number(schedule.consecutive_failures || 0) > 0 ? `<div class="timeline-description" style="color: var(--error, #ef4444); margin-top: 4px;">Failures: ${Number(schedule.consecutive_failures)}${schedule.last_error ? ` • ${escapeHtml(String(schedule.last_error).slice(0, 120))}` : ''}</div>` : ''}
+            ${schedule.blocked_by_policy ? `<div class="timeline-description" style="color: var(--warning, #f59e0b); margin-top: 4px;">Policy warning: ${escapeHtml(schedule.policy_message || 'Tool is blocked by current policy')}</div>` : ''}
+          </div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  tasksList.innerHTML = `${taskCards}${scheduleCards}`;
+}
+
+function formatScheduleTime(isoString) {
+  try {
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) return 'Unknown';
+    return date.toLocaleString();
+  } catch {
+    return 'Unknown';
+  }
+}
+
+async function toggleSchedule(scheduleId, enabled) {
+  try {
+    const response = await fetch(`/api/schedules/${scheduleId}/toggle`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ enabled })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      showToast(data.error || 'Failed to update schedule', 'error');
+      return;
+    }
+    showToast(enabled ? 'Schedule resumed' : 'Schedule paused', 'success');
+    loadTasks();
+  } catch (error) {
+    console.error('Error toggling schedule:', error);
+    showToast('Failed to update schedule', 'error');
+  }
+}
+
+async function runScheduleNow(scheduleId) {
+  try {
+    const response = await fetch(`/api/schedules/${scheduleId}/run`, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      showToast(data.error || 'Failed to run schedule', 'error');
+      return;
+    }
+    showToast(data.job_id ? `Schedule started (job ${data.job_id})` : 'Schedule started', 'success');
+    loadTasks();
+  } catch (error) {
+    console.error('Error running schedule now:', error);
+    showToast('Failed to run schedule', 'error');
+  }
+}
+
+async function editSchedule(scheduleId) {
+  const schedule = schedulesById[scheduleId];
+  if (!schedule) {
+    showToast('Schedule not found', 'error');
+    return;
+  }
+
+  const description = prompt('Schedule description', schedule.description || '');
+  if (description === null) return;
+
+  const intervalInput = prompt('Run every how many minutes?', String(schedule.interval_minutes || 15));
+  if (intervalInput === null) return;
+  const intervalMinutes = Number(intervalInput);
+  if (!Number.isFinite(intervalMinutes) || intervalMinutes <= 0) {
+    showToast('Please enter a valid positive minute interval', 'error');
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/schedules/${scheduleId}`, {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        description: description.trim(),
+        interval_minutes: intervalMinutes,
+        tool_name: schedule.tool_name || 'start_background_task',
+        tool_args: schedule.tool_args || {},
+        timezone: schedule.timezone || 'UTC',
+        retry_limit: Number(schedule.retry_limit || 0),
+        retry_backoff_minutes: Number(schedule.retry_backoff_minutes || 1),
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      showToast(data.error || 'Failed to update schedule', 'error');
+      return;
+    }
+    showToast('Schedule updated', 'success');
+    loadTasks();
+  } catch (error) {
+    console.error('Error updating schedule:', error);
+    showToast('Failed to update schedule', 'error');
+  }
+}
+
+async function deleteSchedule(scheduleId) {
+  const schedule = schedulesById[scheduleId];
+  if (!schedule) {
+    showToast('Schedule not found', 'error');
+    return;
+  }
+
+  if (!confirm(`Delete schedule: ${schedule.description || scheduleId}?`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/schedules/${scheduleId}`, {
+      method: 'DELETE',
+      headers: authHeaders()
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      showToast(data.error || 'Failed to delete schedule', 'error');
+      return;
+    }
+    showToast('Schedule deleted', 'success');
+    loadTasks();
+  } catch (error) {
+    console.error('Error deleting schedule:', error);
+    showToast('Failed to delete schedule', 'error');
+  }
+}
+
+async function createSchedule() {
+  const description = prompt('Schedule description', 'Recurring background task');
+  if (description === null) return;
+
+  const trimmedDescription = (description || '').trim();
+  if (!trimmedDescription) {
+    showToast('Description is required', 'error');
+    return;
+  }
+
+  const cadence = prompt('Cadence (examples: 15m, 1h, 1d)', '30m');
+  if (cadence === null) return;
+
+  const cadenceValue = (cadence || '').trim().toLowerCase();
+  if (!/^\d+[mhd]$/.test(cadenceValue)) {
+    showToast('Cadence must look like 15m, 1h, or 1d', 'error');
+    return;
+  }
+
+  try {
+    const response = await fetch('/api/schedules', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        description: trimmedDescription,
+        cadence: cadenceValue,
+        tool_name: 'start_background_task',
+        tool_args: { description: trimmedDescription },
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      showToast(data.error || 'Failed to create schedule', 'error');
+      return;
+    }
+
+    showToast('Schedule created', 'success');
+    await loadTasks();
+  } catch (error) {
+    console.error('Error creating schedule:', error);
+    showToast('Failed to create schedule', 'error');
+  }
 }
 
 async function cancelTask(taskId) {
@@ -1975,6 +2498,10 @@ closeTasksBtn?.addEventListener('click', () => {
   stopTasksPolling();
 });
 
+createScheduleBtn?.addEventListener('click', () => {
+  createSchedule();
+});
+
 // ============================================
 // Initialize
 // ============================================
@@ -2006,6 +2533,9 @@ document.addEventListener('DOMContentLoaded', () => {
 const smartHomeModal = document.getElementById('smartHomeModal');
 const toggleSmartHomeBtn = document.getElementById('toggleSmartHomeBtn');
 const closeSmartHomeBtn = document.getElementById('closeSmartHomeBtn');
+const smartHomeAllOnBtn = document.getElementById('smartHomeAllOnBtn');
+const smartHomeAllOffBtn = document.getElementById('smartHomeAllOffBtn');
+const smartHomeRefreshBtn = document.getElementById('smartHomeRefreshBtn');
 let smartHomePollingInterval = null;
 let smartHomeCountdownInterval = null;
 let smartHomeCountdown = 15;
@@ -2052,6 +2582,7 @@ function stopSmartHomePolling() {
 
 toggleSmartHomeBtn?.addEventListener('click', () => {
   smartHomeModal.classList.add('visible');
+  loadSmartHomeHealth();
   loadSmartHomeRooms();
   startSmartHomePolling();
 });
@@ -2079,7 +2610,7 @@ async function loadSmartHomeRooms() {
     const data = await resp.json();
 
     if (!data.success || !data.rooms) {
-      container.innerHTML = '<div class="room-card loading">Smart home unavailable</div>';
+      container.innerHTML = '<div class="room-card loading">Smart home unavailable. Check Smart Home status above.</div>';
       return;
     }
 
@@ -2122,7 +2653,34 @@ async function loadSmartHomeRooms() {
     });
   } catch (err) {
     console.error('Failed to load Smart Home rooms:', err);
-    container.innerHTML = '<div class="room-card loading">Connection error</div>';
+    container.innerHTML = '<div class="room-card loading">Connection error. Check Smart Home status above.</div>';
+  }
+}
+
+async function loadSmartHomeHealth() {
+  const statusEl = document.getElementById('smartHomeStatus');
+  if (!statusEl) return;
+
+  statusEl.textContent = 'Checking smart home connection...';
+
+  try {
+    const resp = await fetch('/api/loxone/health');
+    const data = await resp.json();
+
+    if (data.success && data.connected) {
+      statusEl.textContent = 'Smart Home: Connected';
+      return;
+    }
+
+    if (data.configured === false) {
+      statusEl.textContent = data.message || 'Smart Home: Not configured. Set LOXONE_HOST, LOXONE_USER, and LOXONE_PASSWORD in .env.';
+      return;
+    }
+
+    statusEl.textContent = data.message || 'Smart Home: Configured but unreachable';
+  } catch (err) {
+    console.error('Failed to load Smart Home health:', err);
+    statusEl.textContent = 'Smart Home: Health check failed';
   }
 }
 
@@ -2183,7 +2741,9 @@ async function toggleSmartHomeRoom(roomId, roomEl) {
       icon.textContent = isOn ? '💡' : '🔅';
       status.textContent = isOn ? 'On' : 'Off';
       console.error('Light toggle failed:', data.error);
+      showToast(data.error || 'Smart Home action failed', 'error');
     } else {
+      showToast(data.message || `Turned ${action} ${roomId}`, 'success');
       // Refresh to get updated mode after 500ms
       setTimeout(loadSmartHomeRooms, 500);
     }
@@ -2194,6 +2754,7 @@ async function toggleSmartHomeRoom(roomId, roomEl) {
     icon.textContent = isOn ? '💡' : '🔅';
     status.textContent = isOn ? 'On' : 'Off';
     console.error('Light toggle error:', err);
+    showToast('Smart Home connection error', 'error');
   }
 }
 
@@ -2210,15 +2771,47 @@ async function toggleSmartHomeMode(roomId, newMode) {
     const data = await resp.json();
 
     if (data.success) {
+      showToast(data.message || `Set ${roomId} to ${brightness}%`, 'success');
       // Refresh to show new state
       setTimeout(loadSmartHomeRooms, 500);
     } else {
       console.error('Mode toggle failed:', data.error);
+      showToast(data.error || 'Failed to change lighting mode', 'error');
     }
   } catch (err) {
     console.error('Mode toggle error:', err);
+    showToast('Smart Home connection error', 'error');
   }
 }
+
+async function setAllSmartHomeLights(action) {
+  const label = action === 'on' ? 'on' : 'off';
+  try {
+    const resp = await fetch(`/api/loxone/light/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: 'all' })
+    });
+    const data = await resp.json();
+    if (!data.success) {
+      showToast(data.error || `Failed to turn ${label} all lights`, 'error');
+      return;
+    }
+    showToast(data.message || `Turned ${label} all lights`, 'success');
+    await loadSmartHomeRooms();
+  } catch (err) {
+    console.error(`All lights ${action} error:`, err);
+    showToast(`Failed to turn ${label} all lights`, 'error');
+  }
+}
+
+smartHomeAllOnBtn?.addEventListener('click', () => setAllSmartHomeLights('on'));
+smartHomeAllOffBtn?.addEventListener('click', () => setAllSmartHomeLights('off'));
+smartHomeRefreshBtn?.addEventListener('click', async () => {
+  await loadSmartHomeHealth();
+  await loadSmartHomeRooms();
+  showToast('Smart Home refreshed', 'info');
+});
 
 // ============================================
 // FILE ATTACHMENTS
@@ -2549,7 +3142,7 @@ async function loadBrainFiles() {
   if (!list) return;
 
   try {
-    const res = await fetch('/api/brain/stats');
+    const res = await fetch('/api/brain/files', { headers: authHeaders() });
     const data = await res.json();
 
     if (!data.files || data.files.length === 0) {
@@ -2560,15 +3153,18 @@ async function loadBrainFiles() {
     const icons = { '.pdf': '📄', '.md': '📝', '.txt': '📃', '.docx': '📋' };
 
     list.innerHTML = data.files.map(f => {
-      const ext = '.' + f.path.split('.').pop().toLowerCase();
+      const ext = '.' + (f.name || f.path || '').split('.').pop().toLowerCase();
       const icon = icons[ext] || '📁';
-      const name = f.path.split('\\').pop();
+      const name = f.name || f.path;
       return `
         <div class="brain-file-card">
           <div class="brain-file-icon">${icon}</div>
           <div class="brain-file-info">
             <div class="brain-file-name">${name}</div>
-            <div class="brain-file-meta">${f.chunks} chunk${f.chunks > 1 ? 's' : ''} indexed</div>
+            <div class="brain-file-meta">${f.chunks} chunk${f.chunks > 1 ? 's' : ''} indexed • ${Math.round((f.size || 0) / 1024)} KB</div>
+            <div style="display:flex; gap:6px; margin-top:6px;">
+              <button class="small-btn" onclick="deleteBrainFile('${encodeURIComponent(f.path)}')">Delete</button>
+            </div>
           </div>
         </div>
       `;
@@ -2578,11 +3174,107 @@ async function loadBrainFiles() {
   }
 }
 
+
+window.deleteBrainFile = async function deleteBrainFile(encodedPath) {
+  const relPath = decodeURIComponent(encodedPath || '');
+  if (!relPath) return;
+  if (!confirm(`Delete ${relPath}?`)) return;
+
+  try {
+    const res = await fetch('/api/brain/file', {
+      method: 'DELETE',
+      headers: authHeaders(),
+      body: JSON.stringify({ path: relPath })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Delete failed', 'error');
+      return;
+    }
+    showToast('File deleted', 'success');
+    await loadBrainFiles();
+  } catch (e) {
+    showToast('Delete failed', 'error');
+  }
+};
+
+async function loadRecentUploads() {
+  const list = document.getElementById('recentUploadsList');
+  if (!list) return;
+
+  try {
+    const res = await fetch('/api/upload/list?limit=12', { headers: authHeaders() });
+    const data = await res.json();
+
+    if (!data.files || data.files.length === 0) {
+      list.innerHTML = '<div class="brain-empty">No uploaded files yet.</div>';
+      return;
+    }
+
+    list.innerHTML = data.files.map(f => {
+      return `
+        <div class="brain-file-card">
+          <div class="brain-file-icon">📎</div>
+          <div class="brain-file-info">
+            <div class="brain-file-name">${escapeHtml(f.filename)}</div>
+            <div class="brain-file-meta">${f.ext.toUpperCase()} • ${Math.round((f.size || 0) / 1024)} KB</div>
+            <div style="display:flex; gap:6px; margin-top:6px;">
+              <button class="small-btn" onclick="summarizeUploadedFile('${f.file_id}')">Summary</button>
+              <button class="small-btn" onclick="extractUploadedFile('${f.file_id}')">Extract</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    list.innerHTML = '<div class="brain-empty">Failed to load uploads</div>';
+  }
+}
+
+window.summarizeUploadedFile = async function summarizeUploadedFile(fileId) {
+  try {
+    const res = await fetch('/api/upload/summarize', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ file_id: fileId })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Summary failed', 'error');
+      return;
+    }
+    addMessage('ai', `📄 Summary for ${data.filename}\n\n${data.summary}`);
+    showToast('File summary added to chat', 'success');
+  } catch (e) {
+    showToast('Summary failed', 'error');
+  }
+};
+
+window.extractUploadedFile = async function extractUploadedFile(fileId) {
+  try {
+    const res = await fetch('/api/upload/extract', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ file_id: fileId, max_chars: 1800 })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Extract failed', 'error');
+      return;
+    }
+    addMessage('ai', `📑 Extract from ${data.filename}${data.truncated ? ' (truncated)' : ''}\n\n${data.text}`);
+    showToast('File extract added to chat', 'success');
+  } catch (e) {
+    showToast('Extract failed', 'error');
+  }
+};
+
 // Initialize Knowledge tab handlers
 document.addEventListener('DOMContentLoaded', () => {
   const uploadZone = document.getElementById('brainUploadZone');
   const fileInput = document.getElementById('brainFileInput');
   const reindexBtn = document.getElementById('reindexBrainBtn');
+  const refreshUploadsBtn = document.getElementById('refreshUploadsBtn');
 
   if (uploadZone && fileInput) {
     // Click to upload
@@ -2602,16 +3294,20 @@ document.addEventListener('DOMContentLoaded', () => {
       e.preventDefault();
       uploadZone.classList.remove('drag-over');
       const files = Array.from(e.dataTransfer.files);
-      for (const file of files) {
-        await uploadBrainFile(file);
+      if (files.length > 1) {
+        await uploadBrainFiles(files);
+      } else if (files.length === 1) {
+        await uploadBrainFile(files[0]);
       }
     });
 
     // File input change
     fileInput.addEventListener('change', async (e) => {
       const files = Array.from(e.target.files);
-      for (const file of files) {
-        await uploadBrainFile(file);
+      if (files.length > 1) {
+        await uploadBrainFiles(files);
+      } else if (files.length === 1) {
+        await uploadBrainFile(files[0]);
       }
       fileInput.value = '';
     });
@@ -2631,10 +3327,26 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  if (refreshUploadsBtn) {
+    refreshUploadsBtn.addEventListener('click', async () => {
+      refreshUploadsBtn.disabled = true;
+      try {
+        await loadRecentUploads();
+      } finally {
+        refreshUploadsBtn.disabled = false;
+      }
+    });
+  }
+
   // Load files when Knowledge tab is clicked
   document.querySelectorAll('.tab[data-tab="knowledge"]').forEach(tab => {
-    tab.addEventListener('click', () => loadBrainFiles());
+    tab.addEventListener('click', () => {
+      loadBrainFiles();
+      loadRecentUploads();
+    });
   });
+
+  loadRecentUploads();
 });
 
 async function uploadBrainFile(file) {
@@ -2657,5 +3369,34 @@ async function uploadBrainFile(file) {
     }
   } catch (e) {
     console.error('Upload error:', e);
+  }
+}
+
+
+async function uploadBrainFiles(files) {
+  const formData = new FormData();
+  files.forEach(file => formData.append('files', file));
+  formData.append('folder', 'documents');
+
+  try {
+    const res = await fetch('/api/brain/upload/batch', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      showToast(`Uploaded ${data.count} file${data.count === 1 ? '' : 's'} to knowledge`, 'success');
+      await loadBrainFiles();
+      if (Array.isArray(data.errors) && data.errors.length > 0) {
+        console.warn('Some files failed during batch upload:', data.errors);
+      }
+    } else {
+      const msg = data.error || 'Batch upload failed';
+      showToast(msg, 'error');
+    }
+  } catch (e) {
+    console.error('Batch upload error:', e);
+    showToast('Batch upload failed', 'error');
   }
 }

@@ -16,6 +16,7 @@ from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 
 from companion_ai.core import config as core_config
+from companion_ai.memory import sqlite_backend as sqlite_memory
 
 logger = logging.getLogger(__name__)
 
@@ -224,18 +225,17 @@ def add_memory(
         # Pass metadata to Mem0 (it will be attached to new memories)
         # Note: Mem0's add() might not propagate metadata to all items if extracting multiple facts,
         # but it's the best we can do at this level.
-        result = memory.add(payload, user_id=user_id, metadata=metadata)
-        
-        logger.info(f"🧠 Mem0 add raw result: {result}")
-
         try:
             result = memory.add(payload, user_id=user_id, metadata=metadata or {})
             logger.info(f"🧠 Mem0 add raw result: {result}")
         except Exception as e:
             error_text = str(e)
             if "model_decommissioned" in error_text or "has been decommissioned" in error_text:
-                logger.warning(f"🧠 Mem0 add failed due to decommissioned model '{ACTIVE_MEM0_LLM}'. Falling back to {FALLBACK_MEM0_LLM}.")
-                memory = _reset_memory(FALLBACK_MEM0_LLM)
+                logger.warning(
+                    f"🧠 Mem0 add failed due to decommissioned model configuration. "
+                    f"Falling back to Groq model '{FALLBACK_GROQ_MODEL}'."
+                )
+                memory = _reset_memory(use_ollama=False)
                 result = memory.add(payload, user_id=user_id, metadata=metadata or {})
                 logger.info(f"🧠 Mem0 add raw result (fallback): {result}")
             else:
@@ -304,6 +304,7 @@ def search_memories(
         response = memory.search(query, user_id=user_id, limit=limit)
         # Mem0 returns {'results': [...]}
         results = response.get('results', []) if isinstance(response, dict) else response
+        results = sqlite_memory.rank_memories_by_quality(results, user_scope=user_id, query=query)
         logger.info(f"🔍 Found {len(results)} memories for query: {query[:50]}")
         return results
     except Exception as e:
@@ -387,9 +388,13 @@ def build_memory_context(
             results = search_memories(user_message, user_id, limit=max_relevant)
             # Format with timestamp if available
             for r in results:
+                if r.get('quality_contradiction_state') == 'conflict':
+                    continue
                 text = r.get("memory", r.get("text", str(r)))
                 meta = r.get("metadata") or {}
                 created_at = meta.get("created_at")
+                q_label = r.get('quality_confidence_label')
+                prefix = f"[{q_label}] " if q_label else ""
                 
                 if created_at:
                     # Try to format nicely if it's ISO
@@ -397,11 +402,11 @@ def build_memory_context(
                         from datetime import datetime
                         dt = datetime.fromisoformat(created_at)
                         ts_str = dt.strftime("%Y-%m-%d %H:%M")
-                        relevant.append(f"[{ts_str}] {text}")
+                        relevant.append(f"[{ts_str}] {prefix}{text}")
                     except:
-                        relevant.append(f"[{created_at}] {text}")
+                        relevant.append(f"[{created_at}] {prefix}{text}")
                 else:
-                    relevant.append(text)
+                    relevant.append(f"{prefix}{text}")
         
         return MemoryContext(
             stats=stats,
@@ -519,6 +524,64 @@ def clear_all_memories(user_id: str = "default") -> bool:
     except Exception as e:
         logger.error(f"Failed to clear memories: {e}")
         return False
+
+
+def migrate_legacy_memories(
+    source_user_id: str,
+    target_user_id: str,
+    max_items: int = 200,
+) -> Dict[str, Any]:
+    """Migrate legacy memories from one Mem0 user scope to another.
+
+    This is used during session/profile scope rollout to copy old
+    single-user memories into new scoped IDs.
+    """
+    if not source_user_id or not target_user_id:
+        return {"migrated": 0, "skipped": 0, "error": "invalid_user_id"}
+    if source_user_id == target_user_id:
+        return {"migrated": 0, "skipped": 0, "reason": "same_scope"}
+
+    try:
+        source_memories = get_all_memories(source_user_id)
+        if not source_memories:
+            return {"migrated": 0, "skipped": 0, "reason": "source_empty"}
+
+        target_memories = get_all_memories(target_user_id)
+        existing_texts = {
+            (m.get("memory") or m.get("text") or "").strip().lower()
+            for m in target_memories
+            if (m.get("memory") or m.get("text"))
+        }
+
+        migrated = 0
+        skipped = 0
+
+        for item in source_memories[:max_items]:
+            text = (item.get("memory") or item.get("text") or "").strip()
+            if not text:
+                skipped += 1
+                continue
+
+            key = text.lower()
+            if key in existing_texts:
+                skipped += 1
+                continue
+
+            add_memory(
+                [{"role": "user", "content": text}],
+                user_id=target_user_id,
+                metadata={"migrated_from": source_user_id, "migration": "legacy_scope"},
+            )
+            existing_texts.add(key)
+            migrated += 1
+
+        logger.info(
+            f"🧬 Mem0 migration {source_user_id} -> {target_user_id}: migrated={migrated}, skipped={skipped}"
+        )
+        return {"migrated": migrated, "skipped": skipped, "source_total": len(source_memories)}
+    except Exception as e:
+        logger.error(f"Mem0 migration failed ({source_user_id} -> {target_user_id}): {e}")
+        return {"migrated": 0, "skipped": 0, "error": str(e)}
 
 
 # Tool function for 120B to use

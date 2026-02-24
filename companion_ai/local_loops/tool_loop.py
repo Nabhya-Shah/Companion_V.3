@@ -432,8 +432,8 @@ and return the result. Be precise and concise."""
     async def _light_dim(self, room: str, level: int) -> LoopResult:
         """Dim lights to specified level."""
         try:
-            from companion_ai.integrations.loxone import dim_lights
-            result = await dim_lights(room, level)
+            from companion_ai.integrations.loxone import set_brightness
+            result = await set_brightness(room, level)
             
             if result.get("success"):
                 return LoopResult.success(

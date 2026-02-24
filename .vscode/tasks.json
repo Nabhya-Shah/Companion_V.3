@@ -4,31 +4,38 @@
 		{
 			"label": "run-pytests",
 			"type": "shell",
-			"command": "pytest -q",
+			"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' -m pytest -q",
 			"group": { "kind": "test", "isDefault": true }
 		},
 		{
 			"label": "install-pytest",
 			"type": "shell",
-			"command": "pip install pytest",
+			"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' -m pip install pytest",
 			"group": "build"
+		},
+		{
+			"label": "setup-py311",
+			"type": "shell",
+			"command": "powershell -ExecutionPolicy Bypass -File .\\scripts\\setup_python311.ps1",
+			"group": "build",
+			"detail": "Install Python 3.11, recreate .venv, and install dependencies"
 		},
 		{
 			"label": "run-chat",
 			"type": "shell",
-			"command": "python chat_cli.py",
+			"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' chat_cli.py",
 			"group": { "kind": "none" }
 		},
 		{
 			"label": "run-companion",
 			"type": "shell",
-			"command": "python run_companion.py",
+			"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' run_companion.py",
 			"group": { "kind": "none" }
 		},
 		{
 			"label": "run-web",
 			"type": "shell",
-			"command": "python run_companion.py --web",
+			"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' run_companion.py --web",
 			"group": { "kind": "none" },
 			"isBackground": true,
 			"problemMatcher": [],
@@ -42,7 +49,7 @@
 		{
 			"label": "watch-logs",
 			"type": "shell",
-			"command": "python tools/watch_logs.py",
+			"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' tools/watch_logs.py",
 			"isBackground": true,
 			"problemMatcher": [],
 			"presentation": {

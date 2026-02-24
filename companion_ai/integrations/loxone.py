@@ -330,3 +330,31 @@ async def test_connection() -> Dict[str, Any]:
                 return {"success": False, "error": f"HTTP {response.status_code}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+async def get_health_status() -> Dict[str, Any]:
+    """Return configuration + connectivity health for UI status display."""
+    configured = bool(LOXONE_USER and LOXONE_PASSWORD and LOXONE_HOST)
+    if not configured:
+        return {
+            "success": False,
+            "configured": False,
+            "connected": False,
+            "message": "Loxone not configured. Set LOXONE_HOST, LOXONE_USER, and LOXONE_PASSWORD in .env.",
+        }
+
+    result = await test_connection()
+    if result.get("success"):
+        return {
+            "success": True,
+            "configured": True,
+            "connected": True,
+            "message": "Connected to Loxone Miniserver",
+        }
+
+    return {
+        "success": False,
+        "configured": True,
+        "connected": False,
+        "message": f"Loxone configured but unreachable: {result.get('error', 'Unknown error')}",
+    }

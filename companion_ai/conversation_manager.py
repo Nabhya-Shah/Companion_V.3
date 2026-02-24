@@ -71,7 +71,7 @@ class ConversationSession:
             })
             logger.info(f"Updated memory context with keywords: {keywords}")
     
-    def process_message(self, user_message: str, full_conversation_history: List[Dict] = None) -> str:
+    def process_message(self, user_message: str, full_conversation_history: List[Dict] = None, memory_user_id: str | None = None) -> str:
         """
         New conversation flow:
         1. Update memory context with relevant information
@@ -98,6 +98,8 @@ class ConversationSession:
             logger.info(f"Using last {len(recent_history)} of {len(full_conversation_history)} exchanges")
         
         # Step 3: Generate response with enhanced context
+        effective_mem0_user_id = memory_user_id or core_config.MEM0_USER_ID
+        self.memory_context['mem0_user_id'] = effective_mem0_user_id
         ai_response = generate_response(user_message, self.memory_context)
         
         # Step 4: Store conversation exchange for later processing
@@ -115,7 +117,7 @@ class ConversationSession:
                     {"role": "user", "content": user_message},
                     {"role": "assistant", "content": ai_response}
                 ]
-                mem0_add_memory(messages, user_id=core_config.MEM0_USER_ID)
+                mem0_add_memory(messages, user_id=effective_mem0_user_id)
                 logger.info("📝 Mem0: Stored conversation exchange")
                 memory_saved = True
             except Exception as e:
@@ -125,7 +127,7 @@ class ConversationSession:
         
         return ai_response, memory_saved
     
-    def process_message_streaming(self, user_message: str, full_conversation_history: List[Dict] = None):
+    def process_message_streaming(self, user_message: str, full_conversation_history: List[Dict] = None, memory_user_id: str | None = None):
         """Streaming version of process_message.
         
         Yields text chunks as they arrive. Stores response after completion.
@@ -143,6 +145,9 @@ class ConversationSession:
                 recent_turns.append(f"AI: {entry.get('ai', '')}")
             self.memory_context['recent_conversation'] = "\n".join(recent_turns)
         
+        effective_mem0_user_id = memory_user_id or core_config.MEM0_USER_ID
+        self.memory_context['mem0_user_id'] = effective_mem0_user_id
+
         # Step 3: Generate response - use orchestrator if enabled
         full_response = ""
         final_metadata = {}
@@ -205,7 +210,7 @@ class ConversationSession:
                         {"role": "user", "content": user_message},
                         {"role": "assistant", "content": full_response}
                     ]
-                    mem0_add_memory(messages, user_id=core_config.MEM0_USER_ID)
+                    mem0_add_memory(messages, user_id=effective_mem0_user_id)
                     logger.info("📝 Mem0: Stored conversation exchange (async)")
                 except Exception as e:
                     logger.warning(f"Mem0 storage failed: {e}")

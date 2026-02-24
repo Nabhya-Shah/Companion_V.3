@@ -283,14 +283,28 @@ class BrainManager:
 
 # Singleton instance
 _brain: Optional[BrainManager] = None
+_brains: dict[str, BrainManager] = {}
 
 
-def get_brain() -> BrainManager:
-    """Get the global BrainManager instance."""
+def _workspace_base_path(workspace_id: str) -> Path:
+    workspace = (workspace_id or 'default').strip() or 'default'
+    if workspace == 'default':
+        return BRAIN_BASE
+    return BRAIN_BASE / "workspaces" / workspace
+
+
+def get_brain(workspace_id: str = 'default') -> BrainManager:
+    """Get a BrainManager instance scoped to workspace_id."""
     global _brain
-    if _brain is None:
-        _brain = BrainManager()
-    return _brain
+    workspace = (workspace_id or 'default').strip() or 'default'
+    if workspace == 'default':
+        if _brain is None:
+            _brain = BrainManager()
+        return _brain
+
+    if workspace not in _brains:
+        _brains[workspace] = BrainManager(_workspace_base_path(workspace))
+    return _brains[workspace]
 
 
 # Convenience functions for tools

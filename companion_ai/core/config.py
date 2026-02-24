@@ -46,11 +46,46 @@ SERPER_API_KEY = os.getenv("SERPER_API_KEY")  # For custom web search if needed
 # Security
 API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN")  # Protects write endpoints
 
+# Tool safety policy (Sprint B)
+# When TOOL_ALLOWLIST is set, only listed tool names can execute.
+# Use '*' to allow all tools.
+TOOL_ALLOWLIST = os.getenv("TOOL_ALLOWLIST", "").strip()
+
+# Phase 3 plugin policy
+# When PLUGIN_ALLOWLIST is set, only listed plugins are enabled.
+# Use '*' or empty to enable all plugins.
+PLUGIN_ALLOWLIST = os.getenv("PLUGIN_ALLOWLIST", "").strip()
+PLUGIN_POLICY_PATH = os.getenv("PLUGIN_POLICY_PATH", os.path.join("data", "plugin_policy.json"))
+SANDBOX_MODE = os.getenv("SANDBOX_MODE", "main").strip().lower()
+
 def require_auth(token: str) -> bool:
     """Check if token is valid. Returns True if auth disabled or token matches."""
     if not API_AUTH_TOKEN:
         return True  # No auth configured = allow all
     return token == API_AUTH_TOKEN
+
+
+def get_tool_allowlist() -> set[str] | None:
+    """Return normalized tool allowlist, or None when policy is disabled.
+
+    None means no allowlist policy is applied.
+    """
+    raw = (TOOL_ALLOWLIST or "").strip()
+    if not raw:
+        return None
+    if raw == "*":
+        return None
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+def get_plugin_allowlist() -> set[str] | None:
+    """Return normalized plugin allowlist, or None when policy is disabled."""
+    raw = (PLUGIN_ALLOWLIST or "").strip()
+    if not raw:
+        return None
+    if raw == "*":
+        return None
+    return {item.strip() for item in raw.split(",") if item.strip()}
 
 # ============================================================================
 # MODEL CONFIGURATION - V4 Architecture

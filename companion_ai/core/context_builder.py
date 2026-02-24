@@ -39,7 +39,7 @@ def classify_mode(user_message: str) -> str:
         return 'conversational'
     return 'informational' if msg.endswith('?') else 'conversational'
 
-def build_system_prompt(user_message: str, recent_conversation: str = "") -> str:
+def build_system_prompt(user_message: str, recent_conversation: str = "", mem0_user_id: str | None = None) -> str:
     """Build full system prompt: static (cached) + dynamic (memory, conversation)."""
     
     # ==========================================================================
@@ -77,7 +77,7 @@ You don't need to explain that you "used a tool" - just respond naturally."""
     dynamic_parts.append(capabilities)
     
     if config.USE_MEM0:
-        memory_context = _build_mem0_context(user_message)
+        memory_context = _build_mem0_context(user_message, mem0_user_id=mem0_user_id)
     else:
         memory_context = _build_memory_context(user_message)
     
@@ -165,7 +165,7 @@ def _build_brain_context() -> str:
         pass  # Fail silently
     return ""
 
-def _build_mem0_context(user_message: str) -> str:
+def _build_mem0_context(user_message: str, mem0_user_id: str | None = None) -> str:
     """Build memory context using Mem0 hybrid memory system.
     
     Returns formatted memory context with:
@@ -180,7 +180,7 @@ def _build_mem0_context(user_message: str) -> str:
         
         context = build_memory_context(
             user_message,
-            user_id=config.MEM0_USER_ID,
+            user_id=mem0_user_id or config.MEM0_USER_ID,
             max_relevant=10  # Increased from config default to ensure better coverage
         )
         
@@ -226,14 +226,14 @@ def _build_memory_context(user_message: str) -> str:
     
     return ""
 
-def build_system_prompt_with_meta(user_message: str, recent_conversation: str = "") -> dict:
+def build_system_prompt_with_meta(user_message: str, recent_conversation: str = "", mem0_user_id: str | None = None) -> dict:
     kw = extract_keywords(user_message, limit=3)
     profile = db.get_all_profile_facts()
     summaries = db.get_relevant_summaries(kw, 3) or db.get_latest_summary(2)
     insights = db.get_relevant_insights(kw, 3) or db.get_latest_insights(2)
     
     # Build system prompt with recent conversation context
-    system_prompt = build_system_prompt(user_message, recent_conversation)
+    system_prompt = build_system_prompt(user_message, recent_conversation, mem0_user_id=mem0_user_id)
     
     memory_meta = {
         'profile_keys': list(profile.keys())[:5],

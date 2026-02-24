@@ -5,9 +5,13 @@ function calling for Groq native integration.
 """
 from __future__ import annotations
 import datetime, re, os, json
+import threading
+from contextlib import contextmanager
 from typing import Callable, Dict, Any
 from companion_ai.memory import sqlite_backend as mem
 from companion_ai.services.jobs import add_job  # Import job manager
+from companion_ai.core import config as core_config
+from companion_ai.core import metrics as core_metrics
 
 try:
     from companion_ai.memory_v2 import search_memories
@@ -21,9 +25,9 @@ except ImportError:
     requests = None
 
 try:
-    import PyPDF2
+    import pypdf
 except ImportError:
-    PyPDF2 = None
+    pypdf = None
 
 try:
     from PIL import Image
@@ -45,7 +49,34 @@ _TOOLS: Dict[str, ToolFn] = {}
 # Modern function calling schemas (JSON Schema format for Groq)
 _FUNCTION_SCHEMAS: Dict[str, Dict[str, Any]] = {}
 
-def tool(name: str, schema: Dict[str, Any] | None = None):
+# Phase 3 plugin metadata
+_TOOL_PLUGIN: Dict[str, str] = {}
+_PLUGIN_TOOLS: Dict[str, set[str]] = {}
+_EXEC_CONTEXT = threading.local()
+
+_PLUGIN_MANIFEST_HINTS: Dict[str, Dict[str, str]] = {
+    'core': {
+        'title': 'Core Skills',
+        'description': 'Built-in assistant capabilities for time, memory, files, and everyday utility actions.',
+        'risk_tier': 'low',
+    },
+    'background': {
+        'title': 'Background Automation',
+        'description': 'Asynchronous task execution and job orchestration features.',
+        'risk_tier': 'medium',
+    },
+}
+
+_SANDBOX_BLOCKED_TOOLS = {
+    'use_computer',
+    'browser_goto',
+    'browser_click',
+    'browser_type',
+    'browser_read',
+    'browser_press',
+}
+
+def tool(name: str, schema: Dict[str, Any] | None = None, plugin: str = 'core'):
     """Decorator to register both legacy and modern function-calling tools.
     
     Args:
@@ -54,6 +85,9 @@ def tool(name: str, schema: Dict[str, Any] | None = None):
     """
     def wrap(fn: ToolFn):
         _TOOLS[name] = fn
+        normalized_plugin = (plugin or 'core').strip() or 'core'
+        _TOOL_PLUGIN[name] = normalized_plugin
+        _PLUGIN_TOOLS.setdefault(normalized_plugin, set()).add(name)
         if schema:
             _FUNCTION_SCHEMAS[name] = schema
         return fn
@@ -87,7 +121,7 @@ def tool(name: str, schema: Dict[str, Any] | None = None):
             "required": ["description", "tool_name", "tool_args"]
         }
     }
-})
+}, plugin='background')
 def tool_background_task(description: str, tool_name: str = "", tool_args: Dict = None) -> str:
     """Start a background task."""
     if tool_args is None:
@@ -101,7 +135,7 @@ def tool_background_task(description: str, tool_name: str = "", tool_args: Dict 
         tool_name = args.get('tool_name', 'unknown')
         tool_args = args.get('tool_args', {})
 
-    job_id = job_manager.add_job(description, tool_name, tool_args)
+    job_id = add_job(description, tool_name, tool_args)
     return f"Started background task '{description}' with ID: {job_id}. I will notify you when it is complete. Do NOT wait for it."
 
 @tool('get_current_time', schema={
@@ -124,11 +158,254 @@ def list_tools() -> list[str]:
     """List all available tool names."""
     return sorted(_TOOLS.keys())
 
+
+def list_plugins() -> list[dict]:
+    """List available plugins and whether they are enabled by policy."""
+    allowlist = _get_workspace_plugin_allowlist()
+    source = 'workspace' if allowlist is not None else 'env'
+    if allowlist is None:
+        allowlist = core_config.get_plugin_allowlist()
+    if allowlist is None:
+        source = 'default'
+    rows = []
+    for plugin_name in sorted(_PLUGIN_TOOLS.keys()):
+        rows.append({
+            'name': plugin_name,
+            'enabled': True if allowlist is None else (plugin_name in allowlist),
+            'tools': sorted(_PLUGIN_TOOLS[plugin_name]),
+            'policy_source': source,
+        })
+    return rows
+
+
+def get_plugin_catalog() -> list[dict]:
+    """Return enriched plugin manifests for UI/admin surfaces."""
+    allowlist = _get_workspace_plugin_allowlist()
+    source = 'workspace' if allowlist is not None else 'env'
+    if allowlist is None:
+        allowlist = core_config.get_plugin_allowlist()
+    if allowlist is None:
+        source = 'default'
+
+    catalog: list[dict] = []
+    for plugin_name in sorted(_PLUGIN_TOOLS.keys()):
+        hints = _PLUGIN_MANIFEST_HINTS.get(plugin_name, {})
+        tools = sorted(_PLUGIN_TOOLS.get(plugin_name, set()))
+        tool_entries = []
+        for tool_name in tools:
+            schema = _FUNCTION_SCHEMAS.get(tool_name) or {}
+            fn_data = schema.get('function') if isinstance(schema, dict) else {}
+            description = ''
+            if isinstance(fn_data, dict):
+                description = str(fn_data.get('description') or '').strip()
+            tool_entries.append({
+                'name': tool_name,
+                'description': description,
+                'sandbox_blocked_in_restricted': tool_name in _SANDBOX_BLOCKED_TOOLS,
+            })
+
+        catalog.append({
+            'name': plugin_name,
+            'title': hints.get('title') or plugin_name.replace('_', ' ').title(),
+            'description': hints.get('description') or 'Plugin tool bundle',
+            'risk_tier': hints.get('risk_tier') or 'medium',
+            'enabled': True if allowlist is None else (plugin_name in allowlist),
+            'policy_source': source,
+            'tool_count': len(tool_entries),
+            'tools': tool_entries,
+        })
+    return catalog
+
+
+def get_plugin_policy_state() -> dict:
+    """Return normalized plugin policy state for control plane clients."""
+    policy_path = core_config.PLUGIN_POLICY_PATH
+    exists = bool(policy_path and os.path.exists(policy_path))
+    workspace_allowlist = _get_workspace_plugin_allowlist()
+    env_allowlist = core_config.get_plugin_allowlist()
+
+    if workspace_allowlist is not None:
+        effective = sorted(workspace_allowlist)
+        source = 'workspace'
+    elif env_allowlist is not None:
+        effective = sorted(env_allowlist)
+        source = 'env'
+    else:
+        effective = None
+        source = 'default'
+
+    return {
+        'path': policy_path,
+        'exists': exists,
+        'source': source,
+        'effective_enabled_plugins': effective,
+        'available_plugins': sorted(_PLUGIN_TOOLS.keys()),
+    }
+
+
+def set_workspace_plugin_policy(enabled_plugins: list[str]) -> dict:
+    """Persist workspace plugin policy (takes precedence over env policy)."""
+    policy_path = core_config.PLUGIN_POLICY_PATH
+    if not policy_path:
+        raise ValueError('PLUGIN_POLICY_PATH is not configured')
+
+    cleaned = sorted({str(item).strip() for item in (enabled_plugins or []) if str(item).strip()})
+    known_plugins = set(_PLUGIN_TOOLS.keys())
+    unknown = sorted([name for name in cleaned if name not in known_plugins])
+    if unknown:
+        raise ValueError(f"Unknown plugin(s): {', '.join(unknown)}")
+
+    parent_dir = os.path.dirname(policy_path)
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
+
+    payload = {
+        'enabled_plugins': cleaned,
+        'updated_at': datetime.datetime.now().isoformat(timespec='seconds'),
+    }
+    with open(policy_path, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    state = get_plugin_policy_state()
+    state['saved'] = True
+    return state
+
+
+def _get_workspace_plugin_allowlist() -> set[str] | None:
+    """Workspace policy has precedence over env allowlist when configured."""
+    policy_path = core_config.PLUGIN_POLICY_PATH
+    try:
+        if not policy_path or not os.path.exists(policy_path):
+            return None
+        with open(policy_path, 'r', encoding='utf-8') as f:
+            payload = json.load(f)
+        enabled = payload.get('enabled_plugins')
+        if not isinstance(enabled, list):
+            return None
+        cleaned = {str(item).strip() for item in enabled if str(item).strip()}
+        return cleaned
+    except Exception:
+        return None
+
+
+def get_execution_mode() -> str:
+    mode = getattr(_EXEC_CONTEXT, 'mode', None)
+    if mode in {'main', 'restricted'}:
+        return mode
+    return 'restricted' if core_config.SANDBOX_MODE == 'restricted' else 'main'
+
+
+def set_execution_mode(mode: str) -> None:
+    _EXEC_CONTEXT.mode = 'restricted' if str(mode).lower() == 'restricted' else 'main'
+
+
+@contextmanager
+def execution_mode(mode: str):
+    previous = get_execution_mode()
+    set_execution_mode(mode)
+    try:
+        yield
+    finally:
+        set_execution_mode(previous)
+
+
+def _is_plugin_allowed(plugin_name: str) -> bool:
+    allowlist = _get_workspace_plugin_allowlist()
+    if allowlist is None:
+        allowlist = core_config.get_plugin_allowlist()
+    if allowlist is None:
+        return True
+    return plugin_name in allowlist
+
+
+def _is_tool_allowed(name: str) -> bool:
+    if get_execution_mode() == 'restricted' and name in _SANDBOX_BLOCKED_TOOLS:
+        return False
+    plugin_name = _TOOL_PLUGIN.get(name, 'core')
+    if not _is_plugin_allowed(plugin_name):
+        return False
+    allowlist = core_config.get_tool_allowlist()
+    if allowlist is None:
+        return True
+    return name in allowlist
+
+
+def evaluate_tool_policy(name: str, mode: str | None = None) -> dict:
+    """Evaluate whether a tool is allowed under current policy.
+
+    Returns a dict with:
+      - allowed: bool
+      - reason: optional short reason code (sandbox_denied/plugin_denied/allowlist_denied/unknown_tool)
+      - message: human-friendly explanation
+    """
+    if not name:
+        return {
+            'allowed': False,
+            'reason': 'unknown_tool',
+            'message': 'Tool is not specified',
+        }
+
+    if name not in _TOOLS:
+        return {
+            'allowed': False,
+            'reason': 'unknown_tool',
+            'message': f"Tool '{name}' is not registered",
+        }
+
+    def _decision() -> dict:
+        if get_execution_mode() == 'restricted' and name in _SANDBOX_BLOCKED_TOOLS:
+            return {
+                'allowed': False,
+                'reason': 'sandbox_denied',
+                'message': f"Tool '{name}' blocked by sandbox mode (restricted)",
+            }
+
+        plugin_name = _TOOL_PLUGIN.get(name, 'core')
+        if not _is_plugin_allowed(plugin_name):
+            return {
+                'allowed': False,
+                'reason': 'plugin_denied',
+                'message': f"Tool '{name}' blocked by plugin policy (plugin='{plugin_name}')",
+            }
+
+        allowlist = core_config.get_tool_allowlist()
+        if allowlist is not None and name not in allowlist:
+            return {
+                'allowed': False,
+                'reason': 'allowlist_denied',
+                'message': f"Tool '{name}' blocked by safety allowlist policy",
+            }
+
+        return {
+            'allowed': True,
+            'reason': None,
+            'message': 'Allowed',
+        }
+
+    if mode is None:
+        return _decision()
+
+    previous = get_execution_mode()
+    set_execution_mode(mode)
+    try:
+        return _decision()
+    finally:
+        set_execution_mode(previous)
+
+
+def _blocked_tool_message(name: str) -> str:
+    decision = evaluate_tool_policy(name)
+    decision_type = decision.get('reason') or 'allowlist_denied'
+    core_metrics.record_tool(name, blocked=True, success=False, decision_type=decision_type)
+    return decision.get('message') or f"Tool '{name}' blocked by safety allowlist policy"
+
 def run_tool(name: str, arg: str) -> str:
     """Execute a tool by name with string argument (legacy interface)."""
     fn = _TOOLS.get(name)
     if not fn:
         return f'Unknown tool: {name}'
+    if not _is_tool_allowed(name):
+        return _blocked_tool_message(name)
     return fn(arg)
 
 def get_function_schemas(allowed: list[str] | None = None) -> list[Dict[str, Any]]:
@@ -137,9 +414,14 @@ def get_function_schemas(allowed: list[str] | None = None) -> list[Dict[str, Any
     Args:
         allowed: Optional list of tool names to include. If None, returns all.
     """
+    allowed_by_policy = core_config.get_tool_allowlist()
     if not allowed:
-        return list(_FUNCTION_SCHEMAS.values())
-    return [schema for name, schema in _FUNCTION_SCHEMAS.items() if name in set(allowed)]
+        names = set(_FUNCTION_SCHEMAS.keys())
+    else:
+        names = set(allowed)
+    if allowed_by_policy is not None:
+        names = names & allowed_by_policy
+    return [schema for name, schema in _FUNCTION_SCHEMAS.items() if name in names]
 
 def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
     """Execute a function call from Groq's native function calling.
@@ -155,6 +437,8 @@ def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
     tool_fn = _TOOLS.get(function_name)
     if not tool_fn:
         return f'Unknown function: {function_name}'
+    if not _is_tool_allowed(function_name):
+        return _blocked_tool_message(function_name)
     
     # Handle different function signatures
     elif function_name == 'get_current_time':
@@ -241,8 +525,14 @@ def tool_memory_search(query: str) -> str:
             # Handle both dict (Mem0 v2) and object return types if any
             text = res.get('memory', res.get('text', str(res)))
             score = res.get('score', 0)
-            date = res.get('created_at', '')[:10] if res.get('created_at') else 'Unknown date'
-            output.append(f"{i}. {text} (Date: {date}, Relevance: {score:.2f})")
+            meta = res.get('metadata') or {}
+            created_at = res.get('created_at') or meta.get('created_at')
+            date = created_at[:10] if created_at else 'Unknown date'
+            q_label = res.get('quality_confidence_label', 'medium')
+            contradiction_state = res.get('quality_contradiction_state', 'none')
+            output.append(
+                f"{i}. {text} (Date: {date}, Quality: {q_label}, State: {contradiction_state}, Relevance: {score:.2f})"
+            )
             
         return "\n".join(output)
     except Exception as e:
@@ -593,15 +883,15 @@ def tool_wikipedia(query: str) -> str:
 })
 def tool_read_pdf(file_path: str, page_number: int | None = None) -> str:
     """Read text from a PDF file."""
-    if not PyPDF2:
-        return "PDF reading unavailable. Install with: pip install PyPDF2"
+    if not pypdf:
+        return "PDF reading unavailable. Install with: pip install pypdf"
     
     if not os.path.exists(file_path):
         return f"File not found: {file_path}"
     
     try:
         with open(file_path, 'rb') as file:
-            pdf_reader = PyPDF2.PdfReader(file)
+            pdf_reader = pypdf.PdfReader(file)
             total_pages = len(pdf_reader.pages)
             
             if page_number:

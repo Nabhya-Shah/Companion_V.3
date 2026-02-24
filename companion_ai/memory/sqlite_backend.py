@@ -4,6 +4,9 @@ import os
 import json
 from datetime import datetime, timedelta, timezone
 import hashlib
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Define database path
 MODULE_DIR = os.path.dirname(__file__)
@@ -82,6 +85,25 @@ def init_db():
         )
     ''')
 
+    # Sprint C: canonical quality/provenance ledger for vector memories
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS memory_quality_ledger (
+            memory_id TEXT NOT NULL,
+            user_scope TEXT NOT NULL,
+            memory_text TEXT NOT NULL,
+            confidence REAL DEFAULT 0.70,
+            confidence_label TEXT DEFAULT 'medium',
+            reaffirmations INTEGER DEFAULT 0,
+            contradiction_state TEXT DEFAULT 'none',
+            provenance_source TEXT DEFAULT 'mem0',
+            metadata_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_validated_ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (memory_id, user_scope)
+        )
+    ''')
+
     # --- Lightweight schema upgrades (idempotent) ---
     # user_profile extra columns
     for alter in [
@@ -100,7 +122,8 @@ def init_db():
         "ALTER TABLE pending_profile_facts ADD COLUMN justification TEXT",
         "ALTER TABLE pending_profile_facts ADD COLUMN evidence TEXT",
         "ALTER TABLE pending_profile_facts ADD COLUMN status TEXT DEFAULT 'pending'",
-        "ALTER TABLE pending_profile_facts ADD COLUMN conflict_with TEXT"
+        "ALTER TABLE pending_profile_facts ADD COLUMN conflict_with TEXT",
+        "ALTER TABLE pending_profile_facts ADD COLUMN reviewed_at TIMESTAMP"
     ]:
         try:
             cursor.execute(alter)
@@ -140,6 +163,218 @@ def calculate_text_similarity(text1: str, text2: str) -> float:
     intersection = words1.intersection(words2)
     union = words1.union(words2)
     return len(intersection) / len(union)
+
+
+def _to_confidence_label(value: float) -> str:
+    if value >= 0.80:
+        return 'high'
+    if value >= 0.50:
+        return 'medium'
+    return 'low'
+
+
+def _safe_float(value: object, default: float = 0.70) -> float:
+    try:
+        parsed = float(value)
+        return max(0.0, min(1.0, parsed))
+    except Exception:
+        return default
+
+
+def upsert_memory_quality_entry(
+    memory_id: str,
+    memory_text: str,
+    user_scope: str,
+    confidence: float = 0.70,
+    reaffirmations: int = 0,
+    contradiction_state: str = 'none',
+    provenance_source: str = 'mem0',
+    metadata: dict | None = None,
+) -> bool:
+    """Create or update one quality-ledger row for a memory."""
+    if not memory_id or not user_scope:
+        return False
+
+    confidence = _safe_float(confidence, 0.70)
+    confidence_label = _to_confidence_label(confidence)
+    metadata_json = json.dumps(metadata or {})
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute('''
+            INSERT INTO memory_quality_ledger (
+                memory_id, user_scope, memory_text, confidence, confidence_label,
+                reaffirmations, contradiction_state, provenance_source, metadata_json,
+                updated_at, last_validated_ts
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(memory_id, user_scope) DO UPDATE SET
+                memory_text = excluded.memory_text,
+                confidence = excluded.confidence,
+                confidence_label = excluded.confidence_label,
+                reaffirmations = excluded.reaffirmations,
+                contradiction_state = excluded.contradiction_state,
+                provenance_source = excluded.provenance_source,
+                metadata_json = excluded.metadata_json,
+                updated_at = CURRENT_TIMESTAMP,
+                last_validated_ts = CURRENT_TIMESTAMP
+        ''', (
+            memory_id,
+            user_scope,
+            memory_text,
+            confidence,
+            confidence_label,
+            int(reaffirmations or 0),
+            contradiction_state or 'none',
+            provenance_source or 'mem0',
+            metadata_json,
+        ))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to upsert memory quality entry {memory_id}: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def bulk_sync_memory_quality_from_mem0(memories: list[dict], user_scope: str) -> int:
+    """Sync Mem0 records into quality ledger and return number of synced rows."""
+    if not memories:
+        return 0
+
+    synced = 0
+    for item in memories:
+        memory_id = item.get('id')
+        memory_text = item.get('memory', item.get('text', ''))
+        if not memory_id or not memory_text:
+            continue
+
+        meta = item.get('metadata') or {}
+        confidence = _safe_float(meta.get('confidence', 0.70), 0.70)
+        reaffirmations = int(meta.get('reaffirmations', meta.get('frequency', 0)) or 0)
+        contradiction_state = (meta.get('contradiction_state') or 'none').strip().lower()
+        if contradiction_state not in {'none', 'pending', 'conflict', 'resolved'}:
+            contradiction_state = 'none'
+
+        ok = upsert_memory_quality_entry(
+            memory_id=memory_id,
+            memory_text=memory_text,
+            user_scope=user_scope,
+            confidence=confidence,
+            reaffirmations=reaffirmations,
+            contradiction_state=contradiction_state,
+            provenance_source='mem0',
+            metadata=meta,
+        )
+        if ok:
+            synced += 1
+
+    return synced
+
+
+def get_memory_quality_map(user_scope: str) -> dict[str, dict]:
+    """Return memory_id -> quality metadata map for one scope."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute('''
+            SELECT memory_id, confidence, confidence_label, reaffirmations,
+                   contradiction_state, provenance_source, metadata_json,
+                   updated_at, last_validated_ts
+            FROM memory_quality_ledger
+            WHERE user_scope = ?
+        ''', (user_scope,))
+        rows = cur.fetchall()
+        out: dict[str, dict] = {}
+        for row in rows:
+            metadata_json = row['metadata_json']
+            try:
+                metadata = json.loads(metadata_json) if metadata_json else {}
+            except Exception:
+                metadata = {}
+            out[row['memory_id']] = {
+                'confidence': row['confidence'],
+                'confidence_label': row['confidence_label'],
+                'reaffirmations': row['reaffirmations'],
+                'contradiction_state': row['contradiction_state'],
+                'provenance_source': row['provenance_source'],
+                'metadata': metadata,
+                'updated_at': row['updated_at'],
+                'last_validated_ts': row['last_validated_ts'],
+            }
+        return out
+    finally:
+        conn.close()
+
+
+def delete_memory_quality_entry(memory_id: str, user_scope: str) -> bool:
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "DELETE FROM memory_quality_ledger WHERE memory_id = ? AND user_scope = ?",
+            (memory_id, user_scope),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception as e:
+        logger.warning(f"Failed to delete memory quality entry {memory_id}: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def rank_memories_by_quality(memories: list[dict], user_scope: str, query: str | None = None) -> list[dict]:
+    """Rank memory hits using quality-ledger signals + lexical overlap.
+
+    Returned rows keep original fields and include:
+      - quality_confidence
+      - quality_confidence_label
+      - quality_contradiction_state
+      - score (overridden blended score)
+    """
+    if not memories:
+        return []
+
+    q_tokens = {t.lower() for t in (query or '').split() if len(t) > 2}
+    quality_map = get_memory_quality_map(user_scope)
+    ranked: list[dict] = []
+
+    for item in memories:
+        row = dict(item)
+        memory_id = row.get('id')
+        text = row.get('memory', row.get('text', ''))
+        text_lower = str(text).lower()
+        base_score = _safe_float(row.get('score', 0.0), 0.0)
+
+        quality = quality_map.get(memory_id, {}) if memory_id else {}
+        confidence = _safe_float(quality.get('confidence', 0.70), 0.70)
+        contradiction_state = quality.get('contradiction_state', 'none') or 'none'
+        contradiction_state = contradiction_state.lower()
+
+        overlap = 0.0
+        if q_tokens:
+            matches = sum(1 for token in q_tokens if token in text_lower)
+            overlap = matches / len(q_tokens)
+
+        contradiction_penalty = 0.0
+        if contradiction_state == 'conflict':
+            contradiction_penalty = 1.0
+        elif contradiction_state == 'pending':
+            contradiction_penalty = 0.2
+
+        blended = base_score + (confidence * 0.60) + (overlap * 0.50) - contradiction_penalty
+
+        row['score'] = round(blended, 4)
+        row['quality_confidence'] = confidence
+        row['quality_confidence_label'] = quality.get('confidence_label', _to_confidence_label(confidence))
+        row['quality_contradiction_state'] = contradiction_state
+        ranked.append(row)
+
+    ranked.sort(key=lambda x: x.get('score', 0), reverse=True)
+    return ranked
 
 # Enhanced Profile functions
 def upsert_profile_fact(key: str, value: str, confidence: float = 1.0, source: str = 'conversation', evidence: str | None = None,
@@ -274,6 +509,18 @@ def get_all_profile_facts() -> dict:
     conn.close()
     return {row['key']: row['value'] for row in results}
 
+def update_profile_fact(key: str, value: str) -> bool:
+    """Compatibility helper for legacy update callers.
+
+    Uses upsert semantics and returns True on success.
+    """
+    try:
+        upsert_profile_fact(key, value)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update profile fact {key}: {e}")
+        return False
+
 def list_profile_facts_detailed(limit: int | None = None) -> list[dict]:
     """Return full provenance metadata for profile facts.
 
@@ -338,7 +585,13 @@ def delete_profile_fact(key: str) -> bool:
 def list_pending_profile_facts() -> list[dict]:
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, key, value, confidence, source, suggested_at FROM pending_profile_facts ORDER BY suggested_at DESC")
+    cursor.execute('''
+        SELECT id, key, value, confidence, source, suggested_at, status, conflict_with,
+               model_conf_label, justification, evidence
+        FROM pending_profile_facts
+        WHERE status IN ('pending', 'proposed_update') OR status IS NULL
+        ORDER BY suggested_at DESC
+    ''')
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
@@ -367,30 +620,38 @@ def get_stale_profile_facts(limit: int = 3) -> list[dict]:
 def approve_profile_fact(pending_id: int) -> bool:
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT key, value, confidence, source FROM pending_profile_facts WHERE id = ?", (pending_id,))
+    cursor.execute("SELECT key, value, confidence, source, status FROM pending_profile_facts WHERE id = ?", (pending_id,))
     row = cursor.fetchone()
     if not row:
         conn.close(); return False
-    key, value, confidence, source = row
+    key, value, confidence, source, status = row
+    if status in ('approved', 'rejected'):
+        conn.close(); return False
     conn.close()
     # Use normal upsert (will bypass staging if feature still enabled because of recursion guard)
     from companion_ai.core import config as core_config
     # Temporarily disable staging to commit
-    original = core_config.ENABLE_FACT_APPROVAL
+    original = getattr(core_config, 'ENABLE_FACT_APPROVAL', False)
     setattr(core_config, 'ENABLE_FACT_APPROVAL', False)
     try:
         upsert_profile_fact(key, value, confidence, source)
     finally:
         setattr(core_config, 'ENABLE_FACT_APPROVAL', original)
-    # Remove pending entry
+    # Mark approved (retain provenance trail)
     conn2 = get_db_connection(); cur2 = conn2.cursor()
-    cur2.execute("DELETE FROM pending_profile_facts WHERE id = ?", (pending_id,))
+    cur2.execute(
+        "UPDATE pending_profile_facts SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (pending_id,)
+    )
     conn2.commit(); conn2.close()
     return True
 
 def reject_profile_fact(pending_id: int) -> bool:
     conn = get_db_connection(); cur = conn.cursor()
-    cur.execute("DELETE FROM pending_profile_facts WHERE id = ?", (pending_id,))
+    cur.execute(
+        "UPDATE pending_profile_facts SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP WHERE id = ? AND status NOT IN ('approved', 'rejected')",
+        (pending_id,)
+    )
     changed = cur.rowcount > 0
     conn.commit(); conn.close(); return changed
 
@@ -784,6 +1045,7 @@ def clear_all_memory():
         cursor.execute("DELETE FROM conversation_summaries") 
         cursor.execute("DELETE FROM ai_insights")
         cursor.execute("DELETE FROM memory_consolidation")
+        cursor.execute("DELETE FROM memory_quality_ledger")
         
         conn.commit()
         print("[OK] All memory data cleared successfully")
