@@ -46,9 +46,9 @@ from companion_ai.llm.router import (                 # noqa: F401
     generate_response_streaming,
 )
 
-# --- Memory extraction ---
-from companion_ai.llm.memory_extraction import (       # noqa: F401
-    generate_summary,
-    extract_profile_facts,
-    generate_insight,
+# --- Memory extraction (canonical module: memory/ai_processor.py) ---
+from companion_ai.memory.ai_processor import (         # noqa: F401
+    extract_smart_profile_facts as extract_profile_facts,
+    generate_smart_summary as generate_summary,
+    generate_contextual_insight as generate_insight,
 )

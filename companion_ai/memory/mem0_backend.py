@@ -64,7 +64,7 @@ def _get_mem0_config(use_ollama: bool = True) -> dict:
                 "max_tokens": 1000,
             }
         }
-        logger.info(f"🦙 Mem0 using Ollama: {OLLAMA_MEM0_MODEL}")
+        logger.info(f"Mem0 using Ollama: {OLLAMA_MEM0_MODEL}")
     else:
         # Fallback to Groq
         api_key = (
@@ -81,7 +81,7 @@ def _get_mem0_config(use_ollama: bool = True) -> dict:
                 "api_key": api_key,
             }
         }
-        logger.info(f"☁️ Mem0 using Groq: {FALLBACK_GROQ_MODEL}")
+        logger.info(f"Mem0 using Groq: {FALLBACK_GROQ_MODEL}")
 
     return {
         "llm": llm_config,
@@ -124,7 +124,7 @@ def get_memory() -> Any:
         try:
             _reset_memory(use_ollama=USE_OLLAMA)
             backend = "Ollama" if USE_OLLAMA else "Groq"
-            logger.info(f"✅ Mem0 initialized with {backend} backend")
+            logger.info(f"Mem0 initialized with {backend} backend")
         except ImportError:
             logger.error("Mem0 not installed. Run: pip install mem0ai")
             raise
@@ -132,17 +132,17 @@ def get_memory() -> Any:
             logger.error(f"Failed to initialize Mem0: {e}")
             # Try falling back to Groq if Ollama fails
             if USE_OLLAMA:
-                logger.warning("🔄 Ollama failed, falling back to Groq...")
+                logger.warning("Ollama failed, falling back to Groq...")
                 try:
                     _reset_memory(use_ollama=False)
-                    logger.info("✅ Mem0 initialized with Groq fallback")
+                    logger.info("Mem0 initialized with Groq fallback")
                 except Exception as e2:
                     logger.error(f"Groq fallback also failed: {e2}")
                     raise
             else:
                 raise
     else:
-        logger.info("🔄 Reusing existing Mem0 instance")
+        logger.info("Reusing existing Mem0 instance")
     
     return _memory_instance
 
@@ -170,7 +170,7 @@ def add_memory(
 
         # Snapshot current memories to guard against unsafe UPDATE/DELETE decisions.
         pre_memories = {m.get("id"): m.get("memory", m.get("text")) for m in get_all_memories(user_id)}
-        logger.info(f"🧠 Mem0 add start: {len(pre_memories)} existing items for user {user_id}")
+        logger.info(f"Mem0 add start: {len(pre_memories)} existing items for user {user_id}")
         
         # SMART DEDUPLICATION: Extract potential fact categories from user message
         user_content = " ".join([m.get("content", "") for m in messages if m.get("role") == "user"])
@@ -209,7 +209,7 @@ def add_memory(
                         overlap = new_tokens & mem_tokens
                         # If significant overlap (>30%) and same category, skip
                         if len(overlap) >= 2 and pattern in mem_text.lower():
-                            logger.info(f"🔄 Skipping duplicate {category} fact - already have: {mem_text}")
+                            logger.info(f"Skipping duplicate {category} fact - already have: {mem_text}")
                             return {"skipped": True, "reason": f"Similar {category} fact exists", "existing": mem_text}
 
         # Add timestamp to metadata
@@ -227,19 +227,19 @@ def add_memory(
         # but it's the best we can do at this level.
         try:
             result = memory.add(payload, user_id=user_id, metadata=metadata or {})
-            logger.info(f"🧠 Mem0 add raw result: {result}")
+            logger.info(f"Mem0 add raw result: {result}")
         except Exception as e:
             error_text = str(e)
             if "model_decommissioned" in error_text or "has been decommissioned" in error_text:
                 logger.warning(
-                    f"🧠 Mem0 add failed due to decommissioned model configuration. "
+                    f"Mem0 add failed due to decommissioned model configuration. "
                     f"Falling back to Groq model '{FALLBACK_GROQ_MODEL}'."
                 )
                 memory = _reset_memory(use_ollama=False)
                 result = memory.add(payload, user_id=user_id, metadata=metadata or {})
-                logger.info(f"🧠 Mem0 add raw result (fallback): {result}")
+                logger.info(f"Mem0 add raw result (fallback): {result}")
             else:
-                logger.error(f"🧠 Mem0 add failed: {e}")
+                logger.error(f"Mem0 add failed: {e}")
                 raise
 
         # Guardrails: allow at most 1 delete, and only when texts clearly overlap; allow updates only with overlap.
@@ -275,9 +275,9 @@ def add_memory(
                 restored.append({"id": mem_id, "text": original_text, "event": event, "overlap": len(overlap)})
 
         if restored:
-            logger.warning(f"🔒 Guarded {len(restored)} unsafe DELETE/UPDATE events; restored originals: {restored}")
+            logger.warning(f"Guarded {len(restored)} unsafe DELETE/UPDATE events; restored originals: {restored}")
 
-        logger.info(f"📝 Added memories for user {user_id}: {result}")
+        logger.info(f"Added memories for user {user_id}: {result}")
         return result
     except Exception as e:
         logger.error(f"Failed to add memory: {e}")
@@ -305,7 +305,7 @@ def search_memories(
         # Mem0 returns {'results': [...]}
         results = response.get('results', []) if isinstance(response, dict) else response
         results = sqlite_memory.rank_memories_by_quality(results, user_scope=user_id, query=query)
-        logger.info(f"🔍 Found {len(results)} memories for query: {query[:50]}")
+        logger.info(f"Found {len(results)} memories for query: {query[:50]}")
         return results
     except Exception as e:
         logger.error(f"Failed to search memories: {e}")
@@ -465,7 +465,7 @@ def delete_memory(memory_id: str) -> bool:
     try:
         memory = get_memory()
         memory.delete(memory_id)
-        logger.info(f"🗑️ Deleted memory: {memory_id}")
+        logger.info(f"Deleted memory: {memory_id}")
         return True
     except Exception as e:
         logger.error(f"Failed to delete memory: {e}")
@@ -486,7 +486,7 @@ def update_memory(memory_id: str, new_data: str) -> bool:
         memory = get_memory()
         # Mem0's update method takes memory_id and new data
         memory.update(memory_id, data=new_data)
-        logger.info(f"✏️ Updated memory {memory_id}: {new_data[:50]}...")
+        logger.info(f"Updated memory {memory_id}: {new_data[:50]}...")
         return True
     except Exception as e:
         logger.error(f"Failed to update memory: {e}")
@@ -576,7 +576,7 @@ def migrate_legacy_memories(
             migrated += 1
 
         logger.info(
-            f"🧬 Mem0 migration {source_user_id} -> {target_user_id}: migrated={migrated}, skipped={skipped}"
+            f"Mem0 migration {source_user_id} -> {target_user_id}: migrated={migrated}, skipped={skipped}"
         )
         return {"migrated": migrated, "skipped": skipped, "source_total": len(source_memories)}
     except Exception as e:
@@ -603,7 +603,7 @@ def memory_search_tool(query: str, user_id: str = "default") -> str:
     if not results:
         return f"No memories found for: {query}"
     
-    lines = [f"🔍 Memory Search: '{query}'", ""]
+    lines = [f"Memory Search: '{query}'", ""]
     for i, r in enumerate(results, 1):
         mem = r.get("memory", r.get("text", str(r)))
         score = r.get("score", 0)

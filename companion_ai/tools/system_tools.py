@@ -111,7 +111,7 @@ def tool_memory_search(query: str) -> str:
         if not results:
             return f"No memories found for '{query}'."
 
-        output = [f"🧠 Memory Search Results for '{query}':"]
+        output = [f"Memory Search Results for '{query}':"]
         for i, res in enumerate(results, 1):
             text = res.get('memory', res.get('text', str(res)))
             score = res.get('score', 0)

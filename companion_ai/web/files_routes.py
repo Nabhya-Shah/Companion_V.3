@@ -146,6 +146,21 @@ def _save_uploaded_file(file, analyze_images: bool = True):
         'url': f'/api/upload/{file_id}',
         'analysis': analysis,
     }
+
+    # Auto-index uploaded documents into brain index for unified search
+    if not is_image:
+        try:
+            from companion_ai.brain_index import get_brain_index
+            index = get_brain_index()
+            store_path = f"uploads/{safe_filename}"
+            chunks = index.index_file(Path(file_path), store_path=store_path)
+            if chunks:
+                logger.info(f"Auto-indexed upload {safe_filename}: {chunks} chunks")
+                payload['indexed'] = True
+                payload['chunks'] = chunks
+        except Exception as e:
+            logger.warning(f"Auto-index failed for {safe_filename}: {e}")
+
     return payload, None, 200
 
 
@@ -362,7 +377,7 @@ def _save_brain_file(file, target_dir: str, subfolder: str, index):
 
     file.save(filepath)
     chunks = index.index_file(Path(filepath))
-    logger.info(f"📄 Uploaded to brain: {filename} ({chunks} chunks indexed)")
+    logger.info(f"Uploaded to brain: {filename} ({chunks} chunks indexed)")
     return {
         'success': True,
         'filename': filename,
@@ -398,7 +413,7 @@ def brain_upload():
         index = get_brain_index()
         chunks = index.index_file(Path(filepath))
 
-        logger.info(f"📄 Uploaded to brain: {filename} ({chunks} chunks indexed)")
+        logger.info(f"Uploaded to brain: {filename} ({chunks} chunks indexed)")
 
         return jsonify({
             'success': True,

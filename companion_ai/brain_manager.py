@@ -247,7 +247,7 @@ class BrainManager:
         for file_path, description in FILE_DESCRIPTIONS.items():
             full_path = self.base_path / file_path
             exists = full_path.exists() if not file_path.endswith('/') else full_path.is_dir()
-            status = "✓" if exists else "○"
+            status = "" if exists else ""
             lines.append(f"- {status} `{file_path}`: {description}")
         
         return "\n".join(lines)

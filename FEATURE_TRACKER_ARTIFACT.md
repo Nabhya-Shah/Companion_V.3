@@ -1,6 +1,6 @@
 # Companion AI Feature Tracker
 
-Date: 2026-02-24
+Date: 2026-02-26
 
 This artifact tracks **user-visible functionality** progress in plain language.
 
@@ -9,10 +9,10 @@ This artifact tracks **user-visible functionality** progress in plain language.
 | Component | State | Notes |
 |-----------|-------|-------|
 | Orchestrator | **Active** (`USE_ORCHESTRATOR=true` default) | Activated in P5-B with fallback resilience |
-| Local Loops | Built, delegation path wired | Full orchestrator→loop routing pending (P5-D) |
-| Quick Tool Path | Not yet implemented | Phase 5-D adds Groq zero-shot routing |
-| Unified Knowledge | 5 separate backends | Phase 5-D merges into single interface |
-| Persona Evolution | Service exists, minimal wiring | Phase 5-E audits and connects to orchestrator |
+| Local Loops | Built, delegation path wired | Full orchestrator→loop routing done |
+| Quick Tool Path | Not yet implemented | Future optimisation |
+| Unified Knowledge | **Single `knowledge.py` entry point** | P5-D merged backends, `remember()` / `recall()` |
+| Persona Evolution | **Active with triggers** | P5-E: periodic, memory-event, session-end triggers wired |
 | Web Layer | **Split into Flask Blueprints** | 7 blueprints in `companion_ai/web/` (P5-C) |
 | LLM Interface | **Split into `llm/` package** | 5 submodules in `companion_ai/llm/` (P5-C) |
 | Tools | **Split into `tools/` package** | 7 files in `companion_ai/tools/` (P5-C) |
@@ -98,5 +98,7 @@ This artifact tracks **user-visible functionality** progress in plain language.
 | P5-07 | Web blueprint split | Cleaner server code, easier navigation | Same endpoints, `web/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
 | P5-08 | Tools directory split | Modular tool organization | Same tool surface, `tools/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
 | P5-09 | LLM directory split | Separated provider concerns | Same LLM behavior, `llm/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
+| P5-10 | Unified knowledge system | Single `remember`/`recall` API for all memory backends | `knowledge.py` entry point, confidence-based facts, 144 tests pass | ✅ Completed (P5-D) |
+| P5-11 | Persona foundation | Personality evolves with use, not just on shutdown | `PersonaState` singleton, 3 trigger types, orchestrator integration, 178 tests pass | ✅ Completed (P5-E) |
 | P5-10 | Unified knowledge interface | One "remember/recall" regardless of backend | Single entry point for all knowledge ops | ⏳ Not started (P5-D) |
 | P5-11 | Persona orchestrator integration | Companion personality in every response | Persona traits reflected in orchestrator context | ⏳ Not started (P5-E) |

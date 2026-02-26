@@ -21,7 +21,7 @@ from companion_ai.conversation_manager import ConversationSession
 from companion_ai.core import config as core_config
 from companion_ai.core import metrics
 from companion_ai.memory.sqlite_backend import get_memory_stats
-from companion_ai.memory import mem0_backend as memory_v2
+from companion_ai.memory import mem0_backend as mem0
 from companion_ai.services import jobs as job_manager_module
 from companion_ai.web import state
 
@@ -68,7 +68,7 @@ def shutdown():
     if not core_config.require_auth(token):
         return jsonify({'error': 'Unauthorized'}), 401
 
-    logger.info("🛑 Shutdown requested. Saving session log and triggering persona evolution...")
+    logger.info("Shutdown requested. Saving session log and triggering persona evolution...")
 
     # Save session log to brain folder
     try:
@@ -109,10 +109,10 @@ def shutdown():
 
         log_file = f"logs/session_{session_date}.md"
         brain.write(log_file, log_content + "---\n\n", append=True)
-        logger.info(f"📝 Session log saved: {log_file}")
+        logger.info(f"Session log saved: {log_file}")
 
     except Exception as e:
-        logger.error(f"❌ Failed to save session log: {e}")
+        logger.error(f"Failed to save session log: {e}")
 
     # Trigger Persona Evolution
     try:
@@ -120,11 +120,11 @@ def shutdown():
         history = state.conversation_session.conversation_history
         if history:
             _persona_evolve(history)
-            logger.info("✅ Persona evolution complete.")
+            logger.info("Persona evolution complete.")
         else:
-            logger.info("ℹ️ No conversation history to analyze.")
+            logger.info("No conversation history to analyze.")
     except Exception as e:
-        logger.error(f"❌ Persona evolution failed during shutdown: {e}")
+        logger.error(f"Persona evolution failed during shutdown: {e}")
 
     # Shutdown Flask
     func = request.environ.get('werkzeug.server.shutdown')
@@ -534,7 +534,7 @@ def get_graph():
         if core_config.USE_MEM0:
             try:
                 _, _, mem0_user_id, _, _ = state._get_active_session_state()
-                mem0_memories = memory_v2.get_all_memories(user_id=mem0_user_id)
+                mem0_memories = mem0.get_all_memories(user_id=mem0_user_id)
                 from companion_ai.memory.knowledge_graph import build_semantic_graph_from_memories
                 graph_data = build_semantic_graph_from_memories(mem0_memories, threshold=0.6)
                 response = jsonify(graph_data)

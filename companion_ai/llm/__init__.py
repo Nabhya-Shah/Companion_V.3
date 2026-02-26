@@ -47,10 +47,11 @@ from companion_ai.llm.router import (
 )
 
 # --- Memory extraction ---
-from companion_ai.llm.memory_extraction import (
-    generate_summary,
-    extract_profile_facts,
-    generate_insight,
+# --- Memory extraction (canonical module: memory/ai_processor.py) ---
+from companion_ai.memory.ai_processor import (
+    extract_smart_profile_facts as extract_profile_facts,
+    generate_smart_summary as generate_summary,
+    generate_contextual_insight as generate_insight,
 )
 
 __all__ = [
@@ -83,8 +84,8 @@ __all__ = [
     # router
     "generate_response",
     "generate_response_streaming",
-    # memory_extraction
-    "generate_summary",
+    # memory_extraction (from ai_processor)
     "extract_profile_facts",
+    "generate_summary",
     "generate_insight",
 ]

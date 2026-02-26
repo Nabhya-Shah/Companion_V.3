@@ -95,7 +95,7 @@ class KnowledgeGraph:
             try:
                 # Use lightweight model: 80MB, fast, accurate
                 self.semantic_model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
-                logger.info("✅ Semantic matching enabled (all-MiniLM-L6-v2)")
+                logger.info("Semantic matching enabled (all-MiniLM-L6-v2)")
             except Exception as e:
                 logger.warning(f"Failed to load semantic model: {e}")
                 self.semantic_model = None
@@ -111,7 +111,7 @@ class KnowledgeGraph:
                     data = pickle.load(f)
                     self.graph = data.get('graph', nx.DiGraph())
                     self.embeddings = data.get('embeddings', {})
-                logger.info(f"✅ Loaded knowledge graph from {GRAPH_PATH}")
+                logger.info(f"Loaded knowledge graph from {GRAPH_PATH}")
             except Exception as e:
                 logger.error(f"Failed to load graph: {e}")
                 self.graph = nx.DiGraph()
@@ -127,7 +127,7 @@ class KnowledgeGraph:
             }
             with open(GRAPH_PATH, 'wb') as f:
                 pickle.dump(data, f)
-            logger.info(f"💾 Saved knowledge graph to {GRAPH_PATH}")
+            logger.info(f"Saved knowledge graph to {GRAPH_PATH}")
         except Exception as e:
             logger.error(f"Failed to save graph: {e}")
     
@@ -158,13 +158,13 @@ class KnowledgeGraph:
                 
                 # 1. Case-insensitive exact match
                 if entity_lower == candidate_lower:
-                    logger.info(f"🔍 Exact match: '{entity_name}' → '{candidate}'")
+                    logger.info(f"Exact match: '{entity_name}' → '{candidate}'")
                     return candidate
                 
                 # 2. Fuzzy string matching (fast, catches typos)
                 ratio = SequenceMatcher(None, entity_lower, candidate_lower).ratio()
                 if ratio >= 0.70:  # 70% similar
-                    logger.info(f"🔍 Fuzzy match ({ratio:.0%}): '{entity_name}' → '{candidate}'")
+                    logger.info(f"Fuzzy match ({ratio:.0%}): '{entity_name}' → '{candidate}'")
                     return candidate
             
             # 3. Semantic similarity across ALL types (abbreviations might be misclassified)
@@ -191,7 +191,7 @@ class KnowledgeGraph:
                         # and variations (Python→Python programming language: 0.841)
                         # Still avoids false matches (Java→JavaScript: 0.404)
                         if similarity >= 0.80:
-                            logger.info(f"🧠 Semantic match ({similarity:.0%}, cross-type {entity_type}→{candidate_type}): '{entity_name}' → '{candidate}'")
+                            logger.info(f"Semantic match ({similarity:.0%}, cross-type {entity_type}→{candidate_type}): '{entity_name}' → '{candidate}'")
                             return candidate
                 except Exception as e:
                     logger.debug(f"Semantic matching failed: {e}")
@@ -219,9 +219,9 @@ class KnowledgeGraph:
                     if entity.name not in aliases:
                         aliases.append(entity.name)
                         node_data['aliases'] = aliases
-                    logger.info(f"🔄 Merged '{entity.name}' → '{existing_match}' (alias added)")
+                    logger.info(f"Merged '{entity.name}' → '{existing_match}' (alias added)")
                 else:
-                    logger.info(f"🔄 Updated entity: {existing_match}")
+                    logger.info(f"Updated entity: {existing_match}")
             
             elif self.graph.has_node(entity.name):
                 # Update existing entity (exact name match)
@@ -229,13 +229,13 @@ class KnowledgeGraph:
                 node_data['last_mentioned'] = now
                 node_data['mention_count'] = node_data.get('mention_count', 0) + 1
                 node_data['attributes'].update(entity.attributes)
-                logger.info(f"🔄 Updated entity: {entity.name}")
+                logger.info(f"Updated entity: {entity.name}")
             else:
                 # Add new entity
                 entity.first_mentioned = now
                 entity.last_mentioned = now
                 self.graph.add_node(entity.name, **entity.to_dict())
-                logger.info(f"✨ New entity: {entity.name} ({entity.entity_type})")
+                logger.info(f"New entity: {entity.name} ({entity.entity_type})")
             
             self._save_graph()
             return True
@@ -260,7 +260,7 @@ class KnowledgeGraph:
                 edge_data['strength'] = min(1.0, edge_data.get('strength', 0.5) + 0.1)
                 edge_data['last_updated'] = now
                 edge_data['contexts'].append(rel.context)
-                logger.info(f"🔗 Strengthened: {rel.source} -{rel.relation_type}→ {rel.target}")
+                logger.info(f"Strengthened: {rel.source} -{rel.relation_type}→ {rel.target}")
             else:
                 # Add new relationship
                 rel.timestamp = now
@@ -268,7 +268,7 @@ class KnowledgeGraph:
                 rel_dict['contexts'] = [rel.context]
                 rel_dict['last_updated'] = now
                 self.graph.add_edge(rel.source, rel.target, **rel_dict)
-                logger.info(f"✨ New relationship: {rel.source} -{rel.relation_type}→ {rel.target}")
+                logger.info(f"New relationship: {rel.source} -{rel.relation_type}→ {rel.target}")
             
             self._save_graph()
             return True
@@ -507,11 +507,11 @@ def clear_graph():
     if os.path.exists(GRAPH_PATH):
         try:
             os.remove(GRAPH_PATH)
-            logger.info(f"🗑️ Deleted knowledge graph file: {GRAPH_PATH}")
+            logger.info(f"Deleted knowledge graph file: {GRAPH_PATH}")
         except Exception as e:
             logger.error(f"Failed to delete graph file: {e}")
             
-    logger.info("🧹 Knowledge graph cleared")
+    logger.info("Knowledge graph cleared")
 
 
 def extract_entities_and_relationships(user_message: str, ai_response: str) -> Tuple[List[Entity], List[Relationship]]:
@@ -593,7 +593,7 @@ Return JSON only:"""
                     timestamp=""  # Will be set by KnowledgeGraph
                 ))
             
-            logger.info(f"📊 Extracted {len(entities)} entities, {len(relationships)} relationships")
+            logger.info(f"Extracted {len(entities)} entities, {len(relationships)} relationships")
             return entities, relationships
             
     except Exception as e:
@@ -605,24 +605,24 @@ Return JSON only:"""
 def add_conversation_to_graph(user_message: str, ai_response: str):
     """Process conversation and add to knowledge graph"""
     try:
-        logger.info(f"🔍 Processing conversation for graph: User={user_message[:50]}... AI={ai_response[:50]}...")
+        logger.info(f"Processing conversation for graph: User={user_message[:50]}... AI={ai_response[:50]}...")
         kg = get_knowledge_graph()
         
         # Extract entities and relationships
         entities, relationships = extract_entities_and_relationships(user_message, ai_response)
         
-        logger.info(f"📊 Extracted {len(entities)} entities, {len(relationships)} relationships")
+        logger.info(f"Extracted {len(entities)} entities, {len(relationships)} relationships")
         
         # Add to graph
         for entity in entities:
             success = kg.add_entity(entity)
-            logger.info(f"  ➜ Entity '{entity.name}' added: {success}")
+            logger.info(f"  Entity '{entity.name}' added: {success}")
         
         for rel in relationships:
             success = kg.add_relationship(rel)
-            logger.info(f"  ➜ Relationship '{rel.source}→{rel.target}' added: {success}")
+            logger.info(f"  Relationship '{rel.source}→{rel.target}' added: {success}")
         
-        logger.info(f"✅ Graph now has {kg.graph.number_of_nodes()} entities, {kg.graph.number_of_edges()} relationships")
+        logger.info(f"Graph now has {kg.graph.number_of_nodes()} entities, {kg.graph.number_of_edges()} relationships")
         
     except Exception as e:
         logger.error(f"Failed to add conversation to graph: {e}")
@@ -783,9 +783,9 @@ def build_semantic_graph_from_memories(memories: List[Dict], threshold: float = 
                             'type': 'text_overlap'
                         })
 
-    logger.info(f"🔗 Built semantic graph: {len(nodes)} nodes, {len(links)} links")
+    logger.info(f"Built semantic graph: {len(nodes)} nodes, {len(links)} links")
     return {'nodes': nodes, 'links': links}
 
 
 # Initialize on import
-logger.info("📊 Knowledge Graph Memory System loaded")
+logger.info("Knowledge Graph Memory System loaded")

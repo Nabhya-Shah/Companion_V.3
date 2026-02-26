@@ -333,21 +333,21 @@ Goal: activate the orchestrator-first architecture, clean dead code, split monol
 | ~~Split `tools.py` → `tools/` directory (registry + domain modules)~~ | 1-2 weeks | ✅ Same tool surface, 7 files, all 120 tests pass |
 | ~~Split `llm_interface.py` → `llm/` directory (providers + router)~~ | 1-2 weeks | ✅ Same LLM behavior, 5 submodules, all 120 tests pass |
 
-### Track D: Unified Knowledge System
+### Track D: Unified Knowledge System ✅ COMPLETE
 
 | Task | Effort | Success Criteria |
 |---|---:|---|
-| Merge brain folder + uploads + brain index into single doc pipeline | 1-2 weeks | One upload/index/search flow |
-| Merge `pending_profile_facts` into main confidence system | 1 week | Low-confidence = flagged, no separate pending table |
-| Create single knowledge entry point (`remember` / `recall`) | 1 week | Orchestrator has one API for all knowledge ops |
+| ~~Merge brain folder + uploads + brain index into single doc pipeline~~ | 1-2 weeks | ✅ Auto-index uploads, single doc flow |
+| ~~Merge `pending_profile_facts` into main confidence system~~ | 1 week | ✅ Low-confidence = flagged, no separate pending table |
+| ~~Create single knowledge entry point (`remember` / `recall`)~~ | 1 week | ✅ `knowledge.py` with `remember()` / `recall()` / `recall_context()` |
 
-### Track E: Persona Foundation
+### Track E: Persona Foundation ✅ COMPLETE
 
 | Task | Effort | Success Criteria |
 |---|---:|---|
-| Audit current persona system (`persona.py` + `companion.yaml`) | 2-3 days | Clear understanding of what evolves and how |
-| Define persona evolution triggers (conversation patterns, memory events) | 1 week | Documented trigger → evolution mapping |
-| Wire persona state into orchestrator context | 2-3 days | Orchestrator responses reflect persona traits |
+| ~~Audit current persona system (`persona.py` + `companion.yaml`)~~ | 2-3 days | ✅ Identified dead code, missing triggers, wholesale-replace bug |
+| ~~Define persona evolution triggers (conversation patterns, memory events)~~ | 1 week | ✅ Periodic (every 25 msgs), memory-event (importance≥0.7), session-end |
+| ~~Wire persona state into orchestrator context~~ | 2-3 days | ✅ Orchestrator routing + synthesis prompts include persona traits |
 
 ### Proposed Sprint Order (Phase 5)
 
@@ -410,13 +410,12 @@ Goal: evolve into a proactive but policy-bounded intelligence layer.
 - **Persona**: responses reflect evolving personality traits grounded in conversation history.
 - **Velocity**: each slice ships with tests and artifact updates in the same change window.
 
-## Immediate Next Execution Window (Phase 5 Continuation)
+## Immediate Next Execution Window (Phase 6)
 
-1. **P5-A, P5-B, P5-C**: ✅ Complete. Spring clean, orchestrator activation, and all three monolith splits done.
-2. Next up: **P5-D** (knowledge unification — doc pipeline, confidence merge, single entry point).
-3. Then **P5-E** (persona foundation — audit, triggers, orchestrator integration).
-4. Keep this roadmap + `FEATURE_TRACKER_ARTIFACT.md` synchronized per delivered slice.
-5. Promote only validated slices into release-profile checks.
+1. **P5-A, P5-B, P5-C, P5-D, P5-E**: ✅ Complete. All Phase 5 tracks done.
+2. Next up: **Phase 6** — Daily-Life Intelligence.
+3. Keep this roadmap + `FEATURE_TRACKER_ARTIFACT.md` synchronized per delivered slice.
+4. Promote only validated slices into release-profile checks.
 
 ## Definition of Done (for Phase 2)
 

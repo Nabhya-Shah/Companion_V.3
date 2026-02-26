@@ -62,7 +62,7 @@ def test_memory_endpoint_uses_scoped_user_id(monkeypatch):
         captured["user_id"] = user_id
         return []
 
-    monkeypatch.setattr(web_companion.memory_v2, "get_all_memories", fake_get_all_memories)
+    monkeypatch.setattr(web_companion.mem0, "get_all_memories", fake_get_all_memories)
 
     client = app.test_client()
     res = client.get("/api/memory?session_id=sessB&profile_id=work")
@@ -77,13 +77,13 @@ def test_clear_memory_uses_scoped_user_id(monkeypatch):
     monkeypatch.setattr(web_companion.core_config, "USE_MEM0", True)
     monkeypatch.setattr(web_companion.core_config, "API_AUTH_TOKEN", "secret")
     monkeypatch.setattr(_mem_mod, "clear_all_memory", lambda: None)
-    monkeypatch.setattr(web_companion.memory_v2, "_reset_memory", lambda: None)
+    monkeypatch.setattr(web_companion.mem0, "_reset_memory", lambda: None)
 
     def fake_clear_all_memories(user_id="default"):
         captured["user_id"] = user_id
         return True
 
-    monkeypatch.setattr(web_companion.memory_v2, "clear_all_memories", fake_clear_all_memories)
+    monkeypatch.setattr(web_companion.mem0, "clear_all_memories", fake_clear_all_memories)
 
     client = app.test_client()
     res = client.post(

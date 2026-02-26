@@ -68,7 +68,7 @@ def tool_read_pdf(file_path: str, page_number: int | None = None) -> str:
                     return f"Page {page_number} out of range. PDF has {total_pages} pages."
                 page = pdf_reader.pages[page_number - 1]
                 text = page.extract_text()
-                return f"📄 PDF: {os.path.basename(file_path)} - Page {page_number}/{total_pages}\n\n{text}"
+                return f"PDF: {os.path.basename(file_path)} - Page {page_number}/{total_pages}\n\n{text}"
             else:
                 pages_to_read = min(3, total_pages)
                 texts = []
@@ -78,7 +78,7 @@ def tool_read_pdf(file_path: str, page_number: int | None = None) -> str:
                     if page_text.strip():
                         texts.append(f"=== Page {i+1} ===\n{page_text}")
                 result = '\n\n'.join(texts)
-                return f"📄 PDF: {os.path.basename(file_path)} ({total_pages} pages total, showing first {pages_to_read})\n\n{result}"
+                return f"PDF: {os.path.basename(file_path)} ({total_pages} pages total, showing first {pages_to_read})\n\n{result}"
 
     except Exception as e:
         return f"Error reading PDF: {str(e)[:200]}"
@@ -120,7 +120,7 @@ def tool_read_image(file_path: str) -> str:
         if not text.strip():
             return f"No text detected in image: {os.path.basename(file_path)}"
 
-        return f"📷 Image OCR: {os.path.basename(file_path)}\n\n{text}"
+        return f"Image OCR: {os.path.basename(file_path)}\n\n{text}"
 
     except pytesseract.TesseractNotFoundError:
         return "Tesseract OCR not installed. Download from: https://github.com/tesseract-ocr/tesseract/releases"
@@ -168,7 +168,7 @@ def tool_read_docx(file_path: str) -> str:
         if len(text) > 3000:
             text = text[:2997] + '...'
 
-        return f"📝 Word Document: {os.path.basename(file_path)}\n\n{text}"
+        return f"Word Document: {os.path.basename(file_path)}\n\n{text}"
 
     except Exception as e:
         return f"Error reading document: {str(e)[:200]}"
@@ -229,7 +229,7 @@ def tool_list_files(directory: str, file_type: str | None = None) -> str:
                 by_ext[ext] = []
             by_ext[ext].append(f)
 
-        result = [f"📁 Files in {directory}:\n"]
+        result = [f"Files in {directory}:\n"]
         for ext, file_list in sorted(by_ext.items()):
             result.append(f"\n{ext.upper()} files ({len(file_list)}):")
             for f in sorted(file_list)[:20]:
@@ -311,7 +311,7 @@ def tool_find_file(filename: str, file_type: str | None = None) -> str:
 
     result = [f"Found {len(matches)} file(s) matching '{filename}':"]
     for m in matches[:10]:
-        result.append(f"\n📄 {m['name']}")
+        result.append(f"\n{m['name']}")
         result.append(f"   Location: {m['dir']}/")
         result.append(f"   Size: {m['size']}")
         result.append(f"   Full path: {m['path']}")

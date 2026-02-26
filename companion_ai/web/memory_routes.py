@@ -14,7 +14,7 @@ from companion_ai.memory.sqlite_backend import (
     bulk_sync_memory_quality_from_mem0, get_memory_quality_map,
     delete_memory_quality_entry, upsert_memory_quality_entry,
 )
-from companion_ai.memory import mem0_backend as memory_v2
+from companion_ai.memory import mem0_backend as mem0
 from companion_ai.conversation_manager import ConversationSession
 from companion_ai.web import state
 
@@ -33,7 +33,7 @@ def get_memory():
         # --- Mem0 as primary source ---
         if core_config.USE_MEM0:
             try:
-                mem0_memories = memory_v2.get_all_memories(user_id=mem0_user_id)
+                mem0_memories = mem0.get_all_memories(user_id=mem0_user_id)
                 bulk_sync_memory_quality_from_mem0(mem0_memories, user_scope=mem0_user_id)
                 quality_map = get_memory_quality_map(mem0_user_id)
 
@@ -183,8 +183,8 @@ def clear_memory():
         # Clear Mem0 vector memory
         if core_config.USE_MEM0:
             try:
-                memory_v2.clear_all_memories(user_id=mem0_user_id)
-                memory_v2._reset_memory()
+                mem0.clear_all_memories(user_id=mem0_user_id)
+                mem0._reset_memory()
                 logger.info("Cleared Mem0 vector memory and reset instance")
             except Exception as mem0_err:
                 logger.error(f"Failed to clear Mem0: {mem0_err}")
@@ -224,7 +224,7 @@ def delete_fact(key: str):
 
         if core_config.USE_MEM0:
             try:
-                mem0_deleted = memory_v2.delete_memory(key)
+                mem0_deleted = mem0.delete_memory(key)
                 if mem0_deleted:
                     deleted = True
                     delete_memory_quality_entry(key, user_scope=mem0_user_id)
@@ -264,7 +264,7 @@ def update_fact(key: str):
 
         if core_config.USE_MEM0:
             try:
-                updated = memory_v2.update_memory(key, new_value)
+                updated = mem0.update_memory(key, new_value)
                 if updated:
                     prior_quality = get_memory_quality_map(mem0_user_id).get(key, {})
                     upsert_memory_quality_entry(

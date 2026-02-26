@@ -1,5 +1,5 @@
 import os, tempfile
-from companion_ai import memory as mem
+from companion_ai.memory import sqlite_backend as mem
 
 # Basic smoke test for summary/insight dedup mechanics
 

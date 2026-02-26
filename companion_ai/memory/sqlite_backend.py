@@ -379,117 +379,55 @@ def rank_memories_by_quality(memories: list[dict], user_scope: str, query: str |
 # Enhanced Profile functions
 def upsert_profile_fact(key: str, value: str, confidence: float = 1.0, source: str = 'conversation', evidence: str | None = None,
                         model_conf_label: str | None = None, justification: str | None = None):
-    """Insert or update profile fact.
+    """Insert or update profile fact with confidence scoring.
 
-    Extended behaviors:
-      - If approval workflow enabled, optionally stage unless auto-approve threshold met.
-      - If fact exists with SAME value -> reaffirm (boost confidence, increment reaffirmations, update last_seen_ts).
-      - If fact exists with DIFFERENT value -> stage as proposed update (conflict) unless high-confidence override.
+    All facts go directly into ``user_profile``.  Facts with
+    ``confidence < FACT_CONFIDENCE_THRESHOLD`` are surfaced as "pending
+    review" via ``list_pending_profile_facts()`` — no separate staging table.
+
+    Behaviors:
+      - Same key + same value → reaffirm (boost confidence, increment reaffirmations).
+      - Same key + different value → update if new confidence >= existing, else skip.
+      - New key → insert.
     """
-    from companion_ai.core import config as core_config
-    # Optional second-pass verification (pre-staging) for low-confidence facts
-    try:
-        if getattr(core_config, 'VERIFY_FACTS_SECOND_PASS', False) and confidence < 0.75:
-            # Lightweight guard to avoid repeated verification loops
-            from companion_ai.llm_interface import generate_model_response
-            verifier_model = getattr(core_config, 'PRIMARY_MODEL', core_config.DEFAULT_CONVERSATION_MODEL)
-            prompt = (
-                f"Evaluate the truthfulness and specificity of this proposed user fact.\n"
-                f"Fact: {key} = {value}\n"
-                "Return STRICT JSON: {\"verdict\": \"accept\"|\"uncertain\"|\"reject\", \"reason\": str, \"suggest_confidence\": 0.0-1.0}." )
-            try:
-                raw = generate_model_response(prompt, "You are a JSON fact verifier.", verifier_model)
-                import re, json as _json
-                m = re.search(r'\{.*\}', raw, re.DOTALL)
-                if m:
-                    parsed = _json.loads(m.group())
-                    verdict = parsed.get('verdict','uncertain')
-                    suggest_conf = float(parsed.get('suggest_confidence', confidence)) if isinstance(parsed.get('suggest_confidence'), (int,float,str)) else confidence
-                    suggest_conf = max(0.0, min(1.0, suggest_conf))
-                    if verdict == 'reject':
-                        print(f"❌ Fact rejected by verifier: {key}={value} reason={parsed.get('reason')}")
-                        return  # drop silently
-                    if verdict == 'uncertain':
-                        # keep but cap confidence
-                        confidence = min(confidence, suggest_conf, 0.55)
-                    elif verdict == 'accept':
-                        confidence = max(confidence, suggest_conf)
-                    justification = (justification or '') + f" [verifier: {verdict} {parsed.get('reason','')[:120]}]"
-            except Exception as ve:
-                print(f"Verifier error (continuing): {ve}")
-    except Exception:
-        pass
-
-    if getattr(core_config, 'ENABLE_FACT_APPROVAL', False):
-        auto = getattr(core_config, 'FACT_AUTO_APPROVE', False) and confidence >= getattr(core_config, 'FACT_AUTO_APPROVE_MIN_CONF', 0.85)
-        # Check existing current value to detect conflict early
-        conn_chk = get_db_connection(); cur_chk = conn_chk.cursor()
-        try:
-            cur_chk.execute("SELECT value, confidence FROM user_profile WHERE key = ?", (key,))
-            row = cur_chk.fetchone()
-        finally:
-            conn_chk.close()
-        if row and row[0] != value and not auto:
-            # Stage as conflict update proposal
-            conn = get_db_connection(); cursor = conn.cursor()
-            try:
-                cursor.execute('''
-                    INSERT OR REPLACE INTO pending_profile_facts (key, value, confidence, source, model_conf_label, justification, evidence, status, conflict_with)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'proposed_update', ?)
-                ''', (key, value, confidence, source, model_conf_label, justification, evidence, row[0]))
-                conn.commit()
-                print(f"⚠️ Conflict staged: {key} existing={row[0]} new={value} ({confidence:.2f})")
-            finally:
-                conn.close()
-            return
-        if not auto:
-            # Stage into pending table instead of immediate commit
-            conn = get_db_connection(); cursor = conn.cursor()
-            try:
-                cursor.execute('''
-                    INSERT OR REPLACE INTO pending_profile_facts (key, value, confidence, source, model_conf_label, justification, evidence, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
-                ''', (key, value, confidence, source, model_conf_label, justification, evidence))
-                conn.commit()
-                print(f"🕒 Staged profile fact for approval: {key}={value} ({confidence:.2f})")
-            finally:
-                conn.close()
-            return
-        print(f"✅ Auto-approved fact (confidence {confidence:.2f}): {key}={value}")
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     # Check if key exists and compare values
     cursor.execute("SELECT value, confidence FROM user_profile WHERE key = ?", (key,))
     existing = cursor.fetchone()
-    
+
     if existing:
         existing_value, existing_confidence = existing
         if existing_value == value:
-            # Reaffirmation path
+            # Reaffirmation path — asymptotic boost
             new_conf = round(existing_confidence + 0.1 * (1 - existing_confidence), 4)
             cursor.execute('''
                 UPDATE user_profile
-                SET confidence = ?, reaffirmations = COALESCE(reaffirmations,0)+1, last_updated = CURRENT_TIMESTAMP,
-                    last_seen_ts = CURRENT_TIMESTAMP
+                SET confidence = ?, reaffirmations = COALESCE(reaffirmations,0)+1,
+                    last_updated = CURRENT_TIMESTAMP, last_seen_ts = CURRENT_TIMESTAMP
                 WHERE key = ?
             ''', (new_conf, key))
-            print(f"🔁 Reaffirmed profile fact: {key}={value} (confidence {existing_confidence:.2f}→{new_conf:.2f})")
+            print(f"Reaffirmed profile fact: {key}={value} (confidence {existing_confidence:.2f}→{new_conf:.2f})")
         else:
-            # Different value (should have been staged if approval on); treat as update override.
-            cursor.execute('''
-                UPDATE user_profile
-                SET value = ?, confidence = ?, last_updated = CURRENT_TIMESTAMP, source = ?, last_seen_ts = CURRENT_TIMESTAMP
-                WHERE key = ?
-            ''', (value, confidence, source, key))
-            print(f"📝 Updated profile (override): {key} = {value} (confidence: {confidence:.2f})")
+            # Different value — update only if new confidence >= old
+            if confidence >= existing_confidence:
+                cursor.execute('''
+                    UPDATE user_profile
+                    SET value = ?, confidence = ?, last_updated = CURRENT_TIMESTAMP,
+                        source = ?, last_seen_ts = CURRENT_TIMESTAMP, evidence = ?
+                    WHERE key = ?
+                ''', (value, confidence, source, evidence, key))
+                print(f"Updated profile: {key} = {value} (confidence: {confidence:.2f})")
+            else:
+                print(f"Skipped lower-confidence update: {key} existing={existing_value}({existing_confidence:.2f}) vs new={value}({confidence:.2f})")
     else:
         cursor.execute('''
-            INSERT INTO user_profile (key, value, confidence, source) 
-            VALUES (?, ?, ?, ?)
-        ''', (key, value, confidence, source))
-        print(f"📝 New profile fact: {key} = {value}")
-    
+            INSERT INTO user_profile (key, value, confidence, source, evidence)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (key, value, confidence, source, evidence))
+        print(f"New profile fact: {key} = {value} (confidence: {confidence:.2f})")
+
     conn.commit()
     conn.close()
 
@@ -583,15 +521,26 @@ def delete_profile_fact(key: str) -> bool:
         conn.close()
 
 def list_pending_profile_facts() -> list[dict]:
+    """Return profile facts with confidence below the review threshold.
+
+    These are "pending review" — facts the AI extracted but is not
+    confident enough about.  The threshold is ``FACT_CONFIDENCE_THRESHOLD``
+    from config (default 0.5).
+    """
+    from companion_ai.core import config as core_config
+    threshold = getattr(core_config, 'FACT_CONFIDENCE_THRESHOLD', 0.5)
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT id, key, value, confidence, source, suggested_at, status, conflict_with,
-               model_conf_label, justification, evidence
-        FROM pending_profile_facts
-        WHERE status IN ('pending', 'proposed_update') OR status IS NULL
-        ORDER BY suggested_at DESC
-    ''')
+        SELECT rowid AS id, key, value, confidence, source,
+               COALESCE(last_updated, first_seen_ts) AS suggested_at,
+               CASE WHEN confidence < ? THEN 'pending' ELSE 'approved' END AS status,
+               NULL AS conflict_with,
+               NULL AS model_conf_label, NULL AS justification, evidence
+        FROM user_profile
+        WHERE confidence < ?
+        ORDER BY last_updated DESC
+    ''', (threshold, threshold))
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
@@ -618,42 +567,36 @@ def get_stale_profile_facts(limit: int = 3) -> list[dict]:
         conn.close()
 
 def approve_profile_fact(pending_id: int) -> bool:
+    """Approve a low-confidence fact by boosting its confidence.
+
+    ``pending_id`` is the ROWID of the ``user_profile`` row (returned by
+    ``list_pending_profile_facts``).
+    """
+    from companion_ai.core import config as core_config
+    target_conf = getattr(core_config, 'FACT_AUTO_APPROVE_THRESHOLD', 0.85)
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT key, value, confidence, source, status FROM pending_profile_facts WHERE id = ?", (pending_id,))
-    row = cursor.fetchone()
-    if not row:
-        conn.close(); return False
-    key, value, confidence, source, status = row
-    if status in ('approved', 'rejected'):
-        conn.close(); return False
-    conn.close()
-    # Use normal upsert (will bypass staging if feature still enabled because of recursion guard)
-    from companion_ai.core import config as core_config
-    # Temporarily disable staging to commit
-    original = getattr(core_config, 'ENABLE_FACT_APPROVAL', False)
-    setattr(core_config, 'ENABLE_FACT_APPROVAL', False)
     try:
-        upsert_profile_fact(key, value, confidence, source)
+        cursor.execute('''
+            UPDATE user_profile
+            SET confidence = ?, last_updated = CURRENT_TIMESTAMP, last_seen_ts = CURRENT_TIMESTAMP
+            WHERE rowid = ?
+        ''', (target_conf, pending_id))
+        conn.commit()
+        return cursor.rowcount > 0
     finally:
-        setattr(core_config, 'ENABLE_FACT_APPROVAL', original)
-    # Mark approved (retain provenance trail)
-    conn2 = get_db_connection(); cur2 = conn2.cursor()
-    cur2.execute(
-        "UPDATE pending_profile_facts SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (pending_id,)
-    )
-    conn2.commit(); conn2.close()
-    return True
+        conn.close()
 
 def reject_profile_fact(pending_id: int) -> bool:
-    conn = get_db_connection(); cur = conn.cursor()
-    cur.execute(
-        "UPDATE pending_profile_facts SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP WHERE id = ? AND status NOT IN ('approved', 'rejected')",
-        (pending_id,)
-    )
-    changed = cur.rowcount > 0
-    conn.commit(); conn.close(); return changed
+    """Reject (delete) a low-confidence fact by ROWID."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM user_profile WHERE rowid = ?", (pending_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
 
 # Enhanced Summary functions with deduplication
 def add_summary(summary_text: str, relevance_score: float = 1.0):
@@ -666,7 +609,7 @@ def add_summary(summary_text: str, relevance_score: float = 1.0):
     # Check for exact duplicates
     cursor.execute("SELECT id FROM conversation_summaries WHERE content_hash = ?", (content_hash,))
     if cursor.fetchone():
-        print("🔄 Duplicate summary detected, skipping...")
+        print("Duplicate summary detected, skipping...")
         conn.close()
         return
     
@@ -677,7 +620,7 @@ def add_summary(summary_text: str, relevance_score: float = 1.0):
     for row in recent_summaries:
         similarity = calculate_text_similarity(summary_text, row[0])
         if similarity > 0.7:
-            print(f"🔄 Similar summary detected ({similarity:.2f} similarity), skipping...")
+            print(f"Similar summary detected ({similarity:.2f} similarity), skipping...")
             conn.close()
             return
     
@@ -689,7 +632,7 @@ def add_summary(summary_text: str, relevance_score: float = 1.0):
     
     conn.commit()
     conn.close()
-    print(f"📝 New summary added (relevance: {relevance_score:.2f})")
+    print(f"New summary added (relevance: {relevance_score:.2f})")
 
 def get_profile_fact(key: str) -> str | None:
     """Get the value of a specific profile fact by key."""
@@ -728,7 +671,7 @@ def add_insight(insight_text: str, category: str = 'general', relevance_score: f
     # Check for exact duplicates
     cursor.execute("SELECT id FROM ai_insights WHERE content_hash = ?", (content_hash,))
     if cursor.fetchone():
-        print("🔄 Duplicate insight detected, skipping...")
+        print("Duplicate insight detected, skipping...")
         conn.close()
         return
     
@@ -744,10 +687,10 @@ def add_insight(insight_text: str, category: str = 'general', relevance_score: f
         existing_lower = existing.lower().strip()
         prefix_match = new_prefix and existing_lower.startswith(new_prefix)
         if similarity >= 0.75:
-            print(f"🔄 Similar insight detected ({similarity:.2f} similarity), skipping...")
+            print(f"Similar insight detected ({similarity:.2f} similarity), skipping...")
             conn.close(); return
         if idx < 5 and (similarity >= 0.6 or prefix_match):
-            print("🔁 Freshness guard: recent similar insight, skipping...")
+            print("Freshness guard: recent similar insight, skipping...")
             conn.close(); return
     
     # Add new insight
@@ -758,7 +701,7 @@ def add_insight(insight_text: str, category: str = 'general', relevance_score: f
     
     conn.commit()
     conn.close()
-    print(f"💡 New insight added: {category} (relevance: {relevance_score:.2f})")
+    print(f"New insight added: {category} (relevance: {relevance_score:.2f})")
 
 def get_latest_insights(n: int = 1) -> list[dict]:
     conn = get_db_connection()
@@ -837,7 +780,7 @@ def smart_memory_management():
     
     conn.commit()
     conn.close()
-    print("🧠 Smart memory management completed - important memories preserved")
+    print("Smart memory management completed - important memories preserved")
 
 def consolidate_similar_memories():
     """Find and merge very similar memories to reduce redundancy."""
@@ -879,7 +822,7 @@ def consolidate_similar_memories():
     
     conn.commit()
     conn.close()
-    print(f"🧠 Memory consolidation completed: merged {merged_count} similar items")
+    print(f"Memory consolidation completed: merged {merged_count} similar items")
 
 def get_memory_stats():
     """Get statistics about the memory system."""
@@ -995,11 +938,11 @@ def get_relevant_insights(query_keywords: list = None, n: int = 8) -> list[dict]
 
 def smart_memory_cleanup():
     """Perform intelligent memory cleanup and consolidation."""
-    print("🧠 Starting smart memory cleanup...")
+    print("Starting smart memory cleanup...")
     smart_memory_management()
     consolidate_similar_memories()
     stats = get_memory_stats()
-    print(f"🧠 Cleanup complete. Stats: {stats['summaries']} summaries, {stats['insights']} insights, {stats['profile_facts']} profile facts")
+    print(f"Cleanup complete. Stats: {stats['summaries']} summaries, {stats['insights']} insights, {stats['profile_facts']} profile facts")
     return stats
 
 # --- Confidence Decay & Reaffirmation Scheduler Helpers ---
@@ -1127,3 +1070,86 @@ def search_memory(query: str, limit: int = 10) -> list[dict]:
     conn.close()
     results.sort(key=lambda r: r['score'], reverse=True)
     return results[:limit]
+
+
+# --- AI Fact Sweep ---
+
+def ai_sweep_facts(dry_run: bool = False) -> dict:
+    """Periodic AI review of low-confidence facts.
+
+    Scans ``user_profile`` for facts with confidence below the review
+    threshold.  For each, asks the LLM whether the fact is plausible
+    and either promotes (boosts confidence) or demotes (lowers / deletes).
+
+    Returns summary dict: ``{reviewed, promoted, demoted, deleted, errors}``.
+    """
+    from companion_ai.core import config as core_config
+
+    threshold = getattr(core_config, 'FACT_CONFIDENCE_THRESHOLD', 0.5)
+    promote_target = getattr(core_config, 'FACT_AUTO_APPROVE_THRESHOLD', 0.85)
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT rowid, key, value, confidence, evidence FROM user_profile WHERE confidence < ? ORDER BY confidence ASC LIMIT 20",
+        (threshold,)
+    )
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    stats = {'reviewed': 0, 'promoted': 0, 'demoted': 0, 'deleted': 0, 'errors': 0}
+    if not rows:
+        return stats
+
+    try:
+        from companion_ai.memory.ai_processor import generate_memory_response
+    except ImportError:
+        logger.warning("ai_processor not available for fact sweep")
+        return stats
+
+    for row in rows:
+        stats['reviewed'] += 1
+        prompt = (
+            f"Evaluate this user profile fact for plausibility and specificity.\n"
+            f"Fact: {row['key']} = {row['value']}\n"
+            f"Evidence: {row.get('evidence') or 'none'}\n"
+            f"Current confidence: {row.get('confidence', 0):.2f}\n\n"
+            "Reply with ONE word: PROMOTE (fact is clear and plausible), "
+            "DEMOTE (vague or unlikely), or DELETE (clearly wrong/nonsense)."
+        )
+        try:
+            verdict = generate_memory_response(prompt, temperature=0.1).strip().upper()
+        except Exception as e:
+            logger.error(f"AI sweep error for {row['key']}: {e}")
+            stats['errors'] += 1
+            continue
+
+        if dry_run:
+            logger.info(f"[dry-run] {row['key']}={row['value']} → {verdict}")
+            continue
+
+        conn2 = get_db_connection()
+        cur2 = conn2.cursor()
+        try:
+            if 'PROMOTE' in verdict:
+                cur2.execute(
+                    "UPDATE user_profile SET confidence = ?, last_seen_ts = CURRENT_TIMESTAMP WHERE rowid = ?",
+                    (promote_target, row['rowid'])
+                )
+                stats['promoted'] += 1
+            elif 'DELETE' in verdict:
+                cur2.execute("DELETE FROM user_profile WHERE rowid = ?", (row['rowid'],))
+                stats['deleted'] += 1
+            else:  # DEMOTE or unrecognized
+                new_conf = max(0.05, row.get('confidence', 0.3) - 0.15)
+                cur2.execute(
+                    "UPDATE user_profile SET confidence = ? WHERE rowid = ?",
+                    (new_conf, row['rowid'])
+                )
+                stats['demoted'] += 1
+            conn2.commit()
+        finally:
+            conn2.close()
+
+    logger.info(f"AI fact sweep complete: {stats}")
+    return stats

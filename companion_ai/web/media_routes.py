@@ -55,7 +55,7 @@ def tts_config():
 
             if provider:
                 tts_manager.provider = provider
-                logger.info(f"🔊 TTS provider set to: {provider}")
+                logger.info(f"TTS provider set to: {provider}")
             if voice:
                 tts_manager.set_voice(voice)
             if rate:

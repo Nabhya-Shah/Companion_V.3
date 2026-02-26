@@ -16,6 +16,13 @@ from companion_ai.memory.mem0_backend import (
     MemoryContext,
 )
 
+# Unified knowledge entry point (P5-D3)
+from companion_ai.memory.knowledge import (
+    remember,
+    recall,
+    recall_context,
+)
+
 # Re-export with aliases for compatibility
 get_memory_context = build_memory_context
 
@@ -25,4 +32,6 @@ __all__ = [
     'delete_memory', 'clear_all_memories', 'build_memory_context',
     'get_memory_context', 'get_memory_stats', 'memory_search_tool',
     'MemoryStats', 'MemoryContext',
+    # Knowledge entry point
+    'remember', 'recall', 'recall_context',
 ]

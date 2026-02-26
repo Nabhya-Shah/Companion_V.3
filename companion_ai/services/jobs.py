@@ -460,7 +460,7 @@ def cleanup_stale_jobs():
     ''')
     deleted = cursor.rowcount
     if deleted > 0:
-        logger.warning(f"🧹 Deleted {deleted} stale jobs from previous session")
+        logger.warning(f"Deleted {deleted} stale jobs from previous session")
     conn.commit()
     conn.close()
 
@@ -468,7 +468,7 @@ _cancel_current_flag = False
 
 def cancel_all_jobs():
     """Cancel all pending and running jobs."""
-    logger.warning("🛑 Cancelling ALL jobs")
+    logger.warning("Cancelling ALL jobs")
     conn = _get_db()
     cursor = conn.cursor()
     
@@ -499,7 +499,7 @@ def should_cancel():
 
 def _worker_loop():
     """Background worker loop to process jobs."""
-    logger.info("👷 Job Worker started")
+    logger.info("Job Worker started")
     global _cancel_current_flag
     
     while not _stop_event.is_set():
@@ -527,7 +527,7 @@ def _worker_loop():
                 conn.commit()
                 conn.close() # Close connection while working
                 
-                logger.info(f"👷 Starting job {job_id}: {description}")
+                logger.info(f"Starting job {job_id}: {description}")
                 
                 try:
                     # Execute the tool
@@ -558,12 +558,12 @@ def _worker_loop():
                     model = core_config.TOOLS_MODEL # Default Groq
                     
                     if is_local_available():
-                        logger.info("🏠 Using LOCAL LLM (Ollama) for background task")
+                        logger.info("Using LOCAL LLM (Ollama) for background task")
                         client = OllamaClientWrapper()
                         # Use centralized model config (defaults to qwen2.5-coder:7b for code)
                         model = LocalLLM.DEFAULT_MODELS['code']
                     else:
-                        logger.info("☁️ Using CLOUD LLM (Groq) for background task")
+                        logger.info("Using CLOUD LLM (Groq) for background task")
                     
                     with execution_mode('restricted'):
                         response_text, tool_used, tool_result = generate_model_response_with_tools(
@@ -602,7 +602,7 @@ def _worker_loop():
                 ''', (status, result, datetime.now().isoformat(), job_id))
                 conn.commit()
                 conn.close()
-                logger.info(f"👷 Job {job_id} finished: {status}")
+                logger.info(f"Job {job_id} finished: {status}")
                 
             else:
                 conn.close()

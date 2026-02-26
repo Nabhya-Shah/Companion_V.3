@@ -155,7 +155,7 @@ async def turn_on_lights(room: Optional[str] = None) -> Dict[str, Any]:
                         success = True
             
             if success:
-                logger.info(f"✅ Turned on {room_name} at {brightness}%")
+                logger.info(f"Turned on {room_name} at {brightness}%")
                 return {
                     "success": True, 
                     "room": room_name, 
@@ -166,7 +166,7 @@ async def turn_on_lights(room: Optional[str] = None) -> Dict[str, Any]:
             else:
                 return {"success": False, "error": "Dimmer command failed"}
         except Exception as e:
-            logger.error(f"❌ Error turning on {room_name}: {e}")
+            logger.error(f"Error turning on {room_name}: {e}")
             return {"success": False, "error": str(e)}
 
 async def turn_off_lights(room: Optional[str] = None) -> Dict[str, Any]:
@@ -206,10 +206,10 @@ async def turn_off_lights(room: Optional[str] = None) -> Dict[str, Any]:
                 url = f"{base_url}/jdev/sps/io/{uuid}/{sub}/0"
                 await client.get(url)
             
-            logger.info(f"✅ Turned off: {room_name}")
+            logger.info(f"Turned off: {room_name}")
             return {"success": True, "room": room_name, "status": "off", "message": f"Turned off {room_name} lights"}
         except Exception as e:
-            logger.error(f"❌ Error turning off {room_name}: {e}")
+            logger.error(f"Error turning off {room_name}: {e}")
             return {"success": False, "error": str(e)}
 
 async def set_brightness(room: str, brightness: int) -> Dict[str, Any]:
@@ -237,7 +237,7 @@ async def set_brightness(room: str, brightness: int) -> Dict[str, Any]:
                 await client.get(url)
             
             mode = "bright" if brightness >= 80 else "dim" if brightness > 0 else "off"
-            logger.info(f"✅ Set {room_name} to {brightness}% ({mode})")
+            logger.info(f"Set {room_name} to {brightness}% ({mode})")
             return {
                 "success": True, 
                 "room": room_name, 
@@ -246,7 +246,7 @@ async def set_brightness(room: str, brightness: int) -> Dict[str, Any]:
                 "message": f"Set {room_name} to {brightness}%"
             }
         except Exception as e:
-            logger.error(f"❌ Error setting brightness for {room_name}: {e}")
+            logger.error(f"Error setting brightness for {room_name}: {e}")
             return {"success": False, "error": str(e)}
 
 async def get_room_statuses() -> Dict[str, Any]:

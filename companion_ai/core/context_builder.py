@@ -98,21 +98,12 @@ You don't need to explain that you "used a tool" - just respond naturally."""
     return static_prompt
 
 def _load_dynamic_traits() -> str:
-    """Load evolved traits from YAML (Dynamic Persona Evolution)."""
+    """Load evolved traits from the PersonaState singleton."""
     try:
-        # Path relative to this file: ../../data/companion_brain/system/learned_traits.yaml
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        path = os.path.join(base_dir, 'data', 'companion_brain', 'system', 'learned_traits.yaml')
-        
-        if os.path.exists(path):
-            with open(path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f)
-                if data and 'evolved_traits' in data:
-                    traits = data['evolved_traits']
-                    if traits and isinstance(traits, list):
-                        return f"[Adaptive Personality Traits]:\n- " + "\n- ".join(traits)
+        from companion_ai.services.persona import get_state
+        return get_state().prompt_fragment()
     except Exception:
-        pass # Fail silently to avoid breaking chat
+        pass  # Fail silently to avoid breaking chat
     return ""
 
 def _build_brain_context() -> str:
@@ -185,7 +176,7 @@ def _build_mem0_context(user_message: str, mem0_user_id: str | None = None) -> s
         )
         
         formatted = format_memory_for_prompt(context)
-        logger.info(f"📚 Mem0 context: {context.stats.total_memories} memories, relevant: {len(context.relevant_memories)}")
+        logger.info(f"Mem0 context: {context.stats.total_memories} memories, relevant: {len(context.relevant_memories)}")
         return formatted
     except Exception as e:
         import logging

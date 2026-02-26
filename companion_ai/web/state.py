@@ -219,14 +219,14 @@ def _maybe_migrate_legacy_scope(mem0_user_id: str, profile_key: str, session_key
 
     legacy_user_id = core_config.MEM0_USER_ID
     try:
-        from companion_ai.memory import mem0_backend as memory_v2
+        from companion_ai.memory import mem0_backend as mem0
 
-        scoped = memory_v2.get_all_memories(user_id=mem0_user_id)
+        scoped = mem0.get_all_memories(user_id=mem0_user_id)
         if scoped:
             _scope_migration_done.add(migration_key)
             return
 
-        result = memory_v2.migrate_legacy_memories(
+        result = mem0.migrate_legacy_memories(
             source_user_id=legacy_user_id,
             target_user_id=mem0_user_id,
             max_items=200,

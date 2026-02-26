@@ -40,7 +40,7 @@ def test_memory_endpoint_uses_quality_ledger_metadata(monkeypatch):
     monkeypatch.setattr(_web_state, "_maybe_migrate_legacy_scope", lambda *_: None)
 
     monkeypatch.setattr(
-        web_companion.memory_v2,
+        web_companion.mem0,
         "get_all_memories",
         lambda user_id=None: [{"id": "m1", "memory": "User prefers tea", "metadata": {"frequency": 2}}],
     )
@@ -71,7 +71,7 @@ def test_memory_endpoint_uses_quality_ledger_metadata(monkeypatch):
 
 def test_delete_fact_removes_quality_entry(monkeypatch):
     monkeypatch.setattr(web_companion.core_config, "USE_MEM0", True)
-    monkeypatch.setattr(web_companion.memory_v2, "delete_memory", lambda memory_id: True)
+    monkeypatch.setattr(web_companion.mem0, "delete_memory", lambda memory_id: True)
 
     captured = {}
 
@@ -160,47 +160,48 @@ def test_mem0_search_uses_quality_ranking(monkeypatch):
 
 
 def test_approve_reject_pending_fact_transitions(tmp_path, monkeypatch):
+    """D2: approve/reject now operate on user_profile rows by ROWID."""
     db_path = tmp_path / "quality_transitions.db"
     monkeypatch.setattr(sqlite_memory, "DB_PATH", str(db_path))
     sqlite_memory.init_db()
+    monkeypatch.setattr("companion_ai.core.config.FACT_CONFIDENCE_THRESHOLD", 0.5)
+    monkeypatch.setattr("companion_ai.core.config.FACT_AUTO_APPROVE_THRESHOLD", 0.85)
 
+    # Insert low-confidence facts directly into user_profile
     conn = sqlite_memory.get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        """
-        INSERT INTO pending_profile_facts (key, value, confidence, source, status)
-        VALUES ('favorite_color', 'blue', 0.7, 'conversation', 'pending')
-        """
+        "INSERT INTO user_profile (key, value, confidence, source) VALUES ('favorite_color', 'blue', 0.3, 'conversation')"
     )
-    pending_id = cur.lastrowid
+    approve_rowid = cur.lastrowid
     cur.execute(
-        """
-        INSERT INTO pending_profile_facts (key, value, confidence, source, status)
-        VALUES ('food', 'pizza', 0.6, 'conversation', 'pending')
-        """
+        "INSERT INTO user_profile (key, value, confidence, source) VALUES ('food', 'pizza', 0.2, 'conversation')"
     )
-    reject_id = cur.lastrowid
+    reject_rowid = cur.lastrowid
     conn.commit()
     conn.close()
 
-    assert pending_id is not None
-    assert reject_id is not None
+    assert approve_rowid is not None
+    assert reject_rowid is not None
 
-    assert sqlite_memory.approve_profile_fact(pending_id) is True
-    assert sqlite_memory.reject_profile_fact(reject_id) is True
+    # Approve boosts confidence
+    assert sqlite_memory.approve_profile_fact(approve_rowid) is True
+    # Reject deletes the row
+    assert sqlite_memory.reject_profile_fact(reject_rowid) is True
 
     conn2 = sqlite_memory.get_db_connection()
     cur2 = conn2.cursor()
-    cur2.execute("SELECT status, reviewed_at FROM pending_profile_facts WHERE id = ?", (pending_id,))
+    # Approved fact should have high confidence now
+    cur2.execute("SELECT confidence FROM user_profile WHERE key = 'favorite_color'")
     approved_row = cur2.fetchone()
-    cur2.execute("SELECT status, reviewed_at FROM pending_profile_facts WHERE id = ?", (reject_id,))
+    # Rejected fact should be deleted
+    cur2.execute("SELECT * FROM user_profile WHERE key = 'food'")
     rejected_row = cur2.fetchone()
     conn2.close()
 
-    assert approved_row[0] == "approved"
-    assert approved_row[1] is not None
-    assert rejected_row[0] == "rejected"
-    assert rejected_row[1] is not None
+    assert approved_row is not None
+    assert approved_row[0] >= 0.85
+    assert rejected_row is None
 
 
 def test_mem0_add_fallback_on_decommissioned_model(monkeypatch):

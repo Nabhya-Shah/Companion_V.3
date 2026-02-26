@@ -65,8 +65,8 @@ def create_app() -> Flask:
     sys.stderr.flush()
 
     logger.info("=" * 70)
-    logger.info("🚀 COMPANION AI WEB SERVER STARTING")
-    logger.info(f"📝 Logs: {LOG_FILE}")
+    logger.info("COMPANION AI WEB SERVER STARTING")
+    logger.info(f"Logs: {LOG_FILE}")
     logger.info("=" * 70)
 
     # ------------------------------------------------------------------

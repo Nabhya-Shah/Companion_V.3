@@ -444,7 +444,7 @@ class AzureTTSManager:
             try:
                 import sounddevice as sd
                 sd.stop()
-                logger.info("🔇 Stopped sounddevice playback")
+                logger.info("Stopped sounddevice playback")
             except Exception as e:
                 logger.debug(f"sounddevice stop: {e}")
             
@@ -453,14 +453,14 @@ class AzureTTSManager:
                 try:
                     result = self.synthesizer.stop_speaking_async()
                     result.get()  # Wait for stop to complete
-                    logger.info("🔇 Stopped Azure TTS playback")
+                    logger.info("Stopped Azure TTS playback")
                 except Exception as e:
                     logger.debug(f"Azure stop: {e}")
             
             # Reset synthesis state
             self.current_synthesis = None
                     
-            logger.info("🛑 Speech stopped")
+            logger.info("Speech stopped")
         except Exception as e:
             logger.error(f"Failed to stop speech: {e}")
     

@@ -10,14 +10,14 @@ This file exists purely for backwards compatibility so that:
 continue to work unchanged.
 
 It also re-exports module-level names that test files monkeypatch
-(core_config, memory_v2, job_manager_module, ConversationSession).
+(core_config, mem0, job_manager_module, ConversationSession).
 """
 
 from companion_ai.web import create_app, run_web  # noqa: F401
 
 # Re-export objects that existing tests monkeypatch via `web_companion.X`
 from companion_ai.core import config as core_config  # noqa: F401
-from companion_ai.memory import mem0_backend as memory_v2  # noqa: F401
+from companion_ai.memory import mem0_backend as mem0  # noqa: F401
 from companion_ai.services import jobs as job_manager_module  # noqa: F401
 from companion_ai.conversation_manager import ConversationSession  # noqa: F401
 

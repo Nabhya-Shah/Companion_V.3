@@ -56,7 +56,7 @@ class OrchestratorDecision:
                 json_str = json_str.split("```")[1].split("```")[0].strip()
             
             data = json.loads(json_str)
-            logger.info(f"✅ DEBUG: Parsed JSON successfully: action={data.get('action')}, loop={data.get('loop')}")
+            logger.info(f"DEBUG: Parsed JSON successfully: action={data.get('action')}, loop={data.get('loop')}")
             return cls(
                 action=OrchestratorAction(data.get("action", "answer")),
                 content=data.get("content"),
@@ -65,8 +65,8 @@ class OrchestratorDecision:
                 save_facts=data.get("save_facts", [])
             )
         except Exception as e:
-            logger.error(f"❌ DEBUG: Failed to parse orchestrator decision: {e}")
-            logger.error(f"❌ DEBUG: Raw input was: {json_str[:200]}...")
+            logger.error(f"DEBUG: Failed to parse orchestrator decision: {e}")
+            logger.error(f"DEBUG: Raw input was: {json_str[:200]}...")
             
             # Try to extract content using regex (handles truncated JSON)
             import re
@@ -76,7 +76,7 @@ class OrchestratorDecision:
                 extracted = content_match.group(1)
                 # Unescape basic JSON escapes
                 extracted = extracted.replace('\\n', '\n').replace('\\t', '\t').replace('\\"', '"')
-                logger.info(f"✅ DEBUG: Extracted content via regex fallback: {extracted[:100]}...")
+                logger.info(f"DEBUG: Extracted content via regex fallback: {extracted[:100]}...")
                 return cls(action=OrchestratorAction.ANSWER, content=extracted)
             
             # Last resort - if it doesn't look like JSON, use as-is
@@ -84,7 +84,7 @@ class OrchestratorDecision:
                 return cls(action=OrchestratorAction.ANSWER, content=json_str)
             
             # Looks like malformed JSON we can't parse - return error
-            logger.error("❌ DEBUG: Could not extract content from malformed JSON")
+            logger.error("DEBUG: Could not extract content from malformed JSON")
             return cls(action=OrchestratorAction.ANSWER, content="I had trouble processing that. Could you try again?")
 
 class Orchestrator:
@@ -180,8 +180,19 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
         # Limit context to reduce tokens
         if len(recent_context) > 500:
             recent_context = recent_context[-500:]
-        
-        dynamic_part = f"\n\n## Context\n{recent_context if recent_context else 'No prior context.'}"
+
+        # Persona state — inject evolved traits so routing reflects personality
+        persona_fragment = ""
+        try:
+            from companion_ai.services.persona import get_state as _get_persona
+            persona_fragment = _get_persona().prompt_fragment()
+        except Exception:
+            pass
+
+        dynamic_part = "\n\n## Context\n"
+        if persona_fragment:
+            dynamic_part += persona_fragment + "\n\n"
+        dynamic_part += recent_context if recent_context else "No prior context."
         
         return static_rules + dynamic_part
     
@@ -248,7 +259,7 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
             duration_ms = int((time.time() - start_time) * 1000)
             
             # DEBUG: Log the raw response from 120B
-            logger.info(f"🔍 DEBUG: 120B raw response:\n{raw_response[:500]}...")
+            logger.info(f"DEBUG: 120B raw response:\n{raw_response[:500]}...")
             
             # Log tokens with step tracking
             from companion_ai.llm_interface import log_tokens_step
@@ -264,7 +275,7 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
             decision = OrchestratorDecision.from_json(raw_response)
             
             # DEBUG: Log the parsed decision
-            logger.info(f"🎯 DEBUG: Parsed decision: action={decision.action}, loop={decision.loop}, has_content={decision.content is not None}")
+            logger.info(f"DEBUG: Parsed decision: action={decision.action}, loop={decision.loop}, has_content={decision.content is not None}")
             
             return decision
             
@@ -317,18 +328,18 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
         task = decision.task or {}
         
         # DEBUG: Log delegation attempt
-        logger.info(f"🔄 DEBUG: Delegating to loop '{loop_name}' with task: {task}")
+        logger.info(f"DEBUG: Delegating to loop '{loop_name}' with task: {task}")
         
         loop = get_loop(loop_name)
         if not loop:
-            logger.error(f"❌ DEBUG: Loop not found: {loop_name}")
+            logger.error(f"DEBUG: Loop not found: {loop_name}")
             return await self._generate_direct_response(user_message, context)
         
-        logger.info(f"✅ DEBUG: Got loop instance: {loop}")
+        logger.info(f"DEBUG: Got loop instance: {loop}")
         
         try:
             # Execute loop with timing
-            logger.info(f"🚀 DEBUG: Executing loop.execute({task})")
+            logger.info(f"DEBUG: Executing loop.execute({task})")
             loop_start = time.time()
             result = await loop.execute(task)
             loop_duration_ms = int((time.time() - loop_start) * 1000)
@@ -395,20 +406,27 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
         user_message: str,
         context: Dict
     ) -> Tuple[str, Dict]:
-        """Quick memory search and response."""
-        task = decision.task or {"operation": "search", "query": user_message}
-        
-        loop = get_loop("memory")
-        if not loop:
-            return await self._generate_direct_response(user_message, context)
-        
-        result = await loop.execute(task)
-        
-        # Synthesize with memory results
+        """Quick memory search via unified knowledge recall."""
+        try:
+            from companion_ai.memory.knowledge import recall
+            results = recall(user_message, limit=8)
+            data = {
+                "memories": [{"content": r["text"], "source": r["source"]} for r in results],
+                "count": len(results),
+                "query": user_message,
+            }
+        except Exception as e:
+            logger.warning(f"knowledge.recall failed, falling back to loop: {e}")
+            loop = get_loop("memory")
+            if not loop:
+                return await self._generate_direct_response(user_message, context)
+            result = await loop.execute({"operation": "search", "query": user_message})
+            data = result.data
+
         return await self._synthesize_response(
             user_message,
             "memory",
-            result.data,
+            data,
             context
         )
     
@@ -472,6 +490,15 @@ The {loop_name} loop returned this data:
 
 Respond naturally as if you found this information yourself. 
 Don't mention "loops" or technical details. Be conversational."""
+
+        # Inject persona traits when available
+        try:
+            from companion_ai.services.persona import get_state as _get_persona
+            pf = _get_persona().prompt_fragment()
+            if pf:
+                synthesis_prompt += f"\n\n{pf}"
+        except Exception:
+            pass
         
         try:
             response = client.chat.completions.create(
@@ -504,19 +531,20 @@ Don't mention "loops" or technical details. Be conversational."""
             return f"Based on what I found: {loop_data}"
     
     async def _save_facts(self, facts: List[str]):
-        """Save facts to memory via Memory Loop."""
+        """Save facts via unified knowledge.remember()."""
         if not facts:
             return
-        
-        loop = get_loop("memory")
-        if not loop:
-            logger.warning("Memory loop not available for saving facts")
+
+        try:
+            from companion_ai.memory.knowledge import remember
+        except ImportError:
+            logger.warning("knowledge module not available for saving facts")
             return
-        
+
         for fact in facts:
             try:
-                await loop.execute({"operation": "save", "fact": fact})
-                logger.info(f"Saved fact: {fact}")
+                remember(fact, source="orchestrator")
+                logger.info(f"Saved fact via knowledge.remember: {fact}")
             except Exception as e:
                 logger.error(f"Failed to save fact '{fact}': {e}")
 

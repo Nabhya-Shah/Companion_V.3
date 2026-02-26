@@ -242,6 +242,12 @@ MEMORY_RELEVANCE_THRESHOLD = 0.5
 MEMORY_GRAPH_ENABLED = True
 MEMORY_AUTO_EXTRACT = True
 IMPORTANCE_MIN_STORE = 0.3  # Minimum importance score to store in memory
+IMPORTANCE_INSIGHT_MIN = 0.4  # Minimum importance to generate insights
+
+# Confidence-based fact system (D2)
+ENABLE_FACT_APPROVAL = False  # When True, low-confidence facts require review
+FACT_CONFIDENCE_THRESHOLD = 0.5  # Facts below this are "pending review"
+FACT_AUTO_APPROVE_THRESHOLD = 0.85  # Facts at/above this are auto-approved
 
 # Graph search modes
 GRAPH_SEARCH_MODES = [

@@ -2,7 +2,7 @@
 
 > **Design Philosophy**: The orchestrator is the brain. Local loops are the specialists. Memory is unified. Persona is the soul.
 
-**Last Updated**: Phase 5-C complete (monolith splits done, 2026-02-24)
+**Last Updated**: Phase 5 complete (all tracks done, 2026-02-26)
 
 ---
 
@@ -179,7 +179,7 @@ Each loop:
 
 | Service | File | Purpose |
 |---------|------|---------|
-| **Persona** | `services/persona.py` | Personality evolution — key differentiator, grows over time |
+| **Persona** | `services/persona.py` | Personality evolution with `PersonaState` singleton, 3 trigger types (periodic/memory-event/session-end), incremental trait merging, rapport progression |
 | **Jobs/Scheduler** | `services/jobs.py` | Recurring automations, run-now, policy enforcement |
 | **Token Budget** | `services/token_budget.py` | Per-step token tracking with model labels |
 | **TTS** | `services/tts.py` | Text-to-speech (optional plugin, not actively developed) |

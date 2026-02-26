@@ -1,6 +1,7 @@
-# companion_ai/memory_ai.py - Dedicated AI for memory management
+# companion_ai/memory/ai_processor.py — Dedicated AI for memory management
 
 import os
+import re
 import json
 import logging
 from dotenv import load_dotenv
@@ -28,6 +29,36 @@ if GROQ_MEMORY_API_KEY:
         logger.info("Memory AI: Dedicated Groq client initialized")
     except Exception as e:
         logger.error(f"Memory AI initialization failed: {str(e)}")
+
+def _is_valid_fact_key(key: str) -> bool:
+    """Whitelist/blacklist gate for extracted fact keys.
+
+    Rejects inferences about mood/behavior and AI self-references.
+    Accepts only recognised profile-fact categories.
+    """
+    k = re.sub(r'[^a-zA-Z0-9]+', '_', key.lower()).strip('_')
+
+    # Blacklist — reject immediately
+    _BLACKLIST = [
+        r'^user_is_', r'^user_.*ing$', r'^ai_',
+        r'conversation', r'aware', r'testing', r'explicit', r'confusion',
+    ]
+    if any(re.search(pat, k) for pat in _BLACKLIST):
+        return False
+
+    # Whitelist — must match at least one
+    _WHITELIST = {
+        'name', 'age', 'location', 'city', 'country', 'hometown',
+        'occupation', 'job', 'work', 'company',
+        'hobby', 'hobbies', 'interest', 'interests',
+        'favorite', 'preference', 'preferred',
+        'skill', 'skills', 'language', 'languages',
+        'pet', 'pets', 'project', 'projects',
+        'learning', 'studying', 'education',
+        'family', 'relationship', 'birthday', 'email', 'phone',
+    }
+    return any(w in k for w in _WHITELIST)
+
 
 def generate_memory_response(prompt: str, temperature: float = 0.3, purpose: str = 'summary', importance: float = 0.0) -> str:
     """Generate response using dedicated Groq client for memory tasks."""
@@ -198,6 +229,10 @@ JSON:"""
                 evidence = evidence[:177] + '...'
             if justification and len(justification) > 160:
                 justification = justification[:157] + '...'
+            # Filter out bad keys (inferences, AI self-refs, etc.)
+            if not _is_valid_fact_key(key):
+                logger.debug(f"Filtered out fact key: {key}")
+                continue
             structured[key] = {
                 'value': value,
                 'confidence': confidence,

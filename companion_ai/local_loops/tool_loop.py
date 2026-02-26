@@ -88,7 +88,7 @@ and return the result. Be precise and concise."""
                         potential_name = domain_parts[0].lower()
                         bookmark_result = await self._open_bookmark(potential_name)
                         if bookmark_result.status == LoopStatus.SUCCESS:
-                            logger.info(f"📚 Using bookmark '{potential_name}' instead of guessed URL")
+                            logger.info(f"Using bookmark '{potential_name}' instead of guessed URL")
                             return bookmark_result
                 except Exception:
                     pass

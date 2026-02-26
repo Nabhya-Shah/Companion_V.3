@@ -57,7 +57,7 @@ class BrainIndex:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_file_hash ON brain_chunks(file_hash)")
             conn.commit()
         
-        logger.info(f"🧠 Brain index initialized at {INDEX_DB}")
+        logger.info(f"Brain index initialized at {INDEX_DB}")
     
     def _get_file_hash(self, path: Path) -> str:
         """Get hash of file for change detection."""
@@ -151,11 +151,21 @@ class BrainIndex:
         b = np.array(b)
         return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-8))
     
-    def index_file(self, file_path: Path) -> int:
-        """Index a single file. Returns number of chunks indexed."""
+    def index_file(self, file_path: Path, *, store_path: str | None = None) -> int:
+        """Index a single file. Returns number of chunks indexed.
+
+        Args:
+            file_path: Absolute path to the file on disk.
+            store_path: Optional logical path to store in the index.
+                        If None, computed as ``file_path.relative_to(BRAIN_BASE)``.
+                        Use e.g. ``"uploads/abc.pdf"`` for files outside BRAIN/.
+        """
         with self._lock:
             file_hash = self._get_file_hash(file_path)
-            relative_path = str(file_path.relative_to(BRAIN_BASE))
+            if store_path is not None:
+                relative_path = store_path
+            else:
+                relative_path = str(file_path.relative_to(BRAIN_BASE))
             
             # Check if already indexed with same hash
             with sqlite3.connect(str(INDEX_DB)) as conn:
@@ -183,7 +193,7 @@ class BrainIndex:
             if not chunks:
                 return 0
             
-            logger.info(f"📝 Indexing {relative_path}: {len(chunks)} chunks")
+            logger.info(f"Indexing {relative_path}: {len(chunks)} chunks")
             
             # Generate embeddings and store
             indexed = 0
@@ -201,7 +211,7 @@ class BrainIndex:
                         indexed += 1
                 conn.commit()
             
-            logger.info(f"✅ Indexed {indexed} chunks from {relative_path}")
+            logger.info(f"Indexed {indexed} chunks from {relative_path}")
             return indexed
     
     def index_all(self) -> Dict[str, int]:
@@ -220,7 +230,7 @@ class BrainIndex:
                 except Exception as e:
                     logger.error(f"Failed to index {path}: {e}")
         
-        logger.info(f"🧠 Brain indexing complete: {len(results)} files, {sum(results.values())} chunks")
+        logger.info(f"Brain indexing complete: {len(results)} files, {sum(results.values())} chunks")
         return results
     
     def search(self, query: str, limit: int = 5) -> List[Dict]:
@@ -280,7 +290,7 @@ class BrainIndex:
             with sqlite3.connect(str(INDEX_DB)) as conn:
                 conn.execute("DELETE FROM brain_chunks")
                 conn.commit()
-        logger.info("🗑️ Brain index cleared")
+        logger.info("Brain index cleared")
 
     def remove_file(self, relative_path: str) -> bool:
         """Remove all indexed chunks for one relative brain file path."""
@@ -333,10 +343,10 @@ def start_background_indexing():
     """Start indexing brain folder in background thread."""
     def _index_thread():
         try:
-            logger.info("🧠 Starting background brain indexing...")
+            logger.info("Starting background brain indexing...")
             index = get_brain_index()
             results = index.index_all()
-            logger.info(f"✅ Background indexing complete: {len(results)} files indexed")
+            logger.info(f"Background indexing complete: {len(results)} files indexed")
         except Exception as e:
             logger.error(f"Background indexing failed: {e}")
     

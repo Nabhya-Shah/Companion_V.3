@@ -15,13 +15,12 @@ from companion_ai.memory.sqlite_backend import (
     get_all_profile_facts, get_relevant_summaries, get_relevant_insights,
     add_summary, upsert_profile_fact, add_insight
 )
-from companion_ai.llm_interface import generate_response, generate_response_streaming, groq_memory_client
+from companion_ai.llm_interface import generate_response, generate_response_streaming
 from companion_ai.memory.ai_processor import (
     analyze_conversation_importance, extract_smart_profile_facts,
     generate_smart_summary, generate_contextual_insight, categorize_insight
 )
 from companion_ai.core import config as core_config
-from companion_ai.services import persona as persona_evolution
 
 # Import Mem0 if enabled
 if core_config.USE_MEM0:
@@ -39,10 +38,10 @@ logger = logging.getLogger(__name__)
 try:
     from companion_ai.memory.knowledge_graph import add_conversation_to_graph, get_graph_stats
     KNOWLEDGE_GRAPH_AVAILABLE = True
-    logger.info("✅ Knowledge Graph enabled")
+    logger.info("Knowledge Graph enabled")
 except ImportError:
     KNOWLEDGE_GRAPH_AVAILABLE = False
-    logger.warning("⚠️ Knowledge Graph not available - install networkx to enable")
+    logger.warning("Knowledge Graph not available - install networkx to enable")
 
 class ConversationSession:
     """Manages a conversation session with separated memory and conversation processing"""
@@ -119,7 +118,7 @@ class ConversationSession:
                     {"role": "assistant", "content": ai_response}
                 ]
                 mem0_add_memory(messages, user_id=effective_mem0_user_id)
-                logger.info("📝 Mem0: Stored conversation exchange")
+                logger.info("Mem0: Stored conversation exchange")
                 memory_saved = True
             except Exception as e:
                 logger.warning(f"Mem0 storage failed: {e}")
@@ -231,14 +230,14 @@ class ConversationSession:
                         {"role": "assistant", "content": full_response}
                     ]
                     mem0_add_memory(messages, user_id=effective_mem0_user_id)
-                    logger.info("📝 Mem0: Stored conversation exchange (async)")
+                    logger.info("Mem0: Stored conversation exchange (async)")
                 except Exception as e:
                     logger.warning(f"Mem0 storage failed: {e}")
             
             # Fire-and-forget - don't block the response
             threading.Thread(target=_async_mem0_save, daemon=True).start()
         elif orchestrator_handled_memory:
-            logger.info("📝 Mem0: Skipped auto-save (orchestrator memory loop already handled it)")
+            logger.info("Mem0: Skipped auto-save (orchestrator memory loop already handled it)")
         
         logger.info(f"Streaming complete. Session length: {len(self.conversation_history)}")
     
@@ -265,176 +264,48 @@ class ConversationSession:
         logger.info("Session memory processing completed")
     
     def _process_single_exchange(self, exchange: Dict):
-        """Process a single conversation exchange for memory storage"""
+        """Process a single conversation exchange for memory storage.
+
+        Uses the canonical ai_processor module for all extraction.
+        """
         user_msg = exchange["user"]
         ai_msg = exchange["ai"]
-        
-        # Use memory client for processing
-        if not groq_memory_client:
-            logger.warning("Memory client not available, skipping memory processing")
-            return
-        
-        # Add to knowledge graph if available
+
+        # Add to knowledge graph if available (visualization only)
         if KNOWLEDGE_GRAPH_AVAILABLE:
             try:
                 add_conversation_to_graph(user_msg, ai_msg)
-                logger.info("📊 Added to knowledge graph")
+                logger.info("Added to knowledge graph")
             except Exception as e:
                 logger.error(f"Knowledge graph processing failed: {e}")
-        
-        # Analyze importance using memory AI
-        importance = self._analyze_importance_with_memory_ai(user_msg, ai_msg)
-        logger.info(f"🧠 Exchange importance: {importance:.2f}")
-        if importance > core_config.IMPORTANCE_MIN_STORE:  # Store if moderately important
-            # Generate summary
-            summary = self._generate_summary_with_memory_ai(user_msg, ai_msg, importance)
-            if summary:
-                add_summary(summary, importance)
 
-            # Extract profile facts (structured)
-            facts = self._extract_facts_with_memory_ai(user_msg, ai_msg)
-            for key, data in facts.items():
-                upsert_profile_fact(
-                    key,
-                    data.get('value',''),
-                    data.get('confidence',0.5),
-                    source='exchange_analysis',
-                    evidence=data.get('evidence'),
-                    model_conf_label=data.get('conf_label'),
-                    justification=data.get('justification')
-                )
+        # Analyze importance
+        importance = analyze_conversation_importance(user_msg, ai_msg, {})
+        logger.info(f"Exchange importance: {importance:.2f}")
 
-            # Generate insights
-            insight = self._generate_insight_with_memory_ai(user_msg, ai_msg, importance)
+        if importance <= core_config.IMPORTANCE_MIN_STORE:
+            logger.info("Low importance exchange - minimal storage")
+            return
+
+        # Generate summary
+        summary = generate_smart_summary(user_msg, ai_msg, importance)
+        if summary:
+            add_summary(summary, importance)
+
+        # Extract profile facts (structured with confidence)
+        facts = extract_smart_profile_facts(user_msg, ai_msg)
+        for key, data in facts.items():
+            upsert_profile_fact(
+                key,
+                data.get('value', ''),
+                data.get('confidence', 0.5),
+                source='exchange_analysis',
+                evidence=data.get('evidence'),
+            )
+
+        # Generate insights
+        if importance >= core_config.IMPORTANCE_INSIGHT_MIN:
+            insight = generate_contextual_insight(user_msg, ai_msg, {}, importance)
             if insight:
-                category = self._categorize_insight_with_memory_ai(insight)
+                category = categorize_insight(insight)
                 add_insight(insight, category, importance)
-        else:
-            logger.info("🧠 Low importance exchange - minimal storage")
-    
-    def _analyze_importance_with_memory_ai(self, user_msg: str, ai_msg: str) -> float:
-        """Analyze conversation importance using dedicated memory AI"""
-        prompt = f"""Rate this conversation's importance for long-term memory (0.0-1.0):
-
-CRITERIA:
-- Personal info revealed (0.7-1.0)
-- Emotional significance (0.6-0.9)
-- Preferences/insights (0.5-0.8)
-- Technical discussion (0.4-0.7)
-- Casual chat (0.1-0.3)
-
-User: {user_msg}
-AI: {ai_msg}
-
-Return only the decimal score:"""
-
-        try:
-            response = groq_memory_client.chat.completions.create(
-                model="meta-llama/llama-4-scout-17b-16e-instruct",  # Scout for quality
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=50
-            )
-            
-            # Extract score
-            import re
-            score_text = response.choices[0].message.content.strip()
-            match = re.search(r'(\d*\.?\d+)', score_text)
-            if match:
-                score = float(match.group(1))
-                return min(max(score, 0.0), 1.0)
-                
-        except Exception as e:
-            logger.error(f"Memory AI importance analysis failed: {e}")
-        
-        # Fallback heuristic
-        combined = f"{user_msg} {ai_msg}".lower()
-        if any(word in combined for word in ['favorite', 'prefer', 'remember', 'important']):
-            return 0.7
-        elif any(word in combined for word in ['project', 'work', 'coding']):
-            return 0.5
-        elif any(word in combined for word in ['hello', 'hi', 'thanks']):
-            return 0.2
-        return 0.4
-    
-    def _generate_summary_with_memory_ai(self, user_msg: str, ai_msg: str, importance: float) -> str:
-        """Generate conversation summary using memory AI"""
-        prompt = f"""Summarize this conversation exchange in 1-2 sentences:
-
-User: {user_msg}
-AI: {ai_msg}
-
-Summary:"""
-
-        try:
-            response = groq_memory_client.chat.completions.create(
-                model="meta-llama/llama-4-scout-17b-16e-instruct",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=100
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            logger.error(f"Memory AI summary generation failed: {e}")
-            return ""
-    
-    def _extract_facts_with_memory_ai(self, user_msg: str, ai_msg: str) -> Dict:
-        """Extract profile facts using shared structured extractor."""
-        try:
-            from companion_ai.memory_ai import extract_smart_profile_facts
-            return extract_smart_profile_facts(user_msg, ai_msg)
-        except Exception as e:
-            logger.error(f"Memory AI fact extraction failed: {e}")
-            return {}
-    
-    def _generate_insight_with_memory_ai(self, user_msg: str, ai_msg: str, importance: float) -> str:
-        """Generate user insights using memory AI"""
-        if importance < core_config.IMPORTANCE_INSIGHT_MIN:
-            return ""
-            
-        prompt = f"""Generate a brief insight about the user based on this conversation:
-
-User: {user_msg}
-AI: {ai_msg}
-
-Insight:"""
-
-        try:
-            response = groq_memory_client.chat.completions.create(
-                model="meta-llama/llama-4-scout-17b-16e-instruct",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.4,
-                max_tokens=150
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            logger.error(f"Memory AI insight generation failed: {e}")
-            return ""
-    
-    def _categorize_insight_with_memory_ai(self, insight: str) -> str:
-        """Categorize insight using memory AI"""
-        prompt = f"""Categorize this insight into ONE category:
-- personality
-- interests  
-- preferences
-- skills
-- general
-
-Insight: {insight}
-
-Category:"""
-
-        try:
-            response = groq_memory_client.chat.completions.create(
-                model="meta-llama/llama-4-scout-17b-16e-instruct",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=20
-            )
-            category = response.choices[0].message.content.strip().lower()
-            if category in ['personality', 'interests', 'preferences', 'skills']:
-                return category
-        except Exception as e:
-            logger.error(f"Memory AI categorization failed: {e}")
-        
-        return 'general'

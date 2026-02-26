@@ -85,7 +85,7 @@ async def _ensure_browser(headless: bool = False):
         else:
             _page = await _context.new_page()
         
-        logger.info("✅ Chrome launched! Logins will persist in AI profile.")
+        logger.info("Chrome launched! Logins will persist in AI profile.")
         return _page
         
     except Exception as e:

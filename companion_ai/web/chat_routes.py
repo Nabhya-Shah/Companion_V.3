@@ -12,6 +12,7 @@ from companion_ai.core import config as core_config
 from companion_ai.conversation_manager import ConversationSession
 from companion_ai.services.tts import tts_manager
 from companion_ai.services import jobs as job_manager_module
+from companion_ai.services.persona import record_interaction, trigger_evolution_background
 from companion_ai.web import state
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,14 @@ def chat_streaming():
         user_message = data.get('message', '').strip()
         if not user_message:
             return jsonify({'error': 'Empty message'}), 400
+
+        # --- Persona trigger: record interaction & maybe evolve ---
+        try:
+            should_evolve = record_interaction()
+            if should_evolve:
+                trigger_evolution_background(active_history)
+        except Exception:
+            pass  # never break chat for persona
 
         def generate():
             """Generator for streaming response."""
@@ -59,7 +68,7 @@ def chat_streaming():
                 tts_available = tts_manager.is_enabled or getattr(tts_manager, 'provider', 'azure') == 'groq'
                 if tts_enabled and tts_available and full_response.strip():
                     try:
-                        logger.info(f"🔊 TTS: Speaking response with provider={getattr(tts_manager, 'provider', 'azure')}")
+                        logger.info(f"TTS: Speaking response with provider={getattr(tts_manager, 'provider', 'azure')}")
                         tts_manager.speak_text(full_response, blocking=False)
                     except Exception as tts_error:
                         logger.warning(f"TTS error: {tts_error}")
@@ -98,6 +107,14 @@ def debug_chat():
         session_key, profile_key, mem0_user_id, active_history, active_session = state._get_active_session_state(data)
         user_message = data.get('message', '').strip()
         persona = data.get('persona', 'Companion')
+
+        # --- Persona trigger ---
+        try:
+            should_evolve = record_interaction()
+            if should_evolve:
+                trigger_evolution_background(active_history)
+        except Exception:
+            pass
 
         if not user_message:
             return jsonify({'error': 'Empty message'}), 400

@@ -122,7 +122,7 @@ def _initialize_clients():
     if GROQ_TOOL_API_KEY:
         try:
             groq_tool_client = Groq(api_key=GROQ_TOOL_API_KEY)
-            logger.info("✅ Dedicated Groq TOOL client initialized")
+            logger.info("Dedicated Groq TOOL client initialized")
         except Exception as e:
             logger.error(f"Failed to initialize Groq TOOL client: {e}")
 
@@ -483,7 +483,7 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
 
         for iteration in range(1, max_iterations + 1):
             if stop_callback and stop_callback():
-                logger.warning("🛑 Local tool loop stopped by callback")
+                logger.warning("Local tool loop stopped by callback")
                 return "I was stopped before I could finish.", None, None
 
             resp = client.chat.completions.create(
@@ -603,7 +603,7 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
     while iteration < max_iterations:
         # Check stop callback
         if stop_callback and stop_callback():
-            logger.warning("🛑 Tool execution stopped by callback")
+            logger.warning("Tool execution stopped by callback")
             return "I was stopped before I could finish.", None, None
 
         iteration += 1
@@ -629,7 +629,7 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
                         if memories:
                             mem_list = [m.get('memory', '') for m in memories[:5]]
                             mem0_context = f"\n\n[Personal memories about this user: {', '.join(mem_list)}]"
-                            logger.info(f"📚 Added {len(mem_list)} Mem0 memories to synthesis")
+                            logger.info(f"Added {len(mem_list)} Mem0 memories to synthesis")
                     except Exception as e:
                         logger.warning(f"Failed to get Mem0 memories for synthesis: {e}")
 
@@ -656,7 +656,7 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
                         stream=False
                     )
                     final_text = synthesis_response.choices[0].message.content.strip()
-                    logger.info(f"✨ Synthesized response using {conversation_model}")
+                    logger.info(f"Synthesized response using {conversation_model}")
 
                     # Return with tool tracking
                     tool_name = all_tool_results[0][0]
@@ -705,7 +705,7 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
                         stream=False
                     )
                     final_text = personality_response.choices[0].message.content.strip()
-                    logger.info(f"✨ Generated personality response using {conversation_model}")
+                    logger.info(f"Generated personality response using {conversation_model}")
                     return sanitize_output(final_text), None, None
                 except Exception as e:
                     logger.error(f"Personality response failed: {e}")

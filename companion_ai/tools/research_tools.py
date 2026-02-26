@@ -73,7 +73,7 @@ def tool_wikipedia(query: str) -> str:
         if len(extract) > 500:
             extract = extract[:497] + '...'
 
-        return f"📖 Wikipedia - {title}:\n\n{extract}"
+        return f"Wikipedia - {title}:\n\n{extract}"
 
     except requests.Timeout:
         return "Wikipedia lookup timeout. Try again."
