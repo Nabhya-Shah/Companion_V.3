@@ -1,6 +1,6 @@
 # Companion AI Feature Tracker
 
-Date: 2026-02-26
+Date: 2026-02-27
 
 This artifact tracks **user-visible functionality** progress in plain language.
 
@@ -85,7 +85,7 @@ This artifact tracks **user-visible functionality** progress in plain language.
 - **Feature source-of-truth:** this file
 - Update both when a feature moves status.
 
-## Phase 5 — Architecture Activation & Spring Clean (In Progress)
+## Phase 5 — Architecture Activation & Spring Clean (Completed 2026-02-26)
 
 | ID | Feature | User Value | Acceptance Signal | Status |
 |---|---|---|---|---|
@@ -93,12 +93,18 @@ This artifact tracks **user-visible functionality** progress in plain language.
 | P5-02 | Legacy chat endpoint removal | Single clear chat path (SSE only) | `/api/chat` returns 404, `/api/chat/send` works | ✅ Completed (P5-A) |
 | P5-03 | Compatibility shim consolidation | Direct imports, no re-export wrappers | 5 shim files deleted, all imports updated | ✅ Completed (P5-A) |
 | P5-04 | Orchestrator activation | Every message routed intelligently | `USE_ORCHESTRATOR=true` default, 40 routing tests pass | ✅ Completed (P5-B) |
-| P5-05 | Local loop wiring | Specialist tasks delegated to local models | DELEGATE decisions invoke correct loop | ⏳ Not started (P5-D) |
-| P5-06 | Quick tool path | Fast zero-shot tool calls via Groq | Simple tool calls don't hit local models | ⏳ Not started (P5-D) |
-| P5-07 | Web blueprint split | Cleaner server code, easier navigation | Same endpoints, `web/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
-| P5-08 | Tools directory split | Modular tool organization | Same tool surface, `tools/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
-| P5-09 | LLM directory split | Separated provider concerns | Same LLM behavior, `llm/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
-| P5-10 | Unified knowledge system | Single `remember`/`recall` API for all memory backends | `knowledge.py` entry point, confidence-based facts, 144 tests pass | ✅ Completed (P5-D) |
-| P5-11 | Persona foundation | Personality evolves with use, not just on shutdown | `PersonaState` singleton, 3 trigger types, orchestrator integration, 178 tests pass | ✅ Completed (P5-E) |
-| P5-10 | Unified knowledge interface | One "remember/recall" regardless of backend | Single entry point for all knowledge ops | ⏳ Not started (P5-D) |
-| P5-11 | Persona orchestrator integration | Companion personality in every response | Persona traits reflected in orchestrator context | ⏳ Not started (P5-E) |
+| P5-05 | Web blueprint split | Cleaner server code, easier navigation | Same endpoints, `web/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
+| P5-06 | Tools directory split | Modular tool organization | Same tool surface, `tools/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
+| P5-07 | LLM directory split | Separated provider concerns | Same LLM behavior, `llm/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
+| P5-08 | Unified knowledge system | Single `remember`/`recall` API for all memory backends | `knowledge.py` entry point, confidence-based facts, 144 tests pass | ✅ Completed (P5-D) |
+| P5-09 | Persona foundation | Personality evolves with use, not just on shutdown | `PersonaState` singleton, 3 trigger types, orchestrator integration, 178 tests pass | ✅ Completed (P5-E) |
+
+## Phase 6 — Daily-Life Intelligence (Planned)
+
+| ID | Feature | User Value | Acceptance Signal | Status |
+|---|---|---|---|---|
+| P6-01 | Context packaging | Better reasoning quality — relevant memory/docs/events bundled per request | `ContextPackager.build()` wired to orchestrator; `/api/context/bundle` debug endpoint; focused tests | ⏳ Not started (P6-A) |
+| P6-02 | Human-in-the-loop approvals | High-risk actions require explicit confirmation before execution | Approval lifecycle (pending→approved/rejected) + approval gate in tool dispatch + Tasks sidebar UI | ⏳ Not started (P6-B) |
+| P6-03 | Workflow templates | Launch repeatable personal routines in ≤ 2 steps | `/api/workflows` CRUD + `/api/workflows/<id>/run` + built-in `daily_briefing` and `inbox_triage` templates | ⏳ Not started (P6-C) |
+| P6-04 | Cross-skill orchestration | Complex multi-step tasks complete with per-step status visible | `/api/plans` with `PlanStep` status + Tasks sidebar plan view + orchestrator plan emission | ⏳ Not started (P6-D) |
+| P6-05 | Proactive insights | Timely daily/weekly digest suggestions without manual querying | `/api/insights` list/dismiss + scheduler-triggered digest + UI badge + focused tests | ⏳ Not started (P6-E) |
