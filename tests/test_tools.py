@@ -45,6 +45,7 @@ def test_tool_allowlist_blocks_disallowed_tool(monkeypatch):
 def test_plugin_allowlist_blocks_plugin_tool(monkeypatch):
     """Plugin policy should block tools from disabled plugins."""
     monkeypatch.setattr(core_config, 'PLUGIN_ALLOWLIST', 'core')
+    monkeypatch.setattr(core_config, 'PLUGIN_POLICY_PATH', '')
     blocked = run_tool('start_background_task', 'research task')
     allowed = run_tool('get_current_time', '')
 
@@ -94,6 +95,7 @@ def test_set_workspace_plugin_policy_rejects_unknown_plugin(monkeypatch, tmp_pat
 
 def test_evaluate_tool_policy_reports_plugin_denied(monkeypatch):
     monkeypatch.setattr(core_config, 'PLUGIN_ALLOWLIST', 'core')
+    monkeypatch.setattr(core_config, 'PLUGIN_POLICY_PATH', '')
     decision = evaluate_tool_policy('start_background_task')
 
     assert decision['allowed'] is False

@@ -15,6 +15,11 @@ from companion_ai.tools import (
     get_plugin_catalog,
     get_plugin_policy_state,
     set_workspace_plugin_policy,
+    get_pending_approvals,
+    resolve_approval,
+    list_approval_required_tools,
+    mark_tool_requires_approval,
+    unmark_tool_requires_approval,
 )
 from companion_ai.web import state
 
@@ -128,3 +133,57 @@ def search():
     except Exception as e:
         logger.error(f"Search error: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Human-In-The-Loop Approval endpoints
+# ---------------------------------------------------------------------------
+
+@tools_bp.route('/api/approvals', methods=['GET'])
+def pending_approvals():
+    """List all pending tool approval requests."""
+    return jsonify({'approvals': get_pending_approvals()})
+
+
+@tools_bp.route('/api/approvals/<request_id>', methods=['POST'])
+def resolve_approval_endpoint(request_id):
+    """Approve or deny a pending tool execution request."""
+    data = request.get_json(silent=True) or {}
+    decision = data.get('decision', '').lower()
+    if decision not in ('approve', 'deny'):
+        return jsonify({'error': "decision must be 'approve' or 'deny'"}), 400
+
+    result = resolve_approval(request_id, approved=(decision == 'approve'))
+    if result is None:
+        return jsonify({'error': 'Approval request not found or already resolved'}), 404
+
+    return jsonify({'status': result.get('status'), 'tool': result.get('tool'), 'id': request_id})
+
+
+@tools_bp.route('/api/approvals/config', methods=['GET', 'POST'])
+def approval_config():
+    """View or update which tools require approval."""
+    if request.method == 'GET':
+        return jsonify({'requires_approval': list_approval_required_tools()})
+
+    data = request.get_json(silent=True) or {}
+    tools_list = data.get('tools')
+    action = data.get('action', 'set')  # 'set', 'add', 'remove'
+
+    if not isinstance(tools_list, list):
+        return jsonify({'error': 'tools must be a list'}), 400
+
+    if action == 'add':
+        for t in tools_list:
+            mark_tool_requires_approval(t)
+    elif action == 'remove':
+        for t in tools_list:
+            unmark_tool_requires_approval(t)
+    else:
+        # Full replace
+        from companion_ai.tools.registry import _APPROVAL_REQUIRED_TOOLS
+        _APPROVAL_REQUIRED_TOOLS.clear()
+        for t in tools_list:
+            mark_tool_requires_approval(t)
+
+    return jsonify({'requires_approval': list_approval_required_tools()})

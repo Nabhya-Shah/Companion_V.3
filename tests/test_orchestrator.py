@@ -174,9 +174,11 @@ class TestOrchestratorPrompt:
         # The dynamic part should be truncated to 500 chars
         assert len(prompt) < 5000  # Static rules + 500 chars max context
 
-    def test_prompt_has_orpheus_vocal_directions(self):
+    def test_prompt_no_orpheus_when_tts_disabled(self):
+        """Orpheus TTS tags should NOT appear in prompt when TTS is off."""
         prompt = self.orch._build_orchestrator_prompt("test", {})
-        assert "Orpheus" in prompt or "TTS" in prompt
+        # TTS is disabled by default, so no emotion tag instructions
+        assert "[cheerful]" not in prompt
 
     def test_prompt_has_memory_routing(self):
         prompt = self.orch._build_orchestrator_prompt("test", {})
@@ -203,11 +205,11 @@ class TestOrchestratorFallback:
 
     def test_no_client_returns_fallback_decision(self):
         orch = Orchestrator()
-        # Force no client
-        orch._groq_client = None
-        client, model, is_local = orch._get_client_and_model()
-        assert client is None
-        assert model is None
+        # Force no client via patching
+        with patch.object(orch, '_get_client_and_model', return_value=(None, None, False)):
+            decision = asyncio.run(orch._get_decision("hello", {}))
+            assert decision.action == OrchestratorAction.ANSWER
+            assert "trouble connecting" in decision.content
 
     def test_get_decision_without_client_returns_answer(self):
         orch = Orchestrator()

@@ -85,7 +85,7 @@ This artifact tracks **user-visible functionality** progress in plain language.
 - **Feature source-of-truth:** this file
 - Update both when a feature moves status.
 
-## Phase 5 — Architecture Activation & Spring Clean (In Progress)
+## Phase 5 (Completed)
 
 | ID | Feature | User Value | Acceptance Signal | Status |
 |---|---|---|---|---|
@@ -93,12 +93,18 @@ This artifact tracks **user-visible functionality** progress in plain language.
 | P5-02 | Legacy chat endpoint removal | Single clear chat path (SSE only) | `/api/chat` returns 404, `/api/chat/send` works | ✅ Completed (P5-A) |
 | P5-03 | Compatibility shim consolidation | Direct imports, no re-export wrappers | 5 shim files deleted, all imports updated | ✅ Completed (P5-A) |
 | P5-04 | Orchestrator activation | Every message routed intelligently | `USE_ORCHESTRATOR=true` default, 40 routing tests pass | ✅ Completed (P5-B) |
-| P5-05 | Local loop wiring | Specialist tasks delegated to local models | DELEGATE decisions invoke correct loop | ⏳ Not started (P5-D) |
-| P5-06 | Quick tool path | Fast zero-shot tool calls via Groq | Simple tool calls don't hit local models | ⏳ Not started (P5-D) |
-| P5-07 | Web blueprint split | Cleaner server code, easier navigation | Same endpoints, `web/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
-| P5-08 | Tools directory split | Modular tool organization | Same tool surface, `tools/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
-| P5-09 | LLM directory split | Separated provider concerns | Same LLM behavior, `llm/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
-| P5-10 | Unified knowledge system | Single `remember`/`recall` API for all memory backends | `knowledge.py` entry point, confidence-based facts, 144 tests pass | ✅ Completed (P5-D) |
-| P5-11 | Persona foundation | Personality evolves with use, not just on shutdown | `PersonaState` singleton, 3 trigger types, orchestrator integration, 178 tests pass | ✅ Completed (P5-E) |
-| P5-10 | Unified knowledge interface | One "remember/recall" regardless of backend | Single entry point for all knowledge ops | ⏳ Not started (P5-D) |
-| P5-11 | Persona orchestrator integration | Companion personality in every response | Persona traits reflected in orchestrator context | ⏳ Not started (P5-E) |
+| P5-05 | Web blueprint split | Cleaner server code, easier navigation | Same endpoints, `web/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
+| P5-06 | Tools directory split | Modular tool organization | Same tool surface, `tools/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
+| P5-07 | LLM directory split | Separated provider concerns | Same LLM behavior, `llm/` directory structure, 120 tests pass | ✅ Completed (P5-C) |
+| P5-08 | Unified knowledge system | Single `remember`/`recall` API for all memory backends | `knowledge.py` entry point, confidence-based facts, 144 tests pass | ✅ Completed (P5-D) |
+| P5-09 | Persona foundation | Personality evolves with use, not just on shutdown | `PersonaState` singleton, 3 trigger types, orchestrator integration, 178 tests pass | ✅ Completed (P5-E) |
+
+## Base (Phase 6) — Daily-Life Intelligence (In Progress)
+
+| ID | Feature | User Value | Acceptance Signal | Status |
+|---|---|---|---|---|
+| P6-01 | Workflow engine | Run multi-step routines (Morning Briefing) via API | `WorkflowManager` parses JSON steps and executes sequentially | ✅ Complete (P6-A) |
+| P6-02 | Routines UI Panel | One-click access to daily automations | User can launch a Workflow from the Web UI manually | ✅ Complete (P6-A) |
+| P6-03 | Human-In-The-Loop Approval | Prevents dangerous tools from running without permission | UI shows [Approve/Deny] prompt for `requires_approval` tools | ✅ Complete (P6-B) |
+| P6-04 | Task Planning Transparency | Shows the steps the AI commits to before it runs them | Chat UI shows Queued -> In-Progress progress tracker via SSE plan events | ✅ Complete (P6-C) |
+| P6-05 | Proactive Insights Engine | Companion texts you first based on events or time | Offline and online unprompted SSE/Chat message delivery | ⏳ Not Started (P6-D) |

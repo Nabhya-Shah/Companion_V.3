@@ -101,6 +101,8 @@ def create_app() -> Flask:
     from companion_ai.web.loxone_routes import loxone_bp
     from companion_ai.web.files_routes import files_bp
     from companion_ai.web.system_routes import system_bp
+    from companion_ai.web.workflow_routes import bp as workflow_bp
+    from companion_ai.web.test_harness import test_bp, install_hooks as install_test_hooks
 
     app.register_blueprint(chat_bp)
     app.register_blueprint(memory_bp)
@@ -109,6 +111,11 @@ def create_app() -> Flask:
     app.register_blueprint(loxone_bp)
     app.register_blueprint(files_bp)
     app.register_blueprint(system_bp)
+    app.register_blueprint(workflow_bp)
+    app.register_blueprint(test_bp)
+
+    # Install test harness hooks for activity logging
+    install_test_hooks()
 
     # ------------------------------------------------------------------
     # Background brain indexing

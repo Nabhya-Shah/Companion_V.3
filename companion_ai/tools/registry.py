@@ -58,17 +58,27 @@ _SANDBOX_BLOCKED_TOOLS = {
     'browser_press',
 }
 
+# Tools that require explicit user approval before execution
+_APPROVAL_REQUIRED_TOOLS: set[str] = set()
+
+# Pending approval requests  {request_id: ApprovalRequest}
+_PENDING_APPROVALS: Dict[str, Any] = {}
+_APPROVAL_LOCK = threading.Lock()
+_APPROVAL_EVENTS: Dict[str, threading.Event] = {}
+
 # ---------------------------------------------------------------------------
 # @tool decorator
 # ---------------------------------------------------------------------------
 
-def tool(name: str, schema: Dict[str, Any] | None = None, plugin: str = 'core'):
+def tool(name: str, schema: Dict[str, Any] | None = None, plugin: str = 'core',
+         requires_approval: bool = False):
     """Decorator to register both legacy and modern function-calling tools.
 
     Args:
         name: Tool identifier
         schema: Optional JSON Schema for native function calling
         plugin: Plugin group name (default 'core')
+        requires_approval: If True, tool execution will pause for user consent
     """
     def wrap(fn: ToolFn):
         _TOOLS[name] = fn
@@ -77,8 +87,30 @@ def tool(name: str, schema: Dict[str, Any] | None = None, plugin: str = 'core'):
         _PLUGIN_TOOLS.setdefault(normalized_plugin, set()).add(name)
         if schema:
             _FUNCTION_SCHEMAS[name] = schema
+        if requires_approval:
+            _APPROVAL_REQUIRED_TOOLS.add(name)
         return fn
     return wrap
+
+
+def mark_tool_requires_approval(name: str) -> None:
+    """Programmatically flag a tool as requiring approval."""
+    _APPROVAL_REQUIRED_TOOLS.add(name)
+
+
+def unmark_tool_requires_approval(name: str) -> None:
+    """Remove the approval requirement from a tool."""
+    _APPROVAL_REQUIRED_TOOLS.discard(name)
+
+
+def tool_requires_approval(name: str) -> bool:
+    """Check if a tool requires user approval."""
+    return name in _APPROVAL_REQUIRED_TOOLS
+
+
+def list_approval_required_tools() -> list[str]:
+    """List all tools that require approval."""
+    return sorted(_APPROVAL_REQUIRED_TOOLS)
 
 # ---------------------------------------------------------------------------
 # Plugin system
@@ -333,6 +365,55 @@ def _blocked_tool_message(name: str) -> str:
 # Dispatch
 # ---------------------------------------------------------------------------
 
+def _wait_for_approval(name: str, args_summary: str, timeout: float = 300.0) -> bool:
+    """Block until user approves/denies this tool call. Returns True if approved."""
+    import uuid as _uuid
+    request_id = str(_uuid.uuid4())[:8]
+    event = threading.Event()
+
+    with _APPROVAL_LOCK:
+        _APPROVAL_EVENTS[request_id] = event
+        _PENDING_APPROVALS[request_id] = {
+            'id': request_id,
+            'tool': name,
+            'args_summary': args_summary,
+            'status': 'pending',
+            'created_at': datetime.datetime.now().isoformat(),
+        }
+
+    import logging as _log
+    _log.getLogger(__name__).info(f"Approval request {request_id} created for tool '{name}'")
+
+    # Block until approved/denied or timeout
+    approved = event.wait(timeout=timeout)
+
+    with _APPROVAL_LOCK:
+        req = _PENDING_APPROVALS.pop(request_id, {})
+        _APPROVAL_EVENTS.pop(request_id, None)
+
+    if not approved:
+        return False  # timed out
+    return req.get('status') == 'approved'
+
+
+def resolve_approval(request_id: str, approved: bool) -> dict | None:
+    """Approve or deny a pending tool execution request."""
+    with _APPROVAL_LOCK:
+        req = _PENDING_APPROVALS.get(request_id)
+        event = _APPROVAL_EVENTS.get(request_id)
+        if not req or not event:
+            return None
+        req['status'] = 'approved' if approved else 'denied'
+    event.set()
+    return req
+
+
+def get_pending_approvals() -> list[dict]:
+    """Return all currently pending approval requests."""
+    with _APPROVAL_LOCK:
+        return [dict(v) for v in _PENDING_APPROVALS.values() if v.get('status') == 'pending']
+
+
 def run_tool(name: str, arg: str) -> str:
     """Execute a tool by name with string argument (legacy interface)."""
     fn = _TOOLS.get(name)
@@ -340,6 +421,9 @@ def run_tool(name: str, arg: str) -> str:
         return f'Unknown tool: {name}'
     if not _is_tool_allowed(name):
         return _blocked_tool_message(name)
+    if name in _APPROVAL_REQUIRED_TOOLS:
+        if not _wait_for_approval(name, str(arg)[:200]):
+            return f"Tool '{name}' was denied or timed out waiting for approval."
     return fn(arg)
 
 
@@ -365,6 +449,10 @@ def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
         return f'Unknown function: {function_name}'
     if not _is_tool_allowed(function_name):
         return _blocked_tool_message(function_name)
+    if function_name in _APPROVAL_REQUIRED_TOOLS:
+        summary = json.dumps(arguments, default=str)[:200]
+        if not _wait_for_approval(function_name, summary):
+            return f"Tool '{function_name}' was denied or timed out waiting for approval."
 
     # Handle different function signatures
     if function_name == 'get_current_time':

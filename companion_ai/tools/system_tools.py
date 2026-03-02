@@ -153,7 +153,7 @@ def tool_memory_search(query: str) -> str:
 def tool_look_at_screen(prompt: str = "What is on the screen?") -> str:
     """Analyze the current screen content."""
     try:
-        from companion_ai.vision_manager import vision_manager
+        from companion_ai.agents.vision import vision_manager
         return vision_manager.analyze_current_screen(prompt)
     except Exception as e:
         return f"Error analyzing screen: {e}"

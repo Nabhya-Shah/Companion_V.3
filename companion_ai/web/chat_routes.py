@@ -2,9 +2,14 @@
 """Chat blueprint — streaming send, debug, history, SSE stream, stop."""
 
 import json
+import re
 import time
+import queue
 import logging
 from datetime import datetime
+
+# Regex to strip TTS emotion tags like [cheerful], [whisper], etc.
+_EMOTION_TAG_RE = re.compile(r'\[(?:cheerful|whisper|sad|dramatic|excited|neutral|angry|laugh|sigh)\]\s*', re.IGNORECASE)
 
 from flask import Blueprint, request, jsonify, Response, stream_with_context
 
@@ -18,6 +23,24 @@ from companion_ai.web import state
 logger = logging.getLogger(__name__)
 
 chat_bp = Blueprint('chat', __name__)
+
+# ---------------------------------------------------------------------------
+# Plan event queue — task_planner pushes events, SSE pops them
+# ---------------------------------------------------------------------------
+_plan_event_queue: queue.Queue = queue.Queue()
+
+
+def _plan_event_listener(event_type: str, plan_id: str, data: dict):
+    """Callback registered with task_planner to capture plan progress events."""
+    _plan_event_queue.put({"event_type": event_type, "plan_id": plan_id, "data": data})
+
+
+# Register once on module import
+try:
+    from companion_ai.services.task_planner import register_plan_listener
+    register_plan_listener(_plan_event_listener)
+except Exception:
+    pass  # task_planner might not exist yet during early imports
 
 
 @chat_bp.route('/api/chat/send', methods=['POST'])
@@ -52,17 +75,36 @@ def chat_streaming():
                     active_history,
                     memory_user_id=mem0_user_id,
                 ):
+                    # Flush any queued plan events before each chunk
+                    while not _plan_event_queue.empty():
+                        try:
+                            plan_evt = _plan_event_queue.get_nowait()
+                            yield f"data: {json.dumps({'plan_event': plan_evt})}\n\n"
+                        except Exception:
+                            break
+
                     if isinstance(chunk, dict) and chunk.get('type') == 'meta':
                         yield f"data: {json.dumps({'meta': chunk['data']})}\n\n"
                     elif isinstance(chunk, dict) and chunk.get('type') == 'token_meta':
                         yield f"data: {json.dumps({'token_meta': chunk['data']})}\n\n"
                     else:
+                        chunk = _EMOTION_TAG_RE.sub('', chunk)
                         full_response += chunk
                         yield f"data: {json.dumps({'chunk': chunk})}\n\n"
 
+                # Flush any remaining plan events after stream completes
+                while not _plan_event_queue.empty():
+                    try:
+                        plan_evt = _plan_event_queue.get_nowait()
+                        yield f"data: {json.dumps({'plan_event': plan_evt})}\n\n"
+                    except Exception:
+                        break
+
                 from companion_ai.llm_interface import get_last_token_usage
                 token_usage = get_last_token_usage()
-                memory_saved = core_config.USE_MEM0
+                # Only show memory toast if the Mem0 thread was actually started
+                # (not if orchestrator already handled memory, or Mem0 is disabled)
+                memory_saved = getattr(active_session, '_last_mem0_started', False)
 
                 tts_enabled = data.get('tts_enabled', False)
                 tts_available = tts_manager.is_enabled or getattr(tts_manager, 'provider', 'azure') == 'groq'
@@ -131,6 +173,9 @@ def debug_chat():
 
         if ai_response.startswith("Chat:") or ai_response.startswith("CHAT:"):
             ai_response = ai_response[5:].strip()
+
+        # Strip TTS emotion tags from displayed text
+        ai_response = _EMOTION_TAG_RE.sub('', ai_response)
 
         entry = {
             'user': user_message,
@@ -261,6 +306,45 @@ def chat_history_stream():
                 except Exception as e:
                     logger.error(f"Job stream error: {e}")
 
+                # Check for pending approval requests
+                try:
+                    from companion_ai.tools.registry import get_pending_approvals
+                    pending = get_pending_approvals()
+                    if pending:
+                        state.sse_sequence += 1
+                        state.sse_counters['approval.pending'] = state.sse_counters.get('approval.pending', 0) + 1
+                        state.sse_last_event_ts = datetime.now().isoformat()
+                        payload = json.dumps({
+                            'type': 'approval_request',
+                            'event': 'approval.pending',
+                            'seq': state.sse_sequence,
+                            'ts': datetime.now().isoformat(),
+                            'payload': {'approvals': pending},
+                        })
+                        yield f"data: {payload}\n\n"
+                except Exception as e:
+                    logger.error(f"Approval stream error: {e}")
+
+                # Drain plan events from the task_planner queue
+                try:
+                    while not _plan_event_queue.empty():
+                        plan_evt = _plan_event_queue.get_nowait()
+                        state.sse_sequence += 1
+                        evt_type = plan_evt["event_type"]
+                        state.sse_counters[evt_type] = state.sse_counters.get(evt_type, 0) + 1
+                        state.sse_last_event_ts = datetime.now().isoformat()
+                        payload = json.dumps({
+                            'type': 'plan_update',
+                            'event': evt_type,
+                            'seq': state.sse_sequence,
+                            'ts': datetime.now().isoformat(),
+                            'payload': plan_evt["data"],
+                            'plan_id': plan_evt["plan_id"],
+                        })
+                        yield f"data: {payload}\n\n"
+                except Exception as e:
+                    logger.error(f"Plan stream error: {e}")
+
             yield ": keep-alive\n\n"
 
     response = Response(stream_with_context(event_stream()), mimetype='text/event-stream')
@@ -289,3 +373,14 @@ def stop_chat():
     except Exception as e:
         logger.error(f"Stop error: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@chat_bp.route('/api/plans', methods=['GET'])
+def get_active_plans():
+    """Return any active task plans (for UI reconnect / poll)."""
+    try:
+        from companion_ai.services.task_planner import get_all_active_plans
+        return jsonify({'plans': get_all_active_plans()})
+    except Exception as e:
+        logger.error(f"Plans API error: {e}")
+        return jsonify({'plans': [], 'error': str(e)})

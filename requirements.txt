@@ -14,24 +14,19 @@ python-docx>=0.8.11     # Word document reading
 # GUI Dependencies (tkinter is part of the standard library on most Python distributions; do not list as pip dep)
 # tkinter
 
-# Audio Processing (for voice features)
-pyaudio>=0.2.11
+# Audio Processing (for voice features — optional)
+# pyaudio>=0.2.11      # Uncomment if using local voice recording
 numpy>=1.24.0
 azure-cognitiveservices-speech>=1.30.0
 # Pin azure-core to patched version (CVE-2026-21226)
 azure-core>=1.38.0
 
-# Optional: Advanced audio processing
-openai-whisper>=20231117
-
 # Vision
 mss>=9.0.1              # Fast screen capture
-pyautogui>=0.9.53       # UI automation (mouse/keyboard)
 
 # Knowledge Graph & Embeddings
 networkx>=3.1           # Graph operations for knowledge graph
 sentence-transformers>=2.2.0  # Embeddings for Mem0 and semantic search
-FlagEmbedding>=1.2.0    # BGE reranker for RAG
 
 # Memory (V4)
 mem0ai>=0.1.0           # Mem0 memory framework

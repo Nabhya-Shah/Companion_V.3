@@ -1,0 +1,22 @@
+{
+    "name": "Morning Briefing",
+    "description": "Reviews today's schedule and the weather, then prepares a daily summary.",
+    "steps": [
+        {
+            "id": "step_schedule",
+            "action": "prompt",
+            "text": "Check my memories for any schedules or tasks I need to do today."
+        },
+        {
+            "id": "step_weather",
+            "action": "prompt",
+            "text": "What is the current weather forecast for today?"
+        },
+        {
+            "id": "step_summary",
+            "action": "prompt",
+            "text": "Using your findings about my schedule and the weather, write a friendly morning briefing to start my day. Please present the final text clearly.",
+            "output_target": "chat"
+        }
+    ]
+}

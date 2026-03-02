@@ -24,14 +24,6 @@
     <div class="main-content">
       <header class="topbar">
         <div class="topbar-left">
-          <button id="toggleTasksBtn" class="icon-btn" title="Background Tasks">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
-              <path d="m9 12 2 2 4-4" />
-            </svg>
-            <span class="task-count-badge" id="taskCountBadge" style="display: none;">0</span>
-          </button>
           <div class="brand">
             <div class="brand-icon">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -44,15 +36,6 @@
           </div>
         </div>
         <div class="topbar-right">
-          <button id="toggleSmartHomeBtn" class="icon-btn" title="Smart Home">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path
-                d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5" />
-              <path d="M9 18h6" />
-              <path d="M10 22h4" />
-            </svg>
-          </button>
           <a href="/graph" target="_blank" class="icon-btn" title="Knowledge Graph">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -64,11 +47,42 @@
               <path d="m14.5 9.5 3-3M9.5 9.5l-3-3M14.5 14.5l3 3M9.5 14.5l-3 3" />
             </svg>
           </a>
-          <button id="shutdownBtn" class="icon-btn" title="Shutdown Server">
+          <button class="icon-btn" data-panel="tasks" title="Tasks">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 2v10" />
-              <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />
+              <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
+              <path d="m9 12 2 2 4-4" />
+            </svg>
+            <span class="task-count-badge" id="taskCountBadge" style="display: none;">0</span>
+          </button>
+          <button class="icon-btn" data-panel="memory" title="Memory">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z" />
+              <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" />
+              <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4" />
+            </svg>
+          </button>
+          <button class="icon-btn" data-panel="knowledge" title="Knowledge">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20" />
+            </svg>
+          </button>
+          <button class="icon-btn" data-panel="stats" title="Stats">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 3v16a2 2 0 0 0 2 2h16" />
+              <path d="m19 9-5 5-4-4-3 3" />
+            </svg>
+          </button>
+          <button class="icon-btn" data-panel="smarthome" title="Smart Home">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path
+                d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5" />
+              <path d="M9 18h6" />
+              <path d="M10 22h4" />
             </svg>
           </button>
           <button id="toggleSettingsBtn" class="icon-btn" title="Settings">
@@ -77,20 +91,6 @@
               <path
                 d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
               <circle cx="12" cy="12" r="3" />
-            </svg>
-          </button>
-          <button id="toggleMemoryBtn" class="icon-btn" title="Memory">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z" />
-              <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" />
-              <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4" />
-              <path d="M17.599 6.5a3 3 0 0 0 .399-1.375" />
-              <path d="M6.003 5.125A3 3 0 0 0 6.401 6.5" />
-              <path d="M3.477 10.896a4 4 0 0 1 .585-.396" />
-              <path d="M19.938 10.5a4 4 0 0 1 .585.396" />
-              <path d="M6 18a4 4 0 0 1-1.967-.516" />
-              <path d="M19.967 17.484A4 4 0 0 1 18 18" />
             </svg>
           </button>
         </div>
@@ -214,44 +214,46 @@
       </footer>
     </div>
 
-    <!-- Left Sidebar - Background Tasks -->
-    <aside class="tasks-sidebar" id="tasksSidebar">
-      <div class="sidebar-header">
-        <h3>🔄 Active Tasks</h3>
-        <button id="createScheduleBtn" class="task-cancel-btn" type="button" title="Create schedule">+ Schedule</button>
-        <button id="closeTasksBtn" class="close-btn">×</button>
-      </div>
-      <div class="tasks-content">
-        <div class="tasks-empty" id="tasksEmpty">
-          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
-            <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
-            <path d="m9 12 2 2 4-4" />
-          </svg>
-          <p>No active tasks</p>
-          <span>Background tasks will appear here</span>
-        </div>
-        <div class="tasks-list" id="tasksList" style="display: none;">
-          <!-- Tasks will be dynamically added here -->
-        </div>
-      </div>
-    </aside>
-
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
-    <!-- Right Sidebar - Memory -->
-    <aside class="memory-sidebar" id="memorySidebar">
-      <div class="sidebar-header">
-        <h3>Memory</h3>
-        <button id="closeMemoryBtn" class="close-btn">×</button>
+    <!-- Unified Side Panel -->
+    <aside class="side-panel" id="sidePanel">
+      <div class="panel-header">
+        <h3 class="panel-title" id="panelTitle">Tasks</h3>
+        <button id="closePanelBtn" class="close-btn">&times;</button>
       </div>
-      <nav class="tabs">
-        <button class="tab active" data-tab="memory">Memory</button>
-        <button class="tab" data-tab="knowledge">Knowledge</button>
-      </nav>
-      <div class="tabpanes">
-        <div class="pane active" id="pane-memory">
+      <div class="panel-body">
+        <!-- Tasks Pane -->
+        <div class="panel-pane active" id="pane-tasks">
+          <div class="panel-pane-header">
+            <h3>Active Tasks</h3>
+            <button id="createScheduleBtn" class="small-btn" type="button" title="Create schedule">+ Schedule</button>
+          </div>
+          <div class="tasks-content">
+            <div class="tasks-empty" id="tasksEmpty">
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
+                <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
+                <path d="m9 12 2 2 4-4" />
+              </svg>
+              <p>No active tasks</p>
+              <span>Background tasks will appear here</span>
+            </div>
+            <div class="tasks-list" id="tasksList" style="display: none;"></div>
+            <div class="routines-divider">
+              <h3>Routines</h3>
+            </div>
+            <div class="routines-list" id="routinesList">
+              <div class="tasks-empty" id="routinesEmpty" style="display: none;">
+                <p class="routines-empty-text">No routines found</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Memory Pane -->
+        <div class="panel-pane" id="pane-memory">
           <div class="stats-card">
             <div class="stats-header">
               <span class="stats-icon">
@@ -279,11 +281,11 @@
               </div>
             </div>
           </div>
-          <!-- Search Box -->
           <div class="memory-search-container">
-            <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="11" cy="11" r="8"/>
-              <path d="m21 21-4.3-4.3"/>
+            <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+              fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8" />
+              <path d="m21 21-4.3-4.3" />
             </svg>
             <input type="text" id="memorySearchInput" class="memory-search" placeholder="Search memories..." />
             <span id="memorySearchCount" class="search-count"></span>
@@ -291,7 +293,7 @@
           <div class="memory-section">
             <div class="section-header-row">
               <h4>What I Know About You</h4>
-              <span class="fact-hint">Click to edit • Right-click to delete</span>
+              <span class="fact-hint">Click to edit &bull; Right-click to delete</span>
             </div>
             <div id="profileList" class="fact-cards"></div>
           </div>
@@ -302,7 +304,7 @@
           <div class="memory-section">
             <div class="section-header-row">
               <h4>Pending Memory Review</h4>
-              <div style="display:flex; gap:6px;">
+              <div class="pending-actions">
                 <button id="approveAllPendingBtn" class="small-btn" title="Approve all pending facts">Approve All</button>
                 <button id="rejectAllPendingBtn" class="small-btn" title="Reject all pending facts">Reject All</button>
               </div>
@@ -320,14 +322,17 @@
             Refresh
           </button>
         </div>
-        <div class="pane" id="pane-knowledge">
+
+        <!-- Knowledge Pane -->
+        <div class="panel-pane" id="pane-knowledge">
           <div class="memory-section">
-            <h4>📁 Upload Documents</h4>
+            <h4>Upload Documents</h4>
             <div id="brainUploadZone" class="upload-zone">
-              <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="17 8 12 3 7 8"/>
-                <line x1="12" y1="3" x2="12" y2="15"/>
+              <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="1.5">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
               </svg>
               <p>Drop files here or click to upload</p>
               <span>PDF, TXT, MD, DOCX supported</span>
@@ -336,8 +341,8 @@
           </div>
           <div class="memory-section">
             <div class="section-header-row">
-              <h4>🧠 Indexed Files</h4>
-              <button id="reindexBrainBtn" class="small-btn" title="Reindex all documents">↻</button>
+              <h4>Indexed Files</h4>
+              <button id="reindexBrainBtn" class="small-btn" title="Reindex all documents">&#x21bb;</button>
             </div>
             <div id="brainFilesList" class="brain-files-list">
               <div class="brain-empty">Loading...</div>
@@ -345,15 +350,17 @@
           </div>
           <div class="memory-section">
             <div class="section-header-row">
-              <h4>📎 Recent Uploads</h4>
-              <button id="refreshUploadsBtn" class="small-btn" title="Refresh uploaded files">↻</button>
+              <h4>Recent Uploads</h4>
+              <button id="refreshUploadsBtn" class="small-btn" title="Refresh uploaded files">&#x21bb;</button>
             </div>
             <div id="recentUploadsList" class="brain-files-list">
               <div class="brain-empty">Loading...</div>
             </div>
           </div>
         </div>
-        <div class="pane" id="pane-tokens">
+
+        <!-- Stats Pane (merged tokens + models + metrics) -->
+        <div class="panel-pane" id="pane-stats">
           <div class="memory-section">
             <h4>Session Token Usage</h4>
             <div id="tokenStats" class="token-stats">
@@ -381,11 +388,10 @@
             <h4>By Model</h4>
             <div id="tokenByModel" class="token-by-model"></div>
           </div>
-          <button id="refreshTokensBtn" class="refresh-btn">↻ Refresh</button>
-          <button id="resetTokensBtn" class="refresh-btn" style="margin-top: 8px; background: var(--error);">Reset
-            Stats</button>
-        </div>
-        <div class="pane" id="pane-models">
+          <div class="stats-btn-row">
+            <button id="refreshTokensBtn" class="refresh-btn">&#x21bb; Refresh</button>
+            <button id="resetTokensBtn" class="refresh-btn btn-danger">Reset Stats</button>
+          </div>
           <div class="stats-card">
             <div class="stats-header">
               <span class="stats-icon">
@@ -405,8 +411,6 @@
             <h4>Feature Flags</h4>
             <div id="featureFlags" class="feature-flags"></div>
           </div>
-        </div>
-        <div class="pane" id="pane-metrics">
           <div class="stats-card">
             <div class="stats-header">
               <span class="stats-icon">
@@ -437,7 +441,24 @@
             <h4>Model Latency</h4>
             <div id="latencyBars" class="latency-bars"></div>
           </div>
-          <button id="refreshMetricsBtn" class="refresh-btn">↻ Refresh</button>
+          <button id="refreshMetricsBtn" class="refresh-btn">&#x21bb; Refresh Metrics</button>
+        </div>
+
+        <!-- Smart Home Pane -->
+        <div class="panel-pane" id="pane-smarthome">
+          <div class="panel-pane-header">
+            <h3>Smart Home</h3>
+            <span class="refresh-countdown" id="smartHomeCountdown" title="Next refresh"></span>
+          </div>
+          <div id="smartHomeStatus" class="setting-hint smart-home-status">Checking smart home connection...</div>
+          <div class="smart-home-controls">
+            <button id="smartHomeAllOnBtn" class="small-btn" type="button">All On</button>
+            <button id="smartHomeAllOffBtn" class="small-btn" type="button">All Off</button>
+            <button id="smartHomeRefreshBtn" class="small-btn" type="button">Refresh</button>
+          </div>
+          <div class="smart-home-rooms" id="smartHomeRooms">
+            <div class="room-card loading">Loading rooms...</div>
+          </div>
         </div>
       </div>
     </aside>
@@ -455,7 +476,7 @@
             </svg>
             Settings
           </h3>
-          <button id="closeSettingsBtn" class="close-btn">×</button>
+          <button id="closeSettingsBtn" class="close-btn">&times;</button>
         </div>
         <div class="modal-body">
           <!-- Interface Section -->
@@ -476,122 +497,22 @@
               </label>
               <p class="setting-hint">Display input/output tokens next to each message</p>
             </div>
-          </div>
-
-          <!-- Voice Section -->
-          <div class="setting-section">
-            <div class="setting-section-header">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <path
-                  d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .993.411l3.383 3.384A.705.705 0 0 0 11 19.298z" />
-                <path d="M16 9a5 5 0 0 1 0 6" />
-                <path d="M19.364 5.636a9 9 0 0 1 0 12.728" />
-              </svg>
-              Voice
-            </div>
             <div class="setting-group">
-              <label class="toggle-label">
-                <input type="checkbox" id="ttsToggle">
-                <span>Enable Text-to-Speech</span>
-              </label>
-              <p class="setting-hint">AI responses will be spoken aloud</p>
-            </div>
-            <div class="setting-group">
-              <label class="toggle-label">
-                <input type="checkbox" id="groqTtsToggle">
-                <span>Use Groq Speed Mode ⚡</span>
-              </label>
-              <p class="setting-hint">Ultra-fast TTS (Orpheus) - supports [emotional] tags</p>
-            </div>
-            <div class="setting-group" id="voiceSettings">
-              <label for="voiceSelect">Voice</label>
-              <select id="voiceSelect">
-                <option value="" disabled selected>Loading voices...</option>
-              </select>
-            </div>
-            <div class="setting-group" id="rateSettings">
-              <label for="rateSelect">Speech Rate</label>
-              <select id="rateSelect">
-                <option value="-20%">Slow</option>
-                <option value="-10%">Slightly Slow</option>
-                <option value="+0%">Normal</option>
-                <option value="+5%" selected>Slightly Fast</option>
-                <option value="+10%">Fast</option>
-              </select>
-            </div>
-          </div>
-
-          <!-- Context Section -->
-          <div class="setting-section">
-            <div class="setting-section-header">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="9" />
-                <path d="M12 7v5l3 3" />
-              </svg>
-              Context
-            </div>
-            <div class="setting-group">
-              <p class="setting-hint" id="contextCurrentBadge">Current: loading...</p>
-            </div>
-            <div class="setting-group">
-              <label for="contextWorkspaceInput">Workspace ID</label>
-              <input id="contextWorkspaceInput" type="text" placeholder="default" />
-            </div>
-            <div class="setting-group">
-              <label for="contextProfileInput">Profile ID</label>
-              <input id="contextProfileInput" type="text" placeholder="default" />
-            </div>
-            <div class="setting-group">
-              <label for="contextSessionInput">Session ID</label>
-              <input id="contextSessionInput" type="text" placeholder="auto/default" />
-            </div>
-            <div class="setting-group">
-              <label class="toggle-label">
-                <input type="checkbox" id="contextMigrateToggle" checked>
-                <span>Try Legacy Memory Migration</span>
-              </label>
-            </div>
-            <div class="setting-links">
-              <a href="#" id="contextApplyBtn" class="setting-link">
-                <span class="link-text">Apply Context</span>
-                <span class="link-arrow">→</span>
-              </a>
-              <a href="#" id="contextNewSessionBtn" class="setting-link">
-                <span class="link-text">Apply + New Session ID</span>
-                <span class="link-arrow">→</span>
-              </a>
-            </div>
-            <div class="setting-group">
-              <p class="setting-hint">Known workspaces: <span id="knownWorkspacesList">default</span></p>
-            </div>
-          </div>
-
-          <!-- Plugins Section -->
-          <div class="setting-section">
-            <div class="setting-section-header">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M9 3v6" />
-                <path d="M15 3v6" />
-                <rect x="3" y="9" width="18" height="12" rx="2" />
-              </svg>
-              Plugins
-            </div>
-            <div class="setting-links">
-              <a href="#" id="pluginCatalogRefreshBtn" class="setting-link">
-                <span class="link-text">Refresh Plugin Catalog</span>
-                <span class="link-arrow">→</span>
-              </a>
-              <a href="#" id="pluginPolicyApplyBtn" class="setting-link">
-                <span class="link-text">Apply Plugin Policy</span>
-                <span class="link-arrow">→</span>
-              </a>
-            </div>
-            <div class="setting-group">
-              <p class="setting-hint" id="pluginPolicyStatus">Disabled plugins will be blocked from running tools.</p>
-              <div id="pluginCatalogList" class="setting-hint">Loading plugin catalog...</div>
+              <label class="setting-label">Theme</label>
+              <div class="theme-picker" id="themePicker">
+                <button class="theme-swatch active" data-theme="midnight" title="Midnight">
+                  <span class="swatch-color" style="background: #0a0a0f;"></span>
+                  <span class="swatch-name">Midnight</span>
+                </button>
+                <button class="theme-swatch" data-theme="soft-dark" title="Soft Dark">
+                  <span class="swatch-color" style="background: #1a1b2e;"></span>
+                  <span class="swatch-name">Soft Dark</span>
+                </button>
+                <button class="theme-swatch" data-theme="light" title="Light">
+                  <span class="swatch-color" style="background: #f8f9fc; border: 1px solid rgba(0,0,0,0.15);"></span>
+                  <span class="swatch-name">Light</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -616,7 +537,7 @@
                   </svg>
                 </span>
                 <span class="link-text">Export Chat History</span>
-                <span class="link-arrow">→</span>
+                <span class="link-arrow">&rarr;</span>
               </a>
             </div>
           </div>
@@ -643,7 +564,7 @@
                   </svg>
                 </span>
                 <span class="link-text">Clear Chat History</span>
-                <span class="link-arrow">→</span>
+                <span class="link-arrow">&rarr;</span>
               </a>
               <a href="#" id="clearMemoryBtn" class="setting-link danger">
                 <span class="link-icon">
@@ -657,40 +578,20 @@
                   </svg>
                 </span>
                 <span class="link-text">Reset All Memory</span>
-                <span class="link-arrow">→</span>
+                <span class="link-arrow">&rarr;</span>
+              </a>
+              <a href="#" id="shutdownBtn" class="setting-link danger">
+                <span class="link-icon">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2v10" />
+                    <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />
+                  </svg>
+                </span>
+                <span class="link-text">Shutdown Server</span>
+                <span class="link-arrow">&rarr;</span>
               </a>
             </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Smart Home Modal -->
-    <div class="modal-overlay" id="smartHomeModal">
-      <div class="modal smart-home-modal">
-        <div class="modal-header">
-          <h3>
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path
-                d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5" />
-              <path d="M9 18h6" />
-              <path d="M10 22h4" />
-            </svg>
-            Smart Home
-            <span class="refresh-countdown" id="smartHomeCountdown" title="Next refresh"></span>
-          </h3>
-          <button id="closeSmartHomeBtn" class="close-btn">×</button>
-        </div>
-        <div class="modal-body">
-          <div id="smartHomeStatus" class="setting-hint" style="margin-bottom: 10px;">Checking smart home connection...</div>
-          <div style="display:flex; gap:8px; margin-bottom:10px;">
-            <button id="smartHomeAllOnBtn" class="small-btn" type="button">All On</button>
-            <button id="smartHomeAllOffBtn" class="small-btn" type="button">All Off</button>
-            <button id="smartHomeRefreshBtn" class="small-btn" type="button">Refresh</button>
-          </div>
-          <div class="smart-home-rooms" id="smartHomeRooms">
-            <div class="room-card loading">Loading rooms...</div>
           </div>
         </div>
       </div>
@@ -698,7 +599,7 @@
   </div>
 
   <script src="/static/toast.js"></script>
-  <script src="/static/app.js"></script>
+  <script type="module" src="/static/app.js"></script>
 </body>
 
 </html>

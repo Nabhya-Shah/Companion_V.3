@@ -359,15 +359,38 @@ Goal: activate the orchestrator-first architecture, clean dead code, split monol
 
 ## Phase 6 (2-4 Months): Daily-Life Intelligence
 
-Goal: make Companion AI genuinely useful for daily personal operations.
+Goal: make Companion AI genuinely useful for daily personal operations by introducing autonomous, scheduled, and proactive multi-step workflows.
 
-| Track | Outcome | Candidate Deliverables | Success Criteria |
-|---|---|---|---|
-| Workflow templates | Reusable personal routines | Daily briefing, inbox triage, routine reminders | Users can launch repeatable workflows in ≤2 steps |
-| Human-in-the-loop | Safer autonomy | Approval checkpoints for high-impact actions | High-risk steps require explicit confirmation |
-| Cross-skill orchestration | Multi-step task completion | Structured plans with progress visibility | Complex tasks complete with per-step status |
-| Proactive insights | Timely, low-noise suggestions | Daily/weekly digests from memory + schedule signals | Suggestions feel relevant, not spammy |
-| Context packaging | Better reasoning quality | Scoped context bundles from memory/files/events | Lower hallucination in multi-step runs |
+### Track P6-A (Workflow Foundations) ✅ COMPLETE
+
+| Task | Effort | Success Criteria |
+|---|---:|---|
+| ~~Create WorkflowManager pipeline~~ | 1-2 weeks | ✅ Parses JSON multi-step instructions into sequential execution chains |
+| ~~Extend Jobs Service for workflows~~ | 3-4 days | ✅ Scheduled jobs can trigger Workflow IDs instead of raw prompts |
+| ~~Build Routines Control Panel~~ | 1 week | ✅ UI panel allowing one-click manual firing of configured routines |
+
+### Track P6-B (Human-In-The-Loop) ✅ COMPLETE
+
+| Task | Effort | Success Criteria |
+|---|---:|---|
+| ~~Introduce `requires_approval` tool scope~~ | 2 days | ✅ Tool registry flags dangerous actions with `requires_approval` |
+| ~~PAUSE/RESUME execution states~~ | 4-5 days | ✅ `run_tool`/`execute_function_call` block on threading Event awaiting approval |
+| ~~Consent UI component~~ | 1 week | ✅ Modal overlay showing tool name + args with Approve/Deny buttons |
+
+### Track P6-C (Cross-Skill Orchestration) ✅ COMPLETE
+
+| Task | Effort | Success Criteria |
+|---|---:|---|
+| ~~Explicit Multi-Step Intention~~ | 1-2 weeks | ✅ Orchestrator `PLAN` action with `plan_steps` array, TaskPlan model in `task_planner.py` |
+| ~~Progress Tracker Component~~ | 1 week | ✅ Chat UI dynamically renders step ticks (Queued/Running/Done) via SSE plan events |
+
+### Track P6-D (Proactive Insights) ⏳ NOT STARTED
+
+| Task | Effort | Success Criteria |
+|---|---:|---|
+| InsightGenerator Engine | 1 week | Background daemon periodically reviewing graph facts and calendar |
+| Unprompted Chat Triggers | 4-5 days | The AI text-messages the user on its own volition via local SSE stream |
+| Offline Resilience DB | 3-4 days | "While you were out" queue for when the web UI was closed during an insight |
 
 ## Phase 7 (4-6 Months): Ecosystem & Integration Growth
 

@@ -21,6 +21,12 @@ from companion_ai.tools.registry import (        # noqa: F401
     run_tool,
     get_function_schemas,
     execute_function_call,
+    mark_tool_requires_approval,
+    unmark_tool_requires_approval,
+    tool_requires_approval,
+    list_approval_required_tools,
+    resolve_approval,
+    get_pending_approvals,
 )
 
 # --- Import domain modules to trigger @tool registration ---
@@ -63,6 +69,10 @@ __all__ = [
     'list_plugins', 'get_plugin_catalog', 'get_plugin_policy_state', 'set_workspace_plugin_policy',
     # Policy
     'get_execution_mode', 'set_execution_mode', 'execution_mode', 'evaluate_tool_policy',
+    # Approval
+    'mark_tool_requires_approval', 'unmark_tool_requires_approval',
+    'tool_requires_approval', 'list_approval_required_tools',
+    'resolve_approval', 'get_pending_approvals',
     # Tool functions (used by tool_loop.py and tests)
     'tool_brain_read', 'tool_brain_write', 'tool_brain_list', 'tool_brain_search',
     'tool_read_pdf', 'tool_read_image', 'tool_read_docx', 'tool_list_files', 'tool_find_file',

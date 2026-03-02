@@ -94,7 +94,7 @@ User → Flask Web Layer → Orchestrator (Groq Cloud)
 ```
 companion_ai/
 ├── core/                 # Config, prompts, logging, metrics
-├── agents/               # [shelved] Browser, vision agents
+├── agents/               # Browser (shelved), vision (active)
 ├── integrations/         # Loxone smart home
 ├── memory/               # SQLite, Mem0, knowledge graph, AI processor
 ├── services/             # Persona, jobs/scheduler, token budget, TTS
@@ -103,8 +103,7 @@ companion_ai/
 │   ├── groq_provider.py  # Groq cloud calls + tool calling
 │   ├── ollama_provider.py # Ollama local calls + embeddings
 │   ├── router.py         # High-level response routing
-│   ├── token_tracker.py  # Per-step token stats
-│   └── memory_extraction.py # Summary + fact extraction
+│   └── token_tracker.py  # Per-step token stats
 ├── tools/                # Tool registration + domain tools
 │   ├── registry.py       # @tool decorator, plugin system, policy
 │   ├── system_tools.py   # Time, memory search, screen

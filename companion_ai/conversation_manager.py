@@ -221,8 +221,10 @@ class ConversationSession:
         # Step 6: Add to Mem0 in BACKGROUND (non-blocking for faster UX)
         # Skip if orchestrator already handled memory (avoid duplicate entries)
         orchestrator_handled_memory = final_metadata.get("source", "").startswith("loop_memory")
+        self._last_mem0_started = False  # Track whether we actually fired Mem0
         if MEM0_AVAILABLE and not orchestrator_handled_memory:
             import threading
+            self._last_mem0_started = True
             def _async_mem0_save():
                 try:
                     messages = [
@@ -237,6 +239,7 @@ class ConversationSession:
             # Fire-and-forget - don't block the response
             threading.Thread(target=_async_mem0_save, daemon=True).start()
         elif orchestrator_handled_memory:
+            self._last_mem0_started = True  # Orchestrator handled it — still a memory save
             logger.info("Mem0: Skipped auto-save (orchestrator memory loop already handled it)")
         
         logger.info(f"Streaming complete. Session length: {len(self.conversation_history)}")

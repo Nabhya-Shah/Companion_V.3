@@ -121,7 +121,7 @@ Dual-provider router:
 | Groq provider | `groq_provider.py` | Client pool, tool calling, streaming, output sanitisation |
 | Ollama provider | `ollama_provider.py` | Local model calls, embeddings |
 | Router | `router.py` | High-level `generate_response` with complexity classification |
-| Memory extraction | `memory_extraction.py` | Summary, profile facts, insight generation |
+| Memory extraction | `memory/ai_processor.py` | Summary, profile facts, insight generation (re-exported via `llm/__init__.py`) |
 
 ### Layer 4: Local Loops (Specialists)
 
@@ -191,7 +191,7 @@ Each loop:
 | **Loxone Smart Home** | `integrations/loxone.py` | Live — room control, state sync, voice commands |
 | **Plugin System** | `services/jobs.py` + policy | Live — registry, gating, policy enforcement |
 | **Browser Agent** | `agents/browser.py` | Shelved — built but unwired |
-| **Vision Agent** | `agents/vision.py` | Shelved — built but unwired |
+| **Vision Agent** | `agents/vision.py` | Active — used by media_routes, files_routes |
 
 ---
 
@@ -207,7 +207,7 @@ companion_ai/
 │   └── prompts.py             # System prompt templates
 ├── agents/
 │   ├── browser.py             # [shelved] Chrome automation
-│   └── vision.py              # [shelved] Computer vision
+│   └── vision.py              # Active — used by media_routes, files_routes
 ├── integrations/
 │   └── loxone.py              # Loxone smart home
 ├── memory/
@@ -232,7 +232,7 @@ companion_ai/
 │   ├── groq_provider.py       # Groq cloud calls + tool calling
 │   ├── ollama_provider.py     # Ollama local calls + embeddings
 │   ├── router.py              # High-level response routing
-│   └── memory_extraction.py   # Summary + fact extraction
+│   └── (memory extraction re-exported from memory/ai_processor.py)
 ├── tools/                     # ✅ Split from tools.py (P5-C)
 │   ├── __init__.py            # Re-exports full public API
 │   ├── registry.py            # @tool decorator, plugin system, policy, dispatch
@@ -277,7 +277,7 @@ prompts/personas/              # Persona YAML definitions
 | `REASONING_MODEL` / `HEAVY_MODEL` / `FAST_MODEL` aliases | ✅ Removed (P5-A) | Vestigial aliases |
 | Legacy `/api/chat` (non-streaming) | ✅ Removed (P5-A) | Only SSE `/api/chat/send` remains |
 | Compatibility shims (`memory_v2.py`, `memory_graph.py`, `persona_evolution.py`) | ✅ Deleted (P5-A) | 5 shim files removed, imports updated |
-| `computer_loop.py` | Shelved | Unwired from registry, code kept |
+| `computer_loop.py` | ✅ Removed | Was shelved, file no longer exists |
 | `llm_interface.py` monolith | ✅ Split → `llm/` (P5-C) | Thin re-export shim remains |
 | `tools.py` monolith | ✅ Split → `tools/` (P5-C) | Old file deleted |
 | `web_companion.py` monolith | ✅ Split → `web/` (P5-C) | Thin re-export shim remains |

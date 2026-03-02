@@ -17,6 +17,7 @@ __pycache__/
 # Runtime data & logs - may contain personal conversations
 data/
 !data/.gitkeep
+companion_ai/data/
 
 # Brain folder - contains personal memories
 BRAIN/
@@ -31,6 +32,11 @@ memory_export_*.json
 # Test/debug artifacts
 tools/test_*.png
 tools/*.log
+.playwright-mcp/
+
+# Node.js (not used, but just in case)
+node_modules/
+package-lock.json
 
 venv/
 .venv/

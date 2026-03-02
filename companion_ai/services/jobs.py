@@ -530,62 +530,82 @@ def _worker_loop():
                 logger.info(f"Starting job {job_id}: {description}")
                 
                 try:
-                    # Execute the tool
-                    from companion_ai.llm_interface import generate_response
-                    from companion_ai.core.prompts import get_static_system_prompt_safe
-                    from companion_ai.local_llm import is_local_available, OllamaClientWrapper, LocalLLM
-                    from companion_ai.core import config as core_config
-                    
-                    # Create a mini-agent loop to solve the task
-                    # We use the LLM to decide what tools to use based on the description
-                    
-                    system_prompt = get_static_system_prompt_safe()
-                    system_prompt += "\n\n[BACKGROUND TASK MODE]\nYou are running as a background agent. Your goal is to complete the user's request autonomously. You have full access to tools. Do not ask the user for clarification. If you need to do multiple steps, do them. When finished, provide a final summary."
-                    
-                    # Use generate_model_response_with_tools directly to ensure tools are executed
-                    # generate_response in llm_interface.py calls this internally, but let's be explicit
-                    # and ensure we use the right model and context.
-                    
-                    from companion_ai.llm_interface import generate_model_response_with_tools
-                    from companion_ai.tools import execution_mode
-                    
-                    # We pass a minimal memory context to avoid token bloat
-                    # The background agent doesn't need full conversation history usually
-                    memory_context = {'recent_conversation': ''}
-                    
-                    # Determine model and client
-                    client = None
-                    model = core_config.TOOLS_MODEL # Default Groq
-                    
-                    if is_local_available():
-                        logger.info("Using LOCAL LLM (Ollama) for background task")
-                        client = OllamaClientWrapper()
-                        # Use centralized model config (defaults to qwen2.5-coder:7b for code)
-                        model = LocalLLM.DEFAULT_MODELS['code']
-                    else:
-                        logger.info("Using CLOUD LLM (Groq) for background task")
-                    
-                    with execution_mode('restricted'):
-                        response_text, tool_used, tool_result = generate_model_response_with_tools(
-                            user_message=f"Perform this background task: {description}",
-                            system_prompt=system_prompt,
-                            model=model,
-                            conversation_model=model,
-                            memory_context=memory_context,
-                            stop_callback=should_cancel,
-                            client=client
-                        )
-                    
-                    if _cancel_current_flag:
-                        result = "Job cancelled by user."
-                        status = 'FAILED'
-                    else:
-                        result = response_text
-                        if tool_used:
-                            result += f"\n\n(Tools used: {tool_used})"
-                        if tool_result:
-                            result += f"\n\n(Tool results: {tool_result})"
+                    if tool_name == "run_workflow" and "workflow_id" in tool_args:
+                        # Direct workflow execution
+                        from companion_ai.services.workflows import get_manager
+                        import asyncio
+                        
+                        manager = get_manager()
+                        results = asyncio.run(manager.execute_workflow(tool_args["workflow_id"]))
+                        
+                        result = f"Workflow '{tool_args['workflow_id']}' completed."
                         status = 'COMPLETED'
+                        
+                        # Forward chat output if needed
+                        for res in results:
+                            if res.get("output_target") == "chat":
+                                try:
+                                    from companion_ai.web.sse import emit_event
+                                    emit_event("message", {"role": "assistant", "content": res["response"]})
+                                except Exception as e:
+                                    logger.error(f"Failed to emit workflow SSE: {e}")
+                    else:
+                        # Execute the tool via agent loop
+                        from companion_ai.llm_interface import generate_response
+                        from companion_ai.core.prompts import get_static_system_prompt_safe
+                        from companion_ai.local_llm import is_local_available, OllamaClientWrapper, LocalLLM
+                        from companion_ai.core import config as core_config
+                        
+                        # Create a mini-agent loop to solve the task
+                        # We use the LLM to decide what tools to use based on the description
+                        
+                        system_prompt = get_static_system_prompt_safe()
+                        system_prompt += "\n\n[BACKGROUND TASK MODE]\nYou are running as a background agent. Your goal is to complete the user's request autonomously. You have full access to tools. Do not ask the user for clarification. If you need to do multiple steps, do them. When finished, provide a final summary."
+                        
+                        # Use generate_model_response_with_tools directly to ensure tools are executed
+                        # generate_response in llm_interface.py calls this internally, but let's be explicit
+                        # and ensure we use the right model and context.
+                        
+                        from companion_ai.llm_interface import generate_model_response_with_tools
+                        from companion_ai.tools import execution_mode
+                        
+                        # We pass a minimal memory context to avoid token bloat
+                        # The background agent doesn't need full conversation history usually
+                        memory_context = {'recent_conversation': ''}
+                        
+                        # Determine model and client
+                        client = None
+                        model = core_config.TOOLS_MODEL # Default Groq
+                        
+                        if is_local_available():
+                            logger.info("Using LOCAL LLM (Ollama) for background task")
+                            client = OllamaClientWrapper()
+                            # Use centralized model config (defaults to qwen2.5-coder:7b for code)
+                            model = LocalLLM.DEFAULT_MODELS['code']
+                        else:
+                            logger.info("Using CLOUD LLM (Groq) for background task")
+                        
+                        with execution_mode('restricted'):
+                            response_text, tool_used, tool_result = generate_model_response_with_tools(
+                                user_message=f"Perform this background task: {description}",
+                                system_prompt=system_prompt,
+                                model=model,
+                                conversation_model=model,
+                                memory_context=memory_context,
+                                stop_callback=should_cancel,
+                                client=client
+                            )
+                        
+                        if _cancel_current_flag:
+                            result = "Job cancelled by user."
+                            status = 'FAILED'
+                        else:
+                            result = response_text
+                            if tool_used:
+                                result += f"\n\n(Tools used: {tool_used})"
+                            if tool_result:
+                                result += f"\n\n(Tool results: {tool_result})"
+                            status = 'COMPLETED'
                         
                 except Exception as e:
                     logger.error(f"Job {job_id} failed: {e}")

@@ -31,6 +31,7 @@ class OrchestratorAction(Enum):
     DELEGATE = "delegate"      # Call a local loop
     BACKGROUND = "background"  # Start background task
     MEMORY_SEARCH = "memory_search"  # Quick memory lookup
+    PLAN = "plan"              # Multi-step plan execution
 
 
 @dataclass
@@ -44,6 +45,7 @@ class OrchestratorDecision:
     loop: Optional[str] = None         # For DELEGATE/BACKGROUND
     task: Optional[Dict] = None        # Task details for loop
     save_facts: List[str] = None       # Facts to save after response
+    plan_steps: Optional[List[Dict]] = None  # For PLAN — ordered steps
     
     @classmethod
     def from_json(cls, json_str: str) -> "OrchestratorDecision":
@@ -62,7 +64,8 @@ class OrchestratorDecision:
                 content=data.get("content"),
                 loop=data.get("loop"),
                 task=data.get("task"),
-                save_facts=data.get("save_facts", [])
+                save_facts=data.get("save_facts", []),
+                plan_steps=data.get("plan_steps"),
             )
         except Exception as e:
             logger.error(f"DEBUG: Failed to parse orchestrator decision: {e}")
@@ -141,6 +144,14 @@ For tools: {"action": "delegate", "loop": "tools", "task": {"operation": "get_ti
 For memory save: {"action": "delegate", "loop": "memory", "task": {"operation": "save", "fact": "User's name is Bob"}}
 For memory search: {"action": "delegate", "loop": "memory", "task": {"operation": "search", "query": "..."}}
 For vision: {"action": "delegate", "loop": "vision", "task": {"operation": "describe"}}
+For multi-step tasks: {"action": "plan", "plan_steps": [{"description": "...", "action": "delegate", "params": {"loop": "...", "task": {...}}}, ...]}
+
+## When to use "plan" action
+Use "plan" when the user's request requires TWO OR MORE distinct operations that depend on each other.
+Examples: "What's the weather like and remind me about my schedule?" → plan with 2 steps.
+"Turn on the lights" → single delegate (NOT a plan).
+"What time is it?" → single delegate (NOT a plan).
+Keep plans SHORT (2-4 steps max). Each step needs a brief description for the user.
 
 ## Routing Rules
 - "What time?" / "What's today?" → tools (get_time)
@@ -163,9 +174,6 @@ For vision: {"action": "delegate", "loop": "vision", "task": {"operation": "desc
 - "Search my documents for X" / "What do my notes say about X?" / "Find in brain" → tools (brain_search, query: "...")
 - Greetings (hi/hello) without personal info → answer directly
 - General questions → answer directly
-
-ORPHEUS VOCAL DIRECTIONS:
-You have access to an expressive TTS engine (Orpheus). You can control your voice tone using bracketed tags like [cheerful], [whisper], [sad], [dramatic], [excited]. Use these naturally early in your sentences when appropriate to convey emotion. Example: "[cheerful] I'd be happy to help with that!"
 
 EXCEPTION: If the message contains "[Visual context" then DO NOT delegate to vision. The image was pre-analyzed. Respond based on the context:
 - If they ask you to SOLVE something (math, puzzle) → ATTEMPT to solve it with available info. Don't ask for clarification - try your best!
@@ -252,7 +260,7 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
                     {"role": "user", "content": user_message}
                 ],
                 temperature=0.3,  # Lower temp for consistent routing
-                max_tokens=1000
+                max_tokens=300   # Routing JSON is ~100 tokens; no need for 1000
             )
             
             raw_response = response.choices[0].message.content.strip()
@@ -304,6 +312,9 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
         
         elif decision.action == OrchestratorAction.DELEGATE:
             return await self._handle_delegation(decision, user_message, context)
+        
+        elif decision.action == OrchestratorAction.PLAN:
+            return await self._handle_plan(decision, user_message, context)
         
         elif decision.action == OrchestratorAction.BACKGROUND:
             return await self._handle_background(decision)
@@ -375,6 +386,116 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
             logger.error(f"Loop execution failed: {e}")
             return await self._generate_direct_response(user_message, context)
     
+    async def _handle_plan(
+        self,
+        decision: OrchestratorDecision,
+        user_message: str,
+        context: Dict
+    ) -> Tuple[str, Dict]:
+        """Execute a multi-step plan with progress tracking."""
+        from companion_ai.services.task_planner import (
+            TaskPlan, PlanStep, StepStatus,
+            register_plan, update_step_status, complete_plan,
+        )
+
+        steps_data = decision.plan_steps or []
+        if not steps_data:
+            # Fallback — no steps defined, answer directly
+            return await self._generate_direct_response(user_message, context)
+
+        # Build plan model
+        plan_steps = []
+        for i, raw in enumerate(steps_data):
+            plan_steps.append(PlanStep(
+                id=f"step_{i+1}",
+                description=raw.get("description", f"Step {i+1}"),
+                action=raw.get("action", "delegate"),
+                params=raw.get("params", {}),
+            ))
+
+        plan = TaskPlan(
+            id=str(__import__("uuid").uuid4())[:8],
+            goal=user_message,
+            steps=plan_steps,
+        )
+        register_plan(plan)  # Emits plan.created SSE event
+        logger.info(f"Plan {plan.id} created with {len(plan.steps)} steps")
+
+        # Execute steps sequentially, accumulating context
+        step_results = []
+        accumulated_context = dict(context)
+
+        for step in plan.steps:
+            update_step_status(plan.id, step.id, StepStatus.RUNNING)
+            try:
+                # Build a sub-decision from the step params
+                params = step.params or {}
+                sub_decision = OrchestratorDecision(
+                    action=OrchestratorAction(step.action),
+                    loop=params.get("loop"),
+                    task=params.get("task"),
+                )
+                result_text, result_meta = await self._execute_decision(
+                    sub_decision, user_message, accumulated_context
+                )
+                step.result = result_text
+                step_results.append({"step": step.description, "result": result_text})
+                # Feed result into accumulated context for next step
+                accumulated_context["plan_context"] = accumulated_context.get("plan_context", "") + \
+                    f"\n[{step.description}]: {result_text}"
+                update_step_status(plan.id, step.id, StepStatus.COMPLETED, result=result_text)
+            except Exception as e:
+                logger.error(f"Plan step {step.id} failed: {e}")
+                update_step_status(plan.id, step.id, StepStatus.FAILED, error=str(e))
+                step_results.append({"step": step.description, "error": str(e)})
+
+        # Synthesize a final answer from all step results
+        synthesis_prompt = f"""You are Companion AI. The user asked: "{user_message}"
+
+You executed a multi-step plan. Here are the results of each step:
+{json.dumps(step_results, indent=2)}
+
+Write a natural, conversational response that combines ALL the information.
+Do NOT mention "steps" or "plans" — just answer naturally."""
+
+        try:
+            from companion_ai.services.persona import get_state as _get_persona
+            pf = _get_persona().prompt_fragment()
+            if pf:
+                synthesis_prompt += f"\n\n{pf}"
+        except Exception:
+            pass
+
+        client, model, is_local = self._get_client_and_model()
+        if client:
+            try:
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "system", "content": synthesis_prompt}],
+                    temperature=0.7,
+                    max_tokens=800,
+                )
+                final_text = resp.choices[0].message.content
+            except Exception as e:
+                logger.error(f"Plan synthesis failed: {e}")
+                final_text = "\n".join(
+                    f"• {r['step']}: {r.get('result', r.get('error', '?'))}"
+                    for r in step_results
+                )
+        else:
+            final_text = "\n".join(
+                f"• {r['step']}: {r.get('result', r.get('error', '?'))}"
+                for r in step_results
+            )
+
+        complete_plan(plan.id, summary=final_text)
+        return final_text, {
+            "source": "plan",
+            "plan_id": plan.id,
+            "steps_completed": sum(1 for s in plan.steps if s.status == StepStatus.COMPLETED),
+            "steps_total": len(plan.steps),
+        }
+
     async def _handle_background(self, decision: OrchestratorDecision) -> Tuple[str, Dict]:
         """Handle background task delegation."""
         loop_name = decision.loop
