@@ -1,6 +1,6 @@
 # Companion AI Roadmap (Post-Phase 1)
 
-Date: 2026-02-24
+Date: 2026-02-27 (Phase 5 complete; Phase 6 planned)
 
 ## Current Status
 
@@ -281,6 +281,28 @@ Goal: Move from “good chat app” to “assistant platform”.
 - [x] Update 5 test files for blueprint monkeypatch targets
 - [x] Full test suite: 120 passed, 2 pre-existing failures — zero regressions
 
+### Sprint P5-D (Unified Knowledge System — Completed 2026-02-26)
+
+- [x] Merge brain folder + uploads + brain index into single document pipeline (auto-index uploads, single doc flow)
+- [x] Merge `pending_profile_facts` into main confidence system (low-confidence = flagged, no separate pending table)
+- [x] Create single knowledge entry point (`knowledge.py`) exposing `remember()`, `recall()`, and `recall_context()`
+- [x] Wire unified knowledge entry point into orchestrator MEMORY routing path
+- [x] Full test suite: 144 passed — zero regressions
+
+### Sprint P5-E (Persona Foundation — Completed 2026-02-26)
+
+- [x] Audit current persona system (`persona.py` + `companion.yaml`) — identified dead code, missing triggers, wholesale-replace bug
+- [x] Define persona evolution triggers: periodic (every 25 msgs), memory-event (importance ≥ 0.7), session-end
+- [x] Implement `PersonaState` singleton with incremental trait merging and rapport progression
+- [x] Wire persona state into orchestrator context (routing + synthesis prompts include persona traits)
+- [x] Full test suite: 178 passed — zero regressions
+
+### Phase 5 Final Status
+
+- ✅ All five Phase 5 tracks complete (A: Spring Clean, B: Orchestrator, C: Monoliths, D: Knowledge, E: Persona).
+- ✅ Codebase now matches the documented architecture vision: orchestrator-first, unified knowledge, split packages, evolving persona.
+- ✅ 178 tests passing. Two pre-existing failures unrelated to Phase 5 work.
+
 ## Long-Range Product Vision (2026+)
 
 ### North Star
@@ -433,12 +455,71 @@ Goal: evolve into a proactive but policy-bounded intelligence layer.
 - **Persona**: responses reflect evolving personality traits grounded in conversation history.
 - **Velocity**: each slice ships with tests and artifact updates in the same change window.
 
+## Phase 6 Sprint Plan — Daily-Life Intelligence
+
+Goal: make Companion AI genuinely useful for daily personal operations by building workflow automation, safer autonomy, multi-step task orchestration, proactive insights, and better reasoning context.
+
+All five Phase 6 tracks map to the table above. Recommended execution order is dependency-aware: context packaging first (foundational), then safety/HITL, then user-facing workflow and insight features.
+
+### Sprint P6-A (Context Packaging — Week 1-2)
+
+Goal: improve reasoning quality by assembling scoped context bundles from memory, documents, and scheduled events before passing to the orchestrator.
+
+- [ ] Add `companion_ai/services/context_packager.py` — builds scoped `ContextBundle` (memory snippets + brain excerpts + upcoming schedule entries) for a given request
+- [ ] Wire context bundles into orchestrator context assembly (replace ad-hoc context construction with `ContextPackager.build()`)
+- [ ] Add `/api/context/bundle` debug endpoint — returns the bundle that would be used for a given query string (auth-gated)
+- [ ] Add focused `tests/test_context_packager.py` — bundle construction, scope isolation, empty-state safety
+
+### Sprint P6-B (Human-in-the-Loop — Week 3-4)
+
+Goal: add explicit approval checkpoints so high-impact tool actions require user confirmation before execution.
+
+- [ ] Add approval checkpoint model + SQLite storage (`companion_ai/services/approvals.py`) — `pending`, `approved`, `rejected` states with TTL expiry
+- [ ] Add `/api/approvals` endpoint — list pending approvals, approve/reject by ID (auth-gated)
+- [ ] Wire high-risk tool flag (`requires_approval: true` in tool metadata) to approval gate in tool dispatch — execution waits for approval or rejects on expiry
+- [ ] Surface pending approvals in the Tasks sidebar (same panel as schedules) with approve/reject actions
+- [ ] Add focused `tests/test_approvals.py` — approval lifecycle, expiry, tool dispatch gate, auth contract
+
+### Sprint P6-C (Workflow Templates — Week 5-6)
+
+Goal: let users launch repeatable personal routines in ≤ 2 steps without manually assembling tool sequences.
+
+- [ ] Define workflow template schema (YAML) with `steps` (tool + args), `trigger` (manual/scheduled), and `name`/`description` metadata
+- [ ] Add workflow template loader + in-memory registry (`companion_ai/services/workflows.py`)
+- [ ] Add `/api/workflows` CRUD endpoints — list, get, create, delete (auth-gated for mutations)
+- [ ] Add `/api/workflows/<id>/run` endpoint — enqueues workflow steps as a multi-step job
+- [ ] Bundle two built-in templates: `daily_briefing` (memory summary + upcoming schedules) and `inbox_triage` (pending approvals + flagged facts)
+- [ ] Add focused `tests/test_workflows.py` — template schema validation, run enqueue, built-in templates smoke
+
+### Sprint P6-D (Cross-Skill Orchestration — Week 7-8)
+
+Goal: give users visibility into multi-step task progress and allow intervention when a plan is in flight.
+
+- [ ] Add structured plan model (`Plan` with ordered `PlanStep` list, per-step `status`, overall `progress_pct`) in `companion_ai/services/plans.py`
+- [ ] Add `/api/plans` endpoints — create, get status, list active, cancel (auth-gated for cancel)
+- [ ] Wire orchestrator to emit a `Plan` for BACKGROUND-routed requests (replacing opaque job entries)
+- [ ] Extend Tasks sidebar to render active plans with per-step status and cancel action
+- [ ] Add focused `tests/test_plans.py` — plan creation, step transitions, cancel path, orchestrator integration
+
+### Sprint P6-E (Proactive Insights — Week 9-10)
+
+Goal: surface timely, low-noise suggestions so the user doesn't have to manually query for status.
+
+- [ ] Add insight generator service (`companion_ai/services/insights.py`) — produces daily/weekly digest from recent memories, upcoming schedules, and flagged pending facts
+- [ ] Add `/api/insights` endpoints — list unread insights, mark read/dismissed
+- [ ] Wire scheduler to trigger daily insight generation (reuse existing scheduler infrastructure from Phase 3-4)
+- [ ] Show unread insight count badge in the UI header; expand into insight list panel on click
+- [ ] Add focused `tests/test_insights.py` — digest generation, empty-state safety, dismiss lifecycle
+
+---
+
 ## Immediate Next Execution Window (Phase 6)
 
-1. **P5-A, P5-B, P5-C, P5-D, P5-E**: ✅ Complete. All Phase 5 tracks done.
-2. Next up: **Phase 6** — Daily-Life Intelligence.
-3. Keep this roadmap + `FEATURE_TRACKER_ARTIFACT.md` synchronized per delivered slice.
-4. Promote only validated slices into release-profile checks.
+1. **P5-A through P5-E**: ✅ Complete. All Phase 5 tracks done.
+2. **Next up: Sprint P6-A** — Context Packaging. Foundational for all subsequent Phase 6 features.
+3. Execute P6-A → P6-B → P6-C → P6-D → P6-E in order (each sprint builds on the previous).
+4. Keep this roadmap + `FEATURE_TRACKER_ARTIFACT.md` synchronized per delivered slice.
+5. Promote only validated slices into release-profile checks.
 
 ## Definition of Done (for Phase 2)
 

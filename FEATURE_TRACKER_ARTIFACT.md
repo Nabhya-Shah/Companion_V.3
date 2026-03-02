@@ -1,6 +1,6 @@
 # Companion AI Feature Tracker
 
-Date: 2026-02-26
+Date: 2026-02-27
 
 This artifact tracks **user-visible functionality** progress in plain language.
 
