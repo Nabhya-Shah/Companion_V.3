@@ -97,7 +97,7 @@ companion_ai/
 ├── agents/               # Browser (shelved), vision (active)
 ├── integrations/         # Loxone smart home
 ├── memory/               # SQLite, Mem0, knowledge graph, AI processor
-├── services/             # Persona, jobs/scheduler, token budget, TTS
+├── services/             # Persona, jobs/scheduler, workflows, insights, token budget, TTS
 ├── local_loops/          # Specialist loops (memory, tool, vision)
 ├── llm/                  # LLM router — Groq + Ollama providers
 │   ├── groq_provider.py  # Groq cloud calls + tool calling
@@ -129,7 +129,7 @@ companion_ai/
 web_companion.py          # Backwards-compat shim → companion_ai/web/
 templates/                # HTML templates
 static/                   # JS, CSS
-tests/                    # 21 pytest suites, 120+ tests
+tests/                    # 21 pytest suites, 219 tests
 scripts/                  # Utility scripts
 ```
 

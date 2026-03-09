@@ -99,7 +99,7 @@ This artifact tracks **user-visible functionality** progress in plain language.
 | P5-08 | Unified knowledge system | Single `remember`/`recall` API for all memory backends | `knowledge.py` entry point, confidence-based facts, 144 tests pass | ✅ Completed (P5-D) |
 | P5-09 | Persona foundation | Personality evolves with use, not just on shutdown | `PersonaState` singleton, 3 trigger types, orchestrator integration, 178 tests pass | ✅ Completed (P5-E) |
 
-## Base (Phase 6) — Daily-Life Intelligence (In Progress)
+## Base (Phase 6) — Daily-Life Intelligence (Completed)
 
 | ID | Feature | User Value | Acceptance Signal | Status |
 |---|---|---|---|---|
@@ -107,4 +107,4 @@ This artifact tracks **user-visible functionality** progress in plain language.
 | P6-02 | Routines UI Panel | One-click access to daily automations | User can launch a Workflow from the Web UI manually | ✅ Complete (P6-A) |
 | P6-03 | Human-In-The-Loop Approval | Prevents dangerous tools from running without permission | UI shows [Approve/Deny] prompt for `requires_approval` tools | ✅ Complete (P6-B) |
 | P6-04 | Task Planning Transparency | Shows the steps the AI commits to before it runs them | Chat UI shows Queued -> In-Progress progress tracker via SSE plan events | ✅ Complete (P6-C) |
-| P6-05 | Proactive Insights Engine | Companion texts you first based on events or time | Offline and online unprompted SSE/Chat message delivery | ⏳ Not Started (P6-D) |
+| P6-05 | Proactive Insights Engine | Companion surfaces timely digests and reminders without explicit prompting | `services/insights.py` + `/api/insights*` + unread header badge + offline chat injection via `/api/chat/history` + `tests/test_insights.py` | ✅ Complete (P6-D) |

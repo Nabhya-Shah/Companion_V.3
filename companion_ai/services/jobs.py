@@ -16,6 +16,36 @@ except Exception:
 # Configure logging
 logger = logging.getLogger(__name__)
 
+
+def _safe_log(level: str, message: str) -> None:
+    """Best-effort logging for daemon threads during interpreter shutdown."""
+    root = logging.getLogger()
+    has_open_stream = False
+    for handler in root.handlers:
+        stream = getattr(handler, 'stream', None)
+        if stream is None:
+            has_open_stream = True
+            break
+        try:
+            if not stream.closed:
+                has_open_stream = True
+                break
+        except Exception:
+            has_open_stream = True
+            break
+
+    if not has_open_stream:
+        return
+
+    prev_raise = logging.raiseExceptions
+    logging.raiseExceptions = False
+    try:
+        getattr(logger, level)(message)
+    except Exception:
+        pass
+    finally:
+        logging.raiseExceptions = prev_raise
+
 # Database path
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'jobs.db')
 
@@ -499,11 +529,18 @@ def should_cancel():
 
 def _worker_loop():
     """Background worker loop to process jobs."""
-    logger.info("Job Worker started")
+    _safe_log('info', "Job Worker started")
     global _cancel_current_flag
     
     while not _stop_event.is_set():
         try:
+            # Generate proactive digest once per day (best effort, non-blocking).
+            try:
+                from companion_ai.services.insights import generate_daily_insight_if_due
+                generate_daily_insight_if_due()
+            except Exception:
+                pass
+
             _run_due_schedules()
             _cancel_current_flag = False # Reset flag for new job
             conn = _get_db()
@@ -527,7 +564,7 @@ def _worker_loop():
                 conn.commit()
                 conn.close() # Close connection while working
                 
-                logger.info(f"Starting job {job_id}: {description}")
+                _safe_log('info', f"Starting job {job_id}: {description}")
                 
                 try:
                     if tool_name == "run_workflow" and "workflow_id" in tool_args:
@@ -578,12 +615,12 @@ def _worker_loop():
                         model = core_config.TOOLS_MODEL # Default Groq
                         
                         if is_local_available():
-                            logger.info("Using LOCAL LLM (Ollama) for background task")
+                            _safe_log('info', "Using LOCAL LLM (Ollama) for background task")
                             client = OllamaClientWrapper()
                             # Use centralized model config (defaults to qwen2.5-coder:7b for code)
                             model = LocalLLM.DEFAULT_MODELS['code']
                         else:
-                            logger.info("Using CLOUD LLM (Groq) for background task")
+                            _safe_log('info', "Using CLOUD LLM (Groq) for background task")
                         
                         with execution_mode('restricted'):
                             response_text, tool_used, tool_result = generate_model_response_with_tools(
@@ -608,7 +645,7 @@ def _worker_loop():
                             status = 'COMPLETED'
                         
                 except Exception as e:
-                    logger.error(f"Job {job_id} failed: {e}")
+                    _safe_log('error', f"Job {job_id} failed: {e}")
                     result = f"Error: {str(e)}"
                     status = 'FAILED'
                 
@@ -622,14 +659,14 @@ def _worker_loop():
                 ''', (status, result, datetime.now().isoformat(), job_id))
                 conn.commit()
                 conn.close()
-                logger.info(f"Job {job_id} finished: {status}")
+                _safe_log('info', f"Job {job_id} finished: {status}")
                 
             else:
                 conn.close()
                 time.sleep(1) # Wait for new jobs
                 
         except Exception as e:
-            logger.error(f"Worker loop error: {e}")
+            _safe_log('error', f"Worker loop error: {e}")
             time.sleep(5)
 
 def start_worker():

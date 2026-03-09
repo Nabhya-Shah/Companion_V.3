@@ -91,12 +91,12 @@ function renderWorkflows(workflows) {
   if (!routinesList) return;
 
   if (!workflows || workflows.length === 0) {
-    routinesEmpty.style.display = 'flex';
+    if (routinesEmpty) routinesEmpty.style.display = 'flex';
     Array.from(routinesList.children).forEach(el => { if (el.id !== 'routinesEmpty') el.remove(); });
     return;
   }
 
-  routinesEmpty.style.display = 'none';
+  if (routinesEmpty) routinesEmpty.style.display = 'none';
   workflowsById = {};
 
   Array.from(routinesList.children).forEach(el => { if (el.id !== 'routinesEmpty') el.remove(); });
@@ -529,4 +529,7 @@ window.resolveApproval = resolveApproval;
 // ---- Init ----
 export function initTasks() {
   document.getElementById('createScheduleBtn')?.addEventListener('click', createSchedule);
+  bus.on('tasks:refresh', loadTasks);
+  bus.on('approval:pending', handleApprovalRequests);
+  bus.on('plan:event', handlePlanEvent);
 }

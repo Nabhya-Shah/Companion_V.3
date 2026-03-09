@@ -30,6 +30,34 @@ chat_bp = Blueprint('chat', __name__)
 _plan_event_queue: queue.Queue = queue.Queue()
 
 
+def _inject_offline_insights(active_history: list[dict]) -> int:
+    """Append undelivered proactive insights into chat history once."""
+    try:
+        from companion_ai.services.insights import list_undelivered_chat_insights, mark_chat_delivered
+
+        rows = list_undelivered_chat_insights(limit=5)
+        if not rows:
+            return 0
+
+        now_iso = datetime.now().isoformat()
+        for row in rows:
+            title = (row.get('title') or 'Proactive Insight').strip()
+            body = (row.get('body') or '').strip()
+            active_history.append({
+                'user': '',
+                'ai': f"[Proactive] {title}\n\n{body}" if body else f"[Proactive] {title}",
+                'timestamp': now_iso,
+                'persona': 'Companion',
+                'source': 'insight',
+            })
+
+        mark_chat_delivered([int(r['id']) for r in rows])
+        return len(rows)
+    except Exception as e:
+        logger.debug(f"Offline insights injection skipped: {e}")
+        return 0
+
+
 def _plan_event_listener(event_type: str, plan_id: str, data: dict):
     """Callback registered with task_planner to capture plan progress events."""
     _plan_event_queue.put({"event_type": event_type, "plan_id": plan_id, "data": data})
@@ -235,6 +263,11 @@ def get_chat_history():
     """Get conversation history for live updates."""
     try:
         _, _, _, active_history, _ = state._get_active_session_state()
+        injected = _inject_offline_insights(active_history)
+        if injected:
+            with state.history_condition:
+                state.history_version += 1
+                state.history_condition.notify_all()
         return jsonify({'history': active_history, 'count': len(active_history)})
     except Exception as e:
         logger.error(f"Get history error: {e}")
@@ -344,6 +377,25 @@ def chat_history_stream():
                         yield f"data: {payload}\n\n"
                 except Exception as e:
                     logger.error(f"Plan stream error: {e}")
+
+                # Emit newly generated proactive insights
+                try:
+                    from companion_ai.services.insights import claim_live_insights
+
+                    for insight in claim_live_insights(limit=5):
+                        state.sse_sequence += 1
+                        state.sse_counters['insight.new'] = state.sse_counters.get('insight.new', 0) + 1
+                        state.sse_last_event_ts = datetime.now().isoformat()
+                        payload = json.dumps({
+                            'type': 'insight',
+                            'event': 'insight.new',
+                            'seq': state.sse_sequence,
+                            'ts': datetime.now().isoformat(),
+                            'payload': {'insight': insight},
+                        })
+                        yield f"data: {payload}\n\n"
+                except Exception as e:
+                    logger.error(f"Insight stream error: {e}")
 
             yield ": keep-alive\n\n"
 

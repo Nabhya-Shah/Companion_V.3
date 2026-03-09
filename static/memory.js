@@ -6,6 +6,80 @@ import { bus, state, authHeaders, setApiToken, escapeHtml, escapeRegex, formatTi
 // ---- State ----
 let allMemoryData = { facts: [], insights: [] };
 
+async function loadProactiveInsights() {
+  const listEl = document.getElementById('proactiveInsightsList');
+  const badgeEl = document.getElementById('insightBadge');
+  if (listEl) listEl.innerHTML = skeletonCards(2);
+
+  try {
+    const r = await fetch('/api/insights?limit=12', { headers: authHeaders() });
+    const data = await r.json();
+    const rows = Array.isArray(data.insights) ? data.insights : [];
+    const unreadCount = Number(data.unread_count || 0);
+
+    if (badgeEl) {
+      if (unreadCount > 0) {
+        badgeEl.textContent = String(unreadCount);
+        badgeEl.style.display = 'flex';
+      } else {
+        badgeEl.style.display = 'none';
+      }
+    }
+
+    if (!listEl) return;
+    if (!rows.length) {
+      listEl.innerHTML = '<div class="memory-empty">No proactive insights yet</div>';
+      return;
+    }
+
+    listEl.innerHTML = rows.map((row) => {
+      const title = escapeHtml(row.title || 'Insight');
+      const body = escapeHtml(row.body || '');
+      const status = String(row.status || 'unread').toLowerCase();
+      const statusClass = status === 'read' ? 'read' : (status === 'dismissed' ? 'dismissed' : 'unread');
+      const timeAgo = formatTimeAgo(row.created_at);
+      const id = Number(row.id);
+
+      return `
+        <div class="memory-card proactive-insight ${statusClass}" data-insight-id="${id}">
+          <div class="memory-card-header">
+            <span class="memory-category insight">proactive</span>
+            <span class="memory-timestamp">${escapeHtml(timeAgo)}</span>
+          </div>
+          <div class="memory-text"><strong>${title}</strong></div>
+          <div class="memory-text">${body}</div>
+          <div class="memory-meta" style="justify-content:flex-end; gap:6px;">
+            <button class="small-btn" onclick="markInsightStatus(${id}, 'read')">Mark read</button>
+            <button class="small-btn" onclick="markInsightStatus(${id}, 'dismissed')">Dismiss</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    console.error('Failed to load proactive insights:', e);
+    if (listEl) listEl.innerHTML = '<div class="memory-empty">Failed to load proactive insights</div>';
+  }
+}
+
+async function markInsightStatus(insightId, status) {
+  try {
+    const r = await fetch(`/api/insights/${insightId}/status`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ status })
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      showToast(data.error || 'Failed to update insight', 'error');
+      return;
+    }
+    showToast(status === 'dismissed' ? 'Insight dismissed' : 'Insight marked read', 'success');
+    await loadProactiveInsights();
+  } catch (e) {
+    showToast('Failed to update insight', 'error');
+  }
+}
+
 // ---- Memory Loading ----
 export async function loadMemory(retry = false) {
   // Show skeletons while loading
@@ -39,6 +113,7 @@ export async function loadMemory(retry = false) {
     const query = searchInput?.value?.toLowerCase() || '';
     renderMemoryCards(query);
     await loadPendingFacts();
+    await loadProactiveInsights();
   } catch (e) {
     console.error('Failed to load memory:', e);
   }
@@ -374,23 +449,27 @@ export async function loadRecentUploads() {
   list.innerHTML = skeletonCards(2);
 
   try {
-    const res = await fetch('/api/upload/list?limit=12', { headers: authHeaders() });
+    const res = await fetch('/api/brain/files', { headers: authHeaders() });
     const data = await res.json();
+    const files = (data.files || [])
+      .filter(f => String(f.path || '').startsWith('documents/'))
+      .slice(0, 12);
 
-    if (!data.files || data.files.length === 0) {
+    if (!files.length) {
       list.innerHTML = '<div class="brain-empty">No uploaded files yet.</div>';
       return;
     }
 
-    list.innerHTML = data.files.map(f => `
+    list.innerHTML = files.map(f => `
       <div class="brain-file-card">
         <div class="brain-file-icon">📎</div>
         <div class="brain-file-info">
-          <div class="brain-file-name">${escapeHtml(f.filename)}</div>
-          <div class="brain-file-meta">${f.ext.toUpperCase()} • ${Math.round((f.size || 0) / 1024)} KB</div>
+          <div class="brain-file-name">${escapeHtml(f.name || f.path)}</div>
+          <div class="brain-file-meta">${escapeHtml(formatTimeAgo(f.modified_at))} • ${Math.round((f.size || 0) / 1024)} KB</div>
           <div style="display:flex; gap:6px; margin-top:6px;">
-            <button class="small-btn" onclick="summarizeUploadedFile('${f.file_id}')">Summary</button>
-            <button class="small-btn" onclick="extractUploadedFile('${f.file_id}')">Extract</button>
+            <button class="small-btn" onclick="summarizeBrainUpload('${encodeURIComponent(f.path)}')">Summary</button>
+            <button class="small-btn" onclick="extractBrainUpload('${encodeURIComponent(f.path)}')">Extract</button>
+            <button class="small-btn" onclick="deleteBrainFile('${encodeURIComponent(f.path)}')">Delete</button>
           </div>
         </div>
       </div>
@@ -400,10 +479,11 @@ export async function loadRecentUploads() {
   }
 }
 
-async function summarizeUploadedFile(fileId) {
+async function summarizeBrainUpload(encodedPath) {
+  const relPath = decodeURIComponent(encodedPath || '');
   try {
-    const res = await fetch('/api/upload/summarize', {
-      method: 'POST', headers: authHeaders(), body: JSON.stringify({ file_id: fileId })
+    const res = await fetch('/api/brain/summarize', {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify({ path: relPath })
     });
     const data = await res.json();
     if (!res.ok) { showToast(data.error || 'Summary failed', 'error'); return; }
@@ -412,10 +492,11 @@ async function summarizeUploadedFile(fileId) {
   } catch (e) { showToast('Summary failed', 'error'); }
 }
 
-async function extractUploadedFile(fileId) {
+async function extractBrainUpload(encodedPath) {
+  const relPath = decodeURIComponent(encodedPath || '');
   try {
-    const res = await fetch('/api/upload/extract', {
-      method: 'POST', headers: authHeaders(), body: JSON.stringify({ file_id: fileId, max_chars: 1800 })
+    const res = await fetch('/api/brain/extract', {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify({ path: relPath, max_chars: 1800 })
     });
     const data = await res.json();
     if (!res.ok) { showToast(data.error || 'Extract failed', 'error'); return; }
@@ -435,6 +516,7 @@ async function uploadBrainFile(file) {
     if (data.success) {
       console.log(`Uploaded ${file.name}: ${data.chunks_indexed} chunks indexed`);
       await loadBrainFiles();
+      await loadRecentUploads();
     } else { console.error('Upload failed:', data.error); }
   } catch (e) { console.error('Upload error:', e); }
 }
@@ -450,6 +532,7 @@ async function uploadBrainFiles(files) {
     if (data.success) {
       showToast(`Uploaded ${data.count} file${data.count === 1 ? '' : 's'} to knowledge`, 'success');
       await loadBrainFiles();
+      await loadRecentUploads();
       if (Array.isArray(data.errors) && data.errors.length > 0) {
         console.warn('Some files failed during batch upload:', data.errors);
       }
@@ -464,8 +547,9 @@ async function uploadBrainFiles(files) {
 window.approvePendingFact = approvePendingFact;
 window.rejectPendingFact = rejectPendingFact;
 window.deleteBrainFile = deleteBrainFile;
-window.summarizeUploadedFile = summarizeUploadedFile;
-window.extractUploadedFile = extractUploadedFile;
+window.summarizeBrainUpload = summarizeBrainUpload;
+window.extractBrainUpload = extractBrainUpload;
+window.markInsightStatus = markInsightStatus;
 
 // ---- Init ----
 export function initMemory() {
@@ -475,6 +559,10 @@ export function initMemory() {
   document.getElementById('refreshMemoryBtn')?.addEventListener('click', loadMemory);
   document.getElementById('approveAllPendingBtn')?.addEventListener('click', () => bulkPendingFacts('approve'));
   document.getElementById('rejectAllPendingBtn')?.addEventListener('click', () => bulkPendingFacts('reject'));
+  document.getElementById('refreshProactiveInsightsBtn')?.addEventListener('click', loadProactiveInsights);
+
+  // Live insight events update badge/list without requiring a full memory reload.
+  bus.on('insight:new', () => { loadProactiveInsights(); });
 
   // Knowledge tab handlers  
   const uploadZone = document.getElementById('brainUploadZone');
@@ -519,6 +607,4 @@ export function initMemory() {
       finally { refreshUploadsBtn.disabled = false; }
     });
   }
-
-  loadRecentUploads();
 }

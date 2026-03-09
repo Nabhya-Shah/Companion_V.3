@@ -70,26 +70,27 @@ relevant memories from the provided list. Return the indices of relevant memorie
             {"operation": "delete", "query": "fact to forget"}
         """
         operation = task.get("operation")
+        user_id = task.get("user_id")
         
         if operation == "search":
-            return await self._search(task.get("query", ""))
+            return await self._search(task.get("query", ""), user_id=user_id)
         elif operation == "extract":
             return await self._extract(task.get("text", ""))
         elif operation == "save":
-            return await self._save(task.get("fact", ""))
+            return await self._save(task.get("fact", ""), user_id=user_id)
         elif operation == "delete":
             return await self._delete(task.get("query", ""))
         else:
             return LoopResult.failure(f"Unknown operation: {operation}")
     
-    async def _search(self, query: str) -> LoopResult:
+    async def _search(self, query: str, user_id: str | None = None) -> LoopResult:
         """Search for relevant memories via unified knowledge.recall()."""
         if not query:
             return LoopResult.failure("No query provided")
 
         try:
             from companion_ai.memory.knowledge import recall
-            results = recall(query, limit=10)
+            results = recall(query, limit=10, user_id=user_id)
             memories = [
                 {"source": r["source"], "content": r["text"], "priority": 1 if r["source"] == "brain" else 2}
                 for r in results
@@ -133,7 +134,7 @@ relevant memories from the provided list. Return the indices of relevant memorie
             logger.error(f"Fact extraction failed: {e}")
             return LoopResult.failure(str(e))
     
-    async def _save(self, fact: str) -> LoopResult:
+    async def _save(self, fact: str, user_id: str | None = None) -> LoopResult:
         """Save a fact via unified knowledge.remember().
 
         Also writes to brain folder for human-readable backup.
@@ -154,7 +155,7 @@ relevant memories from the provided list. Return the indices of relevant memorie
             from companion_ai.brain_manager import get_brain
             from datetime import datetime
 
-            result = remember(fact, source="loop_memory")
+            result = remember(fact, source="loop_memory", user_id=user_id)
 
             # Also append to brain folder for human-readable log
             brain = get_brain()

@@ -28,7 +28,6 @@ def get_memory():
     try:
         detailed = request.args.get('detailed', 'false').lower() in ('1', 'true', 'yes')
         session_key, profile_key, mem0_user_id, _, _ = state._get_active_session_state()
-        state._maybe_migrate_legacy_scope(mem0_user_id, profile_key, session_key)
 
         # --- Mem0 as primary source ---
         if core_config.USE_MEM0:

@@ -361,6 +361,64 @@ def schedule_modify(schedule_id):
     return jsonify({'status': 'success', 'updated': True})
 
 
+@system_bp.route('/api/insights', methods=['GET'])
+def list_insights_api():
+    """List proactive insights and unread count."""
+    try:
+        from companion_ai.services.insights import list_insights, unread_count
+
+        unread_only = request.args.get('unread', '').strip().lower() in {'1', 'true', 'yes'}
+        limit = int(request.args.get('limit', '20'))
+        rows = list_insights(unread_only=unread_only, limit=max(limit, 1))
+        return jsonify({'insights': rows, 'count': len(rows), 'unread_count': unread_count()})
+    except Exception as e:
+        logger.error(f"Insights list error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@system_bp.route('/api/insights/<int:insight_id>/status', methods=['POST'])
+def update_insight_status_api(insight_id: int):
+    """Update insight status: unread/read/dismissed."""
+    token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
+    if not core_config.require_auth(token):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    status = (data.get('status') or '').strip().lower()
+    if status not in {'unread', 'read', 'dismissed'}:
+        return jsonify({'error': "status must be one of: unread, read, dismissed"}), 400
+
+    try:
+        from companion_ai.services.insights import update_status
+
+        ok = update_status(insight_id, status)
+        if not ok:
+            return jsonify({'error': 'Insight not found'}), 404
+        return jsonify({'status': 'success', 'id': insight_id, 'state': status})
+    except Exception as e:
+        logger.error(f"Insights status error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@system_bp.route('/api/insights/generate', methods=['POST'])
+def generate_insight_now_api():
+    """Force-generate a proactive insight digest now (debug/admin)."""
+    token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
+    if not core_config.require_auth(token):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    try:
+        from companion_ai.services.insights import generate_daily_insight_if_due
+
+        created = generate_daily_insight_if_due(force=True)
+        if not created:
+            return jsonify({'status': 'noop', 'reason': 'No digest content available'})
+        return jsonify({'status': 'created', 'insight': created})
+    except Exception as e:
+        logger.error(f"Insights generate error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @system_bp.route('/api/loops/capabilities', methods=['GET'])
 def get_loop_capabilities():
     """Get capabilities of all local loops (for debugging)."""

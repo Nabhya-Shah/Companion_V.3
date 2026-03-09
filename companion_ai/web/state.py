@@ -49,7 +49,6 @@ _STRICT_TOKEN_PATH_PREFIXES = (
     "/api/shutdown",
     "/api/memory/clear",
     "/api/brain/reindex",
-    "/api/brain/upload",
     "/api/brain/auto-write",
     "/api/tokens/reset",
 )

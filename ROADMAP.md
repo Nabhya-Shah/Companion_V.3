@@ -1,8 +1,8 @@
 # Companion AI — Master Roadmap & Sprint Plan
 
-> **Last Updated**: 2026-03-02  
-> **Status**: Phase 6 Makeover — in progress  
-> **Tests**: 206 passing
+> **Last Updated**: 2026-03-09  
+> **Status**: Phase 6 complete + performance optimizations  
+> **Tests**: 219 passing
 
 ---
 
@@ -20,8 +20,33 @@ Personal AI companion with orchestrator brain, persistent memory, knowledge grap
 | P2 | Memory System | ✅ Done | SQLite facts, Mem0 vectors, conflict detection, dedup, confidence scoring |
 | P3 | Knowledge & Brain | ✅ Done | Document upload, brain index, knowledge graph, D3 visualizer |
 | P4 | Orchestrator & Loops | ✅ Done | 120B routing brain, local loops (memory, tool, vision), job scheduler |
-| P5 | Code Quality | ✅ Done | Monolith splits (llm/, tools/, web/), dead code removal, 206 tests |
-| P6-A/B/C | Features | ✅ Done | Workflows, approvals, planning, scheduled tasks, plugin policy |
+| P5 | Code Quality | ✅ Done | Monolith splits (llm/, tools/, web/), dead code removal, 211 tests |
+| P6-A/B/C/D | Features | ✅ Done | Workflows, approvals, planning, scheduled tasks, plugin policy, proactive insights |
+
+---
+
+## Recent Work: Performance Optimizations (2026-03-09)
+
+**Goal**: Eliminate unexpected token burn from background systems and page loads.
+
+**Issues Fixed**:
+1. ✅ Workflow reload spam — `reload_workflows()` logged on every Tasks poll even when files unchanged
+2. ✅ Automatic Mem0 migration — fresh sessions triggered migration work on every memory read
+3. ✅ Eager frontend loading — page bootstrap hit `/api/memory` and `/api/brain/files` before panels opened
+4. ✅ Session scope leaks — memory operations could bleed across sessions within same profile
+
+**Solutions**:
+- Change-aware workflow reload using `(filename, mtime_ns, size)` signature
+- Moved migration trigger to explicit context-switch only (removed from read path)
+- Lazy-loaded memory/knowledge panels — data loads only when panel opens
+- Session-scoped Mem0 `user_id` format propagated throughout orchestrator and loops
+
+**Impact**:
+- Fresh page load: 0 memory/brain endpoint hits
+- Tasks panel poll: no workflow reload logs
+- Test suite: 219 passing (+8 from baseline)
+
+**Files Modified**: `services/workflows.py`, `web/memory_routes.py`, `static/app.js`, `static/memory.js`, `orchestrator.py`, `local_loops/memory_loop.py`
 
 ---
 
@@ -190,7 +215,7 @@ Personal AI companion with orchestrator brain, persistent memory, knowledge grap
 - [x] Use ES module `import/export` with `<script type="module">`
 - [x] Event bus for cross-module communication (no circular deps)
 - [x] All 5 panel tabs verified working with Playwright
-- [x] 206 backend tests still passing
+- [x] 211 backend tests still passing
 
 **B — Mobile-Friendly**
 - [ ] Panel becomes full-width overlay on < 768px
@@ -203,8 +228,8 @@ Personal AI companion with orchestrator brain, persistent memory, knowledge grap
 
 | After | Test |
 |-------|------|
-| Phase 1 | `pytest -q` → 206 pass. "Hello" → no memory toast. Token count < 1500. "What can you do?" → mentions workflows. |
-| Phase 2 | `pytest -q` → 206 pass. No broken imports. `.gitignore` covers data/. Docs accurate. |
+| Phase 1 | `pytest -q` → 211 pass. "Hello" → no memory toast. Token count < 1500. "What can you do?" → mentions workflows. |
+| Phase 2 | `pytest -q` → 211 pass. No broken imports. `.gitignore` covers data/. Docs accurate. |
 | Phase 3 | All 5 panel tabs open/close. All data loads correctly. Settings has 3 sections. No console errors. |
 | Phase 4 | No visual regressions. No unused CSS classes for deleted elements. |
 | Phase 5 | Smooth animations. Themes switch correctly. JS modules load. Mobile viewport renders. |
@@ -228,7 +253,7 @@ Personal AI companion with orchestrator brain, persistent memory, knowledge grap
 | Smart Home | Loxone Miniserver |
 | Frontend | Vanilla JS + CSS custom properties |
 | Knowledge Graph Viz | D3.js |
-| Tests | pytest (206 tests, 21+ suites) |
+| Tests | pytest (211 tests, 22+ suites) |
 
 ---
 
@@ -269,4 +294,4 @@ Personal AI companion with orchestrator brain, persistent memory, knowledge grap
 | Graph visualizer | `templates/graph.html` (991 lines) |
 | Config | `companion_ai/core/config.py` (396 lines) |
 | Persona YAML | `prompts/personas/companion.yaml` |
-| Tests | `tests/` (21 files, 206 tests) |
+| Tests | `tests/` (22 files, 211 tests) |

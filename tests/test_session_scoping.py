@@ -2,6 +2,9 @@ from companion_ai.core import config as core_config
 from web_companion import app
 import web_companion
 import companion_ai.web.memory_routes as _mem_mod
+import asyncio
+
+from companion_ai.local_loops.memory_loop import MemoryLoop
 
 
 def test_chat_passes_scoped_mem0_user_id(monkeypatch):
@@ -94,3 +97,25 @@ def test_clear_memory_uses_scoped_user_id(monkeypatch):
 
     assert res.status_code == 200
     assert captured["user_id"] == f"{core_config.MEM0_USER_ID}::p:private::s:sessC"
+
+
+def test_memory_loop_save_uses_scoped_user_id(monkeypatch):
+    captured = {}
+
+    def fake_remember(fact, **kwargs):
+        captured["fact"] = fact
+        captured["user_id"] = kwargs.get("user_id")
+        return {"mem0": {"ok": True}, "sqlite": False}
+
+    monkeypatch.setattr("companion_ai.memory.knowledge.remember", fake_remember)
+
+    loop = MemoryLoop()
+    result = asyncio.run(loop.execute({
+        "operation": "save",
+        "fact": "User likes coffee",
+        "user_id": f"{core_config.MEM0_USER_ID}::p:home::s:sessA",
+    }))
+
+    assert result.status.value == "success"
+    assert captured["fact"] == "User likes coffee"
+    assert captured["user_id"] == f"{core_config.MEM0_USER_ID}::p:home::s:sessA"

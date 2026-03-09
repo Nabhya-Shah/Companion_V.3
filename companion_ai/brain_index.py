@@ -200,15 +200,15 @@ class BrainIndex:
             with sqlite3.connect(str(INDEX_DB)) as conn:
                 for idx, chunk in enumerate(chunks):
                     embedding = self._get_embedding(chunk)
+                    embedding_blob = None
                     if embedding:
-                        # Store embedding as binary blob
                         embedding_blob = np.array(embedding, dtype=np.float32).tobytes()
-                        conn.execute("""
-                            INSERT OR REPLACE INTO brain_chunks 
-                            (file_path, file_hash, chunk_idx, text, embedding)
-                            VALUES (?, ?, ?, ?, ?)
-                        """, (relative_path, file_hash, idx, chunk, embedding_blob))
-                        indexed += 1
+                    conn.execute("""
+                        INSERT OR REPLACE INTO brain_chunks 
+                        (file_path, file_hash, chunk_idx, text, embedding)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (relative_path, file_hash, idx, chunk, embedding_blob))
+                    indexed += 1
                 conn.commit()
             
             logger.info(f"Indexed {indexed} chunks from {relative_path}")

@@ -2,7 +2,7 @@
 
 > **Design Philosophy**: The orchestrator is the brain. Local loops are the specialists. Memory is unified. Persona is the soul.
 
-**Last Updated**: Phase 5 complete (all tracks done, 2026-02-26)
+**Last Updated**: Phase 6 complete + optimizations (2026-03-09)
 
 ---
 
@@ -180,7 +180,9 @@ Each loop:
 | Service | File | Purpose |
 |---------|------|---------|
 | **Persona** | `services/persona.py` | Personality evolution with `PersonaState` singleton, 3 trigger types (periodic/memory-event/session-end), incremental trait merging, rapport progression |
-| **Jobs/Scheduler** | `services/jobs.py` | Recurring automations, run-now, policy enforcement |
+| **Jobs/Scheduler** | `services/jobs.py` | Recurring automations, run-now, policy enforcement, daemon-safe logging |
+| **Workflows** | `services/workflows.py` | YAML workflow loader with change-aware reload (mtime+size signature), async execution, chat history updates, context-switch sync |
+| **Proactive Insights** | `services/insights.py` | Daily digest generation, undelivered insight tracking, SSE delivery, offline catch-up via chat history injection |
 | **Token Budget** | `services/token_budget.py` | Per-step token tracking with model labels |
 | **TTS** | `services/tts.py` | Text-to-speech (optional plugin, not actively developed) |
 
@@ -218,6 +220,8 @@ companion_ai/
 ├── services/
 │   ├── tts.py                 # Text-to-speech
 │   ├── jobs.py                # Job queue + scheduler
+│   ├── workflows.py           # Workflow engine (YAML, change-aware reload)
+│   ├── insights.py            # Proactive insights (daily digest, SSE delivery)
 │   ├── persona.py             # Persona evolution
 │   └── token_budget.py        # Token tracking
 ├── local_loops/
@@ -293,6 +297,32 @@ prompts/personas/              # Persona YAML definitions
 5. **Persona as differentiator**: The companion's personality evolves over time — not just a chatbot.
 6. **Observable by default**: Token tracking, job status, schedule outcomes — all visible to the user.
 7. **Local-first**: No cloud dependency except Groq for primary chat. Memory, embeddings, and tools run locally.
+8. **Lazy-load by default**: Frontend panels load data only when opened, not on bootstrap, to minimize startup token burn.
+9. **Change-aware operations**: Backend services use file signatures to avoid unnecessary reloads and processing.
+
+---
+
+## Performance Optimizations
+
+**Date**: 2026-03-09  
+**Context**: Eliminated unexpected token burn from background systems and page loads.
+
+| Optimization | Problem | Solution | Impact |
+|--------------|---------|----------|--------|
+| **Workflow Reload Spam** | `reload_workflows()` logged reload on every Tasks poll (~5s) even when files unchanged | Change-aware reload using `(filename, mtime_ns, size)` signature; early-exit if unchanged | Eliminated false reload logs; reduced filesystem overhead |
+| **Automatic Migration Path** | Fresh sessions triggered Mem0 legacy migration on every `/api/memory` read | Moved migration trigger from read path to explicit `/api/context/switch` only | Eliminated unwanted token burn on memory queries |
+| **Eager Frontend Loading** | Page bootstrap called `loadMemory()`, `loadRecentUploads()`, `loadProactiveInsights()` before panels opened | Removed eager calls; data loads deferred to `onPanelTabSwitch()` | Fresh page load no longer hits `/api/memory` or `/api/brain/files` |
+| **Session-Scoped Mem0** | Memory operations could leak across sessions within same profile | Propagated `user_id` format `{base}::p:{profile}::s:{session}` throughout orchestrator and local loops | Proper session isolation for vector memory |
+
+**Files Modified**:
+- `companion_ai/services/workflows.py` — `_compute_signature()`, change-aware `reload_workflows()`
+- `companion_ai/web/memory_routes.py` — removed `_maybe_migrate_legacy_scope()` from read path
+- `static/app.js` — removed eager `loadMemory()` from DOMContentLoaded
+- `static/memory.js` — removed terminal `loadRecentUploads()` and `loadProactiveInsights()` calls
+- `companion_ai/orchestrator.py` — session-scoped context builder
+- `companion_ai/local_loops/memory_loop.py` — user_id propagation
+
+**Test Coverage**: All optimizations validated in test suite (219 tests passing).
 
 ---
 

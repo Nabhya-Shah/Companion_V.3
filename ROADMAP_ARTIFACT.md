@@ -406,13 +406,13 @@ Goal: make Companion AI genuinely useful for daily personal operations by introd
 | ~~Explicit Multi-Step Intention~~ | 1-2 weeks | ✅ Orchestrator `PLAN` action with `plan_steps` array, TaskPlan model in `task_planner.py` |
 | ~~Progress Tracker Component~~ | 1 week | ✅ Chat UI dynamically renders step ticks (Queued/Running/Done) via SSE plan events |
 
-### Track P6-D (Proactive Insights) ⏳ NOT STARTED
+### Track P6-D (Proactive Insights) ✅ COMPLETE
 
 | Task | Effort | Success Criteria |
 |---|---:|---|
-| InsightGenerator Engine | 1 week | Background daemon periodically reviewing graph facts and calendar |
-| Unprompted Chat Triggers | 4-5 days | The AI text-messages the user on its own volition via local SSE stream |
-| Offline Resilience DB | 3-4 days | "While you were out" queue for when the web UI was closed during an insight |
+| ~~InsightGenerator Engine~~ | 1 week | ✅ `services/insights.py` generates daily digest signals from memory + schedules |
+| ~~Unprompted Chat Triggers~~ | 4-5 days | ✅ Live `insight.new` SSE events emitted to connected UI clients |
+| ~~Offline Resilience DB~~ | 3-4 days | ✅ Undelivered insight queue is injected into chat history on reconnect/open |
 
 ## Phase 7 (4-6 Months): Ecosystem & Integration Growth
 
@@ -455,11 +455,11 @@ Goal: evolve into a proactive but policy-bounded intelligence layer.
 - **Persona**: responses reflect evolving personality traits grounded in conversation history.
 - **Velocity**: each slice ships with tests and artifact updates in the same change window.
 
-## Phase 6 Sprint Plan — Daily-Life Intelligence
+## Phase 6 Sprint Plan — Daily-Life Intelligence (Archived Plan Notes)
 
 Goal: make Companion AI genuinely useful for daily personal operations by building workflow automation, safer autonomy, multi-step task orchestration, proactive insights, and better reasoning context.
 
-All five Phase 6 tracks map to the table above. Recommended execution order is dependency-aware: context packaging first (foundational), then safety/HITL, then user-facing workflow and insight features.
+This section is retained for historical planning context. Current delivered status is tracked in `FEATURE_TRACKER_ARTIFACT.md` and `ROADMAP.md`.
 
 ### Sprint P6-A (Context Packaging — Week 1-2)
 
@@ -505,19 +505,19 @@ Goal: give users visibility into multi-step task progress and allow intervention
 
 Goal: surface timely, low-noise suggestions so the user doesn't have to manually query for status.
 
-- [ ] Add insight generator service (`companion_ai/services/insights.py`) — produces daily/weekly digest from recent memories, upcoming schedules, and flagged pending facts
-- [ ] Add `/api/insights` endpoints — list unread insights, mark read/dismissed
-- [ ] Wire scheduler to trigger daily insight generation (reuse existing scheduler infrastructure from Phase 3-4)
-- [ ] Show unread insight count badge in the UI header; expand into insight list panel on click
-- [ ] Add focused `tests/test_insights.py` — digest generation, empty-state safety, dismiss lifecycle
+- [x] Add insight generator service (`companion_ai/services/insights.py`) — produces daily digest from recent memories, upcoming schedules, and pending facts
+- [x] Add `/api/insights` endpoints — list insights, unread count, mark read/dismissed, force-generate
+- [x] Wire scheduler/worker loop to trigger daily insight generation (reuse existing scheduler infrastructure from Phase 3-4)
+- [x] Show unread insight count badge in the UI header and proactive insights list in Memory panel
+- [x] Add focused `tests/test_insights.py` — digest generation, API/status lifecycle, offline chat injection
 
 ---
 
 ## Immediate Next Execution Window (Phase 6)
 
-1. **P5-A through P5-E**: ✅ Complete. All Phase 5 tracks done.
-2. **Next up: Sprint P6-A** — Context Packaging. Foundational for all subsequent Phase 6 features.
-3. Execute P6-A → P6-B → P6-C → P6-D → P6-E in order (each sprint builds on the previous).
+1. **P5-A through P5-E**: ✅ Complete.
+2. **P6-A through P6-D**: ✅ Complete (workflows, approvals, planning transparency, proactive insights).
+3. Re-baseline Phase 7 backlog into a fresh execution plan before new feature work.
 4. Keep this roadmap + `FEATURE_TRACKER_ARTIFACT.md` synchronized per delivered slice.
 5. Promote only validated slices into release-profile checks.
 

@@ -518,13 +518,62 @@ def brain_files_list():
         return jsonify({'error': str(e)}), 500
 
 
+@files_bp.route('/api/brain/extract', methods=['POST'])
+def brain_extract_text():
+    """Extract text from a brain workspace file."""
+    data = request.get_json(silent=True) or {}
+    rel = str(data.get('path') or '').strip()
+    if not rel:
+        return jsonify({'error': 'path is required'}), 400
+
+    max_chars = max(500, min(int(data.get('max_chars') or 12000), 50000))
+    abs_path = _resolve_brain_file_path(rel)
+    if not abs_path or not os.path.exists(abs_path):
+        return jsonify({'error': 'File not found'}), 404
+
+    text, truncated = _extract_text_from_uploaded_path(abs_path, max_chars=max_chars)
+    if not text:
+        return jsonify({'error': 'No extractable text for this file type'}), 400
+
+    return jsonify({
+        'path': rel.replace('\\', '/'),
+        'filename': os.path.basename(abs_path),
+        'chars': len(text),
+        'truncated': truncated,
+        'text': text,
+    })
+
+
+@files_bp.route('/api/brain/summarize', methods=['POST'])
+def brain_summarize_text():
+    """Summarize text from a brain workspace file."""
+    data = request.get_json(silent=True) or {}
+    rel = str(data.get('path') or '').strip()
+    if not rel:
+        return jsonify({'error': 'path is required'}), 400
+
+    max_chars = max(120, min(int(data.get('max_chars') or 700), 3000))
+    abs_path = _resolve_brain_file_path(rel)
+    if not abs_path or not os.path.exists(abs_path):
+        return jsonify({'error': 'File not found'}), 404
+
+    text, _ = _extract_text_from_uploaded_path(abs_path, max_chars=20000)
+    if not text:
+        return jsonify({'error': 'No extractable text for this file type'}), 400
+
+    summary = _summarize_text_simple(text, max_chars=max_chars)
+    return jsonify({
+        'path': rel.replace('\\', '/'),
+        'filename': os.path.basename(abs_path),
+        'source_chars': len(text),
+        'summary_chars': len(summary),
+        'summary': summary,
+    })
+
+
 @files_bp.route('/api/brain/file', methods=['DELETE'])
 def brain_file_delete():
     """Delete one brain file and its indexed chunks."""
-    token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
-    if not core_config.require_auth(token):
-        return jsonify({'error': 'Unauthorized'}), 401
-
     data = request.get_json(silent=True) or {}
     rel = data.get('path')
     if not rel:

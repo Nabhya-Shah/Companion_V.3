@@ -1,3 +1,6 @@
+import asyncio
+from datetime import datetime
+
 from flask import Blueprint, jsonify, request
 from companion_ai.services.workflows import get_manager
 import logging
@@ -29,17 +32,37 @@ def get_workflow(workflow_id):
     })
 
 @bp.route('/<workflow_id>/run', methods=['POST'])
-async def run_workflow(workflow_id):
+def run_workflow(workflow_id):
     """Execute a workflow and return the results."""
     manager = get_manager()
     try:
-        results = await manager.execute_workflow(workflow_id)
+        results = asyncio.run(manager.execute_workflow(workflow_id))
         # Check if we should broadcast back any chat targeted steps
+        chat_updates = []
         for res in results:
             if res.get("output_target") == "chat":
-                from companion_ai.web.sse import emit_event
-                # Assuming UI listens to regular 'message' events for chat
-                emit_event("message", {"role": "assistant", "content": res["response"]})
+                chat_updates.append({
+                    "ai": res.get("response", ""),
+                    "timestamp": datetime.now().isoformat(),
+                    "metadata": {
+                        "source": "workflow",
+                        "workflow_id": workflow_id,
+                        "step_id": res.get("step_id"),
+                    },
+                })
+
+        if chat_updates:
+            try:
+                from companion_ai.web import state
+
+                session_key, _, _, active_history, _ = state._get_active_session_state()
+                active_history.extend(chat_updates)
+                with state.history_condition:
+                    state.history_version += 1
+                    state.history_condition.notify_all()
+                logger.info(f"Workflow {workflow_id} appended {len(chat_updates)} chat update(s) to session {session_key}")
+            except Exception as broadcast_err:
+                logger.warning(f"Workflow chat history update skipped: {broadcast_err}")
                 
         return jsonify({"status": "success", "workflow_id": workflow_id, "results": results})
     except ValueError as e:

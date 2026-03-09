@@ -28,14 +28,38 @@ class WorkflowManager:
     
     def __init__(self):
         self._workflows: Dict[str, WorkflowDefinition] = {}
+        self._workflow_signature: tuple = ()
         self.reload_workflows()
     
-    def reload_workflows(self):
+    def _compute_signature(self) -> tuple:
+        if not os.path.exists(WORKFLOWS_DIR):
+            return ()
+
+        signature = []
+        for filename in sorted(os.listdir(WORKFLOWS_DIR)):
+            if not filename.endswith('.json'):
+                continue
+            path = os.path.join(WORKFLOWS_DIR, filename)
+            try:
+                stat = os.stat(path)
+            except OSError:
+                continue
+            signature.append((filename, stat.st_mtime_ns, stat.st_size))
+        return tuple(signature)
+
+    def reload_workflows(self, force: bool = False) -> bool:
         """Loads all workflows from the workflows directory."""
-        self._workflows.clear()
         if not os.path.exists(WORKFLOWS_DIR):
             os.makedirs(WORKFLOWS_DIR, exist_ok=True)
-            return
+            self._workflows = {}
+            self._workflow_signature = ()
+            return True
+
+        signature = self._compute_signature()
+        if not force and signature == self._workflow_signature:
+            return False
+
+        workflows: Dict[str, WorkflowDefinition] = {}
 
         for filename in os.listdir(WORKFLOWS_DIR):
             if filename.endswith('.json'):
@@ -54,7 +78,7 @@ class WorkflowManager:
                         ))
                     
                     wf_id = filename[:-5]
-                    self._workflows[wf_id] = WorkflowDefinition(
+                    workflows[wf_id] = WorkflowDefinition(
                         id=wf_id,
                         name=data.get('name', wf_id),
                         description=data.get('description', ''),
@@ -63,6 +87,10 @@ class WorkflowManager:
                     logger.info(f"Loaded workflow: {wf_id}")
                 except Exception as e:
                     logger.error(f"Failed to load workflow {filename}: {e}")
+
+        self._workflows = workflows
+        self._workflow_signature = signature
+        return True
 
     def get_workflow(self, workflow_id: str) -> Optional[WorkflowDefinition]:
         return self._workflows.get(workflow_id)

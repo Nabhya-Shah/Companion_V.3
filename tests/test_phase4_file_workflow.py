@@ -181,3 +181,21 @@ def test_brain_file_delete(tmp_path, monkeypatch):
     assert ok.status_code == 200
     assert ok.get_json()['deleted'] is True
     assert not target.exists()
+
+
+def test_brain_extract_and_summarize(tmp_path, monkeypatch):
+    monkeypatch.setattr(_files_mod, '_brain_dir_for_workspace', lambda: str(tmp_path))
+    docs = tmp_path / 'documents'
+    docs.mkdir(parents=True, exist_ok=True)
+    target = docs / 'note.txt'
+    target.write_text('This is a detailed knowledge note about project planning and coffee preferences.', encoding='utf-8')
+
+    client = app.test_client()
+
+    extract_res = client.post('/api/brain/extract', json={'path': 'documents/note.txt', 'max_chars': 200})
+    assert extract_res.status_code == 200
+    assert 'coffee preferences' in extract_res.get_json()['text']
+
+    summary_res = client.post('/api/brain/summarize', json={'path': 'documents/note.txt', 'max_chars': 80})
+    assert summary_res.status_code == 200
+    assert summary_res.get_json()['summary']

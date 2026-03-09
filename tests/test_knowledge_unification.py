@@ -77,6 +77,34 @@ class TestBrainIndexStorePath:
             if brain_file.exists():
                 brain_file.unlink()
 
+    def test_index_file_counts_chunks_without_embeddings(self, tmp_path):
+        from companion_ai.brain_index import BrainIndex
+
+        upload = tmp_path / "doc.txt"
+        upload.write_text("This is a long test document with enough text to index. " * 20)
+
+        idx = BrainIndex.__new__(BrainIndex)
+        idx._lock = __import__("threading").Lock()
+
+        db_path = tmp_path / "test_brain3.db"
+        with patch("companion_ai.brain_index.INDEX_DB", db_path):
+            idx._init_db()
+            idx._get_embedding = MagicMock(return_value=None)
+
+            chunks = idx.index_file(upload, store_path="uploads/doc.txt")
+            assert chunks > 0
+
+            with sqlite3.connect(str(db_path)) as conn:
+                stored = conn.execute(
+                    "SELECT COUNT(*) FROM brain_chunks WHERE file_path = 'uploads/doc.txt'"
+                ).fetchone()[0]
+                embedded = conn.execute(
+                    "SELECT COUNT(*) FROM brain_chunks WHERE file_path = 'uploads/doc.txt' AND embedding IS NOT NULL"
+                ).fetchone()[0]
+
+            assert stored == chunks
+            assert embedded == 0
+
 
 # ============================================================================
 # D2 — Confidence-based fact system

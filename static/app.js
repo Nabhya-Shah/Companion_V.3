@@ -14,7 +14,7 @@
 import { state } from './utils.js';
 import { initChat, attachChipListeners, syncChatHistory, updateSendButton, startSSE, setupVoiceInput } from './chat.js';
 import { initPanel } from './panel.js';
-import { loadMemory, initMemory } from './memory.js';
+import { initMemory } from './memory.js';
 import { loadTasks, initTasks } from './tasks.js';
 import { loadSettings, loadModelsPanel, loadMetrics, loadTokenStats, loadTokenBudget, initSettings } from './settings.js';
 import { initSmartHome } from './smarthome.js';
@@ -35,7 +35,6 @@ document.addEventListener('DOMContentLoaded', () => {
   attachChipListeners();
   state.lastHistoryLength = -1; // Force initial sync
   syncChatHistory();
-  loadMemory();
   loadModelsPanel();
   loadMetrics();
   loadTokenStats();

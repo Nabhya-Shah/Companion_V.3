@@ -229,7 +229,7 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
             
             # Step 3: Handle memory saving (AFTER response is generated)
             if decision.save_facts:
-                await self._save_facts(decision.save_facts)
+                await self._save_facts(decision.save_facts, context)
             
             return response, metadata
             
@@ -336,7 +336,10 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
         import time
         
         loop_name = decision.loop
-        task = decision.task or {}
+        task = dict(decision.task or {})
+        mem0_user_id = context.get("mem0_user_id")
+        if mem0_user_id and loop_name == "memory":
+            task.setdefault("user_id", mem0_user_id)
         
         # DEBUG: Log delegation attempt
         logger.info(f"DEBUG: Delegating to loop '{loop_name}' with task: {task}")
@@ -530,7 +533,11 @@ Do NOT mention "steps" or "plans" — just answer naturally."""
         """Quick memory search via unified knowledge recall."""
         try:
             from companion_ai.memory.knowledge import recall
-            results = recall(user_message, limit=8)
+            results = recall(
+                user_message,
+                limit=8,
+                user_id=context.get("mem0_user_id"),
+            )
             data = {
                 "memories": [{"content": r["text"], "source": r["source"]} for r in results],
                 "count": len(results),
@@ -651,7 +658,7 @@ Don't mention "loops" or technical details. Be conversational."""
             logger.error(f"Synthesis failed: {e}")
             return f"Based on what I found: {loop_data}"
     
-    async def _save_facts(self, facts: List[str]):
+    async def _save_facts(self, facts: List[str], context: Optional[Dict] = None):
         """Save facts via unified knowledge.remember()."""
         if not facts:
             return
@@ -662,9 +669,11 @@ Don't mention "loops" or technical details. Be conversational."""
             logger.warning("knowledge module not available for saving facts")
             return
 
+        mem0_user_id = (context or {}).get("mem0_user_id")
+
         for fact in facts:
             try:
-                remember(fact, source="orchestrator")
+                remember(fact, source="orchestrator", user_id=mem0_user_id)
                 logger.info(f"Saved fact via knowledge.remember: {fact}")
             except Exception as e:
                 logger.error(f"Failed to save fact '{fact}': {e}")

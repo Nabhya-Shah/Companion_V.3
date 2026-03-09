@@ -69,6 +69,24 @@ def test_memory_endpoint_uses_quality_ledger_metadata(monkeypatch):
     assert data["profile_detailed"][0]["contradiction_state"] == "pending"
 
 
+def test_memory_endpoint_does_not_auto_migrate_legacy_scope(monkeypatch):
+    monkeypatch.setattr(web_companion.core_config, "USE_MEM0", True)
+    monkeypatch.setattr(
+        _web_state,
+        "_maybe_migrate_legacy_scope",
+        lambda *_: (_ for _ in ()).throw(AssertionError("memory reads should not trigger migration")),
+    )
+    monkeypatch.setattr(web_companion.mem0, "get_all_memories", lambda user_id=None: [])
+    monkeypatch.setattr(_mem_mod, "bulk_sync_memory_quality_from_mem0", lambda memories, user_scope: 0)
+    monkeypatch.setattr(_mem_mod, "get_memory_quality_map", lambda user_scope: {})
+
+    client = app.test_client()
+    response = client.get("/api/memory?detailed=1&session_id=sA&profile_id=home")
+
+    assert response.status_code == 200
+    assert response.get_json()["profile_detailed"] == []
+
+
 def test_delete_fact_removes_quality_entry(monkeypatch):
     monkeypatch.setattr(web_companion.core_config, "USE_MEM0", True)
     monkeypatch.setattr(web_companion.mem0, "delete_memory", lambda memory_id: True)

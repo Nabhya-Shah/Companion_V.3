@@ -644,6 +644,12 @@ export function startSSE() {
         bus.emit('tasks:refresh');
       } else if (eventType === 'approval.pending' || data.type === 'approval_request') {
         bus.emit('approval:pending', payload.approvals || []);
+      } else if (eventType === 'insight.new' || data.type === 'insight') {
+        if (payload.insight) {
+          bus.emit('insight:new', payload.insight);
+          // Pull latest history so proactively injected chat messages appear.
+          syncChatHistory();
+        }
       } else if (data.type === 'plan_update') {
         bus.emit('plan:event', data.event, data.plan_id, payload);
       } else {
