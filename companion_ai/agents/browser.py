@@ -60,24 +60,45 @@ async def _ensure_browser(headless: bool = False):
     # Use dedicated AI profile (avoids Chrome's remote debugging restriction)
     ai_profile_dir = os.path.join(os.path.expanduser("~"), ".companion_chrome")
     chrome_exe = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-    
+
+    # If Chrome isn't installed at the standard path, fall back to Playwright-bundled Chromium
     if not os.path.exists(chrome_exe):
-        raise Exception("Chrome not found. Please install Chrome.")
-    
-    # Launch Chrome with AI profile
-    logger.info("Launching Chrome with AI profile...")
+        logger.warning("Chrome not found at standard path; falling back to Playwright-bundled Chromium.")
+        chrome_exe = None
+
+    # Ensure profile dir exists
     try:
-        _context = await _playwright.chromium.launch_persistent_context(
-            user_data_dir=ai_profile_dir,
-            executable_path=chrome_exe,
-            headless=headless,
-            viewport={"width": 1280, "height": 900},
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-first-run",
-                "--no-default-browser-check",
-            ]
-        )
+        os.makedirs(ai_profile_dir, exist_ok=True)
+    except Exception:
+        logger.warning("Could not create AI profile dir; continuing without explicit user profile path")
+
+    # Launch browser with AI profile (prefer system Chrome when available)
+    logger.info("Launching browser with AI profile (Chrome preferred, Chromium fallback)...")
+    try:
+        if chrome_exe:
+            _context = await _playwright.chromium.launch_persistent_context(
+                user_data_dir=ai_profile_dir,
+                executable_path=chrome_exe,
+                headless=headless,
+                viewport={"width": 1280, "height": 900},
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                ]
+            )
+        else:
+            # Use Playwright's bundled Chromium (no executable_path)
+            _context = await _playwright.chromium.launch_persistent_context(
+                user_data_dir=ai_profile_dir,
+                headless=headless,
+                viewport={"width": 1280, "height": 900},
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                ]
+            )
         
         # Get existing page or create one
         if _context.pages:

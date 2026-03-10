@@ -1,14 +1,14 @@
 # Companion AI — Master Roadmap & Sprint Plan
 
-> **Last Updated**: 2026-03-09  
-> **Status**: Phase 6 complete + performance optimizations  
+> **Last Updated**: 2026-03-10  
+> **Status**: Phase 6 complete; Groq-first provider decision locked; next focus is Phase 7 quick-tool and memory work  
 > **Tests**: 219 passing
 
 ---
 
 ## Project Overview
 
-Personal AI companion with orchestrator brain, persistent memory, knowledge graph, scheduled automations, smart home integration, and evolving persona. Built with Python 3.11, Flask, Groq Cloud API, Mem0 + Qdrant vectors, vanilla JS frontend.
+Personal AI companion with orchestrator brain, persistent memory, knowledge graph, scheduled automations, smart home integration, and evolving persona. Built with Python 3.11, Flask, a Groq-first cloud path plus local vLLM/Ollama specialists, Mem0 + Qdrant vectors, and a vanilla JS frontend.
 
 ---
 
@@ -50,7 +50,163 @@ Personal AI companion with orchestrator brain, persistent memory, knowledge grap
 
 ---
 
-## Current Phase: P6 Makeover
+## Next Execution Window: Phase 7 (Groq-First Execution)
+
+**Decision**: Groq remains the primary provider.
+
+Provider benchmarking is complete enough to stop spending roadmap time on provider churn. Groq tied for best benchmark score, had the best latency profile, and already matches the repo's architecture and key-rotation setup. Mistral can remain a future fallback candidate on paper, but it is not the active roadmap path. Gemini remains useful for later experiments, not for the default runtime.
+
+The roadmap should now move back to product work on top of the existing Groq-first assumptions: OpenAI-compatible chat clients, Groq key rotation, a Groq-native tool path for light tools, and local specialists for heavy work.
+
+### Current Provider Baseline
+
+| Workload | Current Provider / Model | Why it exists now | Planning implication |
+|----------|--------------------------|-------------------|----------------------|
+| Primary chat + orchestrator | Groq `openai/gpt-oss-120b` | Strong reasoning + current production baseline | Migration target must preserve structured routing quality |
+| Fast tool execution | Groq `llama-3.1-8b-instant` | Cheap, fast light-tool path on OpenAI-style API | Good candidate to replace or bypass with quick-tool routing |
+| Cloud vision | Groq `meta-llama/llama-4-maverick-17b-128e-instruct` | Existing image analysis path | Alternate providers must match streaming + multimodal needs |
+| Memory AI / extraction | Groq `meta-llama/llama-4-scout-17b-16e-instruct` | Structured extraction and cloud fallback | Could be replaced, reduced, or pushed more local |
+| Local heavy specialist path | Local vLLM `Qwen/Qwen2.5-3B-Instruct` | Heavy tools stay local to save cloud spend | Provider strategy must preserve local-first capability |
+| Local vision fallback | Ollama `llava:13b` | Local image analysis fallback | Still useful even if primary cloud provider changes |
+
+### Provider Decision Outcome
+
+| Candidate | Outcome | Why |
+|-----------|---------|-----|
+| **Groq** | Chosen default | Matched best benchmark score and won on latency while already fitting current architecture |
+| **Mistral** | Keep as backup candidate only | Comparable score, but slower and not worth primary-path migration work now |
+| **Gemini** | Defer | Comparable score, but much slower in this harness and not worth default-path complexity |
+
+### Sprint P7-A (Completed) — Provider Baseline & Decision
+
+**Goal**: confirm whether the roadmap should stay Groq-first or pivot.
+
+- [x] Inventory provider touchpoints across chat, tools, vision, memory, embeddings, and orchestrator routing
+- [x] Document Groq-specific behavior and key-rotation assumptions
+- [x] Benchmark the strongest alternatives against Companion workloads
+- [x] Decide whether to pivot or stay Groq-first
+
+**Deliverables**:
+- Provider architecture baseline table
+- Migration seam map
+- Dependency list for provider-sensitive roadmap items
+
+**Current seam inventory**:
+
+| Seam | Current file(s) | Current assumption | Migration risk |
+|------|------------------|--------------------|----------------|
+| Model + key configuration | `companion_ai/core/config.py` | Groq keys, Groq key rotation, Groq-first model IDs, light/heavy routing policy | High |
+| Primary chat client | `companion_ai/llm/router.py` | Imports Groq client globals directly and assumes Groq-backed default chat path | High |
+| Tool loop implementation | `companion_ai/llm/groq_provider.py` | Groq SDK objects, Groq/OpenAI-style `tool_calls`, Groq-oriented synthesis loop, local-model exception handling | High |
+| Orchestrator decision path | `companion_ai/orchestrator.py` | `_get_client_and_model()` is effectively Groq-primary only for orchestration | High |
+| Memory AI extraction | `companion_ai/memory/ai_processor.py` | Dedicated `groq_memory_client` for importance, summaries, and fact extraction | Medium |
+| Mem0 fallback LLM | `companion_ai/memory/mem0_backend.py` | Groq fallback model and Groq API key assumptions when local path is unavailable | Medium |
+| Knowledge graph extraction | `companion_ai/memory/knowledge_graph.py` | Uses `groq_memory_client` directly for graph-oriented inference | Medium |
+| Vision cloud path | `companion_ai/agents/vision.py`, `companion_ai/local_loops/vision_loop.py` | `GROQ_VISION_API_KEY` and Groq-hosted vision model as current cloud path | Medium |
+| TTS provider path | `companion_ai/services/tts.py` | Hard-coded Groq speech endpoint and voice naming assumptions | Medium |
+| Local specialist backend | `companion_ai/local_llm.py` | Local vLLM exposes OpenAI-style API; Ollama retained as separate fallback style | Low |
+| Token budget reporting | `companion_ai/services/token_budget.py` | Groq free-limit heuristics embedded in budget guidance | Low |
+
+**Minimum provider adapter surface**:
+
+- `chat_complete(messages, model, **opts)`
+- `chat_stream(messages, model, **opts)`
+- `tool_complete(messages, tools, tool_choice, model, **opts)`
+- `structured_complete(messages, response_format, model, **opts)`
+- `vision_complete(messages_or_parts, model, **opts)`
+- `embeddings_create(input, model, **opts)`
+- `list_models()`
+- `usage_from_response(response)`
+
+**Initial dependency split**:
+
+- Provider-sensitive next items: quick-tool path, memory extraction completion, token-budget redesign, any primary-chat/provider migration
+- Provider-independent next items: mobile work, UI polish, some workflow UX improvements, selected Phase 7 plugin/integration ergonomics
+
+**Success criteria**:
+- No major model call path remains undocumented
+- Groq-specific code paths are distinguishable from transport-agnostic logic
+- The team can describe exactly what must be abstracted before shadow-mode migration
+
+### Sprint P7-B (Completed) — Benchmark Gate
+
+**Goal**: produce a go/no-go benchmark gate before resuming product work.
+
+- [x] Benchmark Groq against viable alternatives for Companion workload classes
+- [x] Score candidates for reasoning quality, tool-call reliability, and streaming behavior
+- [x] Decide the active architecture move: stay Groq-first
+- [x] Record why the other providers are not advancing now
+
+**Benchmark rubric**:
+
+| Criterion | Weight | What Companion needs |
+|-----------|--------|----------------------|
+| Routing + reasoning quality | 25% | Stable JSON or structured decision-making for orchestrator-style flows |
+| Tool/function-call reliability | 20% | Predictable schema adherence and low repair overhead |
+| Streaming behavior | 15% | Clean SSE-friendly incremental responses without brittle parsing |
+| Cost / generous usage envelope | 15% | Better economics than Groq-first everywhere, or a clearly justified tradeoff |
+| Multimodal + embeddings fit | 10% | Enough coverage for current vision and future memory/search work |
+| Migration effort | 10% | Limited rewrites in provider code and low blast radius across the app |
+| Usage visibility + auditing | 5% | Usable token/cost accounting for regressions and rollout control |
+
+**Research-backed shortlist**:
+
+| Provider | Role in shortlist | Current live evidence | Main strengths | Main concerns |
+|----------|-------------------|-----------------------|----------------|---------------|
+| **Gemini direct** | Primary migration candidate | OpenAI compatibility docs, streaming, function calling, structured outputs, embeddings, multimodal, current pricing/free tier, current model/deprecation pages | Broadest feature consolidation, generous free tier, strong multimodal + embeddings, current model momentum | OpenAI compatibility is still beta; preview-model churn and deprecations require careful pinning |
+| **OpenRouter** | Best abstraction / fallback layer candidate | OpenAI-like normalized API, SSE streaming, tool calling, structured outputs, provider routing, cost/usage reporting, current model marketplace | Best hedge against vendor lock-in, rich usage visibility, many low-cost or free model choices, easy shadow routing | Behavior varies by upstream model/provider; not a single-model quality guarantee |
+| **Fireworks** | Strong direct open-weight cloud candidate | OpenAI-compatible chat completions, streaming, tools, structured outputs, prompt caching, perf metrics, broad model library, current pricing | Mature direct API, strong observability, broad open-model lineup, competitive serverless pricing | Less compelling free/generous entry than Gemini/Cerebras; still another direct provider to manage |
+| **Cerebras** | Speed-specialist candidate | Current chat completions API, structured outputs, parallel tool calls, GPT-OSS-120B at ~3000 tok/s, free/developer tiers, current pricing | Exceptional speed, credible for coding/orchestrator experiments, direct API is fairly clean | Narrower current model surface, weaker multimodal story, GPT-OSS pricing above Groq on developer tier |
+| **Together AI** | Secondary open-model candidate | Current chat docs, streaming docs, function-calling docs, broad price sheet, many hosted models | Breadth of open models, reasonable pricing, documented multi-step/parallel tool calling | Weaker evidence collected here for structured-output observability and platform-level migration advantages versus Fireworks/OpenRouter |
+| **Groq** | Control baseline / fallback | Current production path, OpenAI compatibility, tool use, prompt caching, structured outputs, current model/pricing/rate-limit docs | Known-good behavior, strong latency, already wired into Companion | Current architecture lock-in, cost pressure, less reason to stay exclusive |
+
+**Weighted comparison snapshot**:
+
+| Provider | Routing / reasoning (25) | Tool reliability (20) | Streaming (15) | Cost / free tier (15) | Multimodal / embeddings (10) | Migration effort (10) | Usage visibility (5) | Total / 100 |
+|----------|---------------------------|------------------------|----------------|-----------------------|------------------------------|----------------------|----------------------|-------------|
+| Gemini direct | 22 | 16 | 12 | 14 | 10 | 8 | 3 | **85** |
+| Fireworks | 20 | 18 | 13 | 11 | 8 | 8 | 5 | **83** |
+| OpenRouter | 19 | 14 | 13 | 13 | 8 | 9 | 5 | **81** |
+| Groq (baseline) | 20 | 17 | 14 | 12 | 7 | 10 | 4 | **84** |
+| Cerebras | 18 | 16 | 14 | 10 | 5 | 8 | 4 | **75** |
+| Together AI | 17 | 15 | 12 | 11 | 6 | 7 | 3 | **71** |
+
+**Interpretation**:
+
+- **Gemini direct** is the strongest single-provider replacement candidate if the goal is to improve cost/free-tier posture while also gaining multimodal and embedding breadth.
+- **OpenRouter** is the strongest architectural hedge if the goal is to reduce lock-in and enable shadow-mode routing across multiple providers.
+- **Fireworks** is the strongest pure open-weight direct-provider alternative for a more provider-stable, model-rich migration than Together AI.
+- **Cerebras** is compelling for speed-sensitive orchestrator or coding experiments, but not yet the best full-stack replacement for Companion's current mix.
+- **Together AI** remains viable, but it no longer looks like the leading direct alternative once Fireworks and Cerebras are included in the comparison.
+
+**Benchmark outcome**:
+
+1. Keep **Groq** as the production default.
+2. Use Groq key rotation to absorb rate-limit pressure.
+3. Do not spend current roadmap time on provider abstraction or migration.
+4. Resume product work with the existing Groq-first architecture.
+
+**Deliverables**:
+- Ranked provider shortlist
+- Benchmark rubric for Companion workloads
+- Shadow-mode migration recommendation
+
+**Success criteria**:
+- At least 3 credible provider options or hybrids are scored against real Companion requirements
+- The roadmap can justify why one candidate advances and the others do not
+- Product work for the next sprint is gated by an explicit provider decision, not by intuition
+
+### Post-Decision Next Work
+
+- Prioritize `P7-03 Quick Tool Path`
+- Then complete `P7-04 Memory extraction completion`
+- Keep mobile UX deferred unless it becomes a cheap follow-on to higher-value work
+
+---
+
+## Historical: P6 Makeover (Completed)
+
+This section is retained as the execution record for the completed P6 makeover work.
 
 ### Known Bugs (Pre-Sprint)
 
@@ -253,7 +409,7 @@ Personal AI companion with orchestrator brain, persistent memory, knowledge grap
 | Smart Home | Loxone Miniserver |
 | Frontend | Vanilla JS + CSS custom properties |
 | Knowledge Graph Viz | D3.js |
-| Tests | pytest (211 tests, 22+ suites) |
+| Tests | pytest (219 tests, 22+ suites) |
 
 ---
 

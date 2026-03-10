@@ -1,6 +1,6 @@
 # Companion AI Feature Tracker
 
-Date: 2026-02-27
+Date: 2026-03-10
 
 This artifact tracks **user-visible functionality** progress in plain language.
 
@@ -10,12 +10,24 @@ This artifact tracks **user-visible functionality** progress in plain language.
 |-----------|-------|-------|
 | Orchestrator | **Active** (`USE_ORCHESTRATOR=true` default) | Activated in P5-B with fallback resilience |
 | Local Loops | Built, delegation path wired | Full orchestrator→loop routing done |
-| Quick Tool Path | Not yet implemented | Future optimisation |
+| Provider Architecture | **Groq-first hybrid** | Primary chat on Groq + local heavy specialist path; provider decision now locked back to Groq |
+| Quick Tool Path | Not yet implemented | Still planned; now explicitly tied to Phase 7 provider-first reset |
 | Unified Knowledge | **Single `knowledge.py` entry point** | P5-D merged backends, `remember()` / `recall()` |
 | Persona Evolution | **Active with triggers** | P5-E: periodic, memory-event, session-end triggers wired |
 | Web Layer | **Split into Flask Blueprints** | 7 blueprints in `companion_ai/web/` (P5-C) |
 | LLM Interface | **Split into `llm/` package** | 5 submodules in `companion_ai/llm/` (P5-C) |
 | Tools | **Split into `tools/` package** | 7 files in `companion_ai/tools/` (P5-C) |
+
+## Current Provider Baseline
+
+| Workload | Current Model / Provider | Planning Note |
+|---|---|---|
+| Primary chat + orchestrator | Groq `openai/gpt-oss-120b` | Current quality baseline to beat or retain as fallback |
+| Fast tool execution | Groq `llama-3.1-8b-instant` | Good candidate for quick-tool bypass or replacement |
+| Cloud vision | Groq `meta-llama/llama-4-maverick-17b-128e-instruct` | Streaming + multimodal parity matters for any replacement |
+| Memory AI | Groq `meta-llama/llama-4-scout-17b-16e-instruct` | Could be reduced or relocated depending on Phase 7 outcome |
+| Local heavy path | vLLM `Qwen/Qwen2.5-3B-Instruct` | Keep local capability regardless of provider changes |
+| Local vision fallback | Ollama `llava:13b` | Remains useful even if primary cloud provider changes |
 
 ## Live Now
 
@@ -36,6 +48,8 @@ This artifact tracks **user-visible functionality** progress in plain language.
 | R-01 | Daily-use smoke checks | One command verifies core app health | `scripts/smoke_daily_use.py` | ✅ Completed |
 | R-02 | Reliability setup path | Faster clean-machine startup success | `scripts/setup_python311.ps1` + release checklist | ✅ Completed |
 | R-03 | Simplified memory/settings UX | Cleaner daily workflow with fewer confusing controls | `templates/index.html` + manual UI check | ✅ Completed |
+| R-04 | Startup token-burn reduction | Fresh page load avoids hidden memory/brain work | No `/api/memory` or `/api/brain/files` hit on initial load | ✅ Completed |
+| R-05 | Session-scoped Mem0 hardening | Memory stays isolated without auto-migration work on reads | `tests/test_session_scoping.py` + `tests/test_memory_quality_pipeline.py` | ✅ Completed |
 
 ## In Progress (Phase 3)
 
@@ -80,10 +94,28 @@ This artifact tracks **user-visible functionality** progress in plain language.
 
 ## Notes
 
-- **Roadmap source-of-truth:** `ROADMAP_ARTIFACT.md`
+- **Roadmap source-of-truth:** `ROADMAP.md`
+- **Archived roadmap detail:** `ROADMAP_ARTIFACT.md`
 - **Architecture source-of-truth:** `ARCHITECTURE.md`
 - **Feature source-of-truth:** this file
 - Update both when a feature moves status.
+
+## Planned Next Window (Phase 7 Execution)
+
+| ID | Feature / Initiative | User Value | Acceptance Signal | Status |
+|---|---|---|---|---|
+| P7-01 | Provider abstraction baseline | Makes future provider changes safer and less disruptive | Provider seam map + documented adapter surface in roadmap | ✅ Research completed |
+| P7-02 | Provider shortlist + benchmark gate | Improves chances of lowering cost or raising quality without regressions | Focused benchmark run completed; Groq retained as default | ✅ Decision completed |
+| P7-03 | Quick Tool Path | Faster simple answers without paying orchestrator cost every time | Direct lightweight tool route + focused tests | 🟡 Planned |
+| P7-04 | Memory extraction completion | Reliable local fact extraction instead of placeholder behavior | `MemoryLoop._extract()` backed by real model call + regression tests | 🟡 Planned |
+
+## Phase 7 Outcome Snapshot
+
+| Rank | Option | Why it matters now | Current recommendation |
+|---|---|---|---|
+| 1 | Groq | Best overall fit after focused benchmark tie-break by latency and existing architecture | Ship as default |
+| 2 | Mistral | Closest viable backup if a second provider is needed later | Keep as paper fallback only |
+| 3 | Gemini | Worked, but too slow to justify default-path complexity right now | Defer |
 
 ## Phase 5 (Completed)
 

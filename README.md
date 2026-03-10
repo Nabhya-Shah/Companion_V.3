@@ -217,6 +217,28 @@ Require live LLM configuration:
 .venv\\Scripts\\python.exe scripts/release_profile_check.py --require-llm
 ```
 
+## Provider Benchmarking
+
+Use the benchmark harness to compare candidate hosted models against Companion-specific tasks before changing the default provider.
+
+```bash
+.venv\\Scripts\\python.exe scripts/provider_benchmark.py --config scripts/provider_benchmark_candidates.example.yaml --dry-run
+```
+
+Create a real YAML config with candidate base URLs, model IDs, and env var names for API keys, then run:
+
+```bash
+.venv\\Scripts\\python.exe scripts/provider_benchmark.py --config scripts/provider_benchmark_candidates.yaml
+```
+
+The benchmark currently checks:
+- structured routing JSON for orchestrator-style decisions
+- tool-calling reliability for exact-time queries
+- structured memory fact extraction
+- streaming responsiveness plus companion-style response quality
+
+Reports are written to `data/benchmarks/` as both JSON and Markdown.
+
 ## 📝 License
 
 MIT
