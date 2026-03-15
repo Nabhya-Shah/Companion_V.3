@@ -101,6 +101,26 @@ function renderPipeline(metadata) {
   const steps = [];
   const tokenSteps = metadata.token_steps || [];
   const getTokensForStep = (name) => tokenSteps.find(s => s.name === name || s.name.includes(name));
+  const parseModelTag = (modelRaw) => {
+    const raw = String(modelRaw || '').trim();
+    if (!raw) return { provider: 'unknown', model: 'unknown' };
+
+    const idx = raw.indexOf(':');
+    if (idx > 0) {
+      const prefix = raw.slice(0, idx).toLowerCase();
+      const model = raw.slice(idx + 1) || 'unknown';
+      if (prefix === 'browser_agent') return { provider: 'browser', model };
+      if (prefix === 'groq' || prefix === 'local') return { provider: prefix, model };
+    }
+
+    if (raw.includes('openai/') || raw.includes('llama-') || raw.includes('gpt-')) {
+      return { provider: 'groq', model: raw };
+    }
+    if (raw.includes(':') || raw.startsWith('Qwen/')) {
+      return { provider: 'local', model: raw };
+    }
+    return { provider: 'unknown', model: raw };
+  };
 
   // Image analysis step
   if (state.lastImageAnalysis) {
@@ -120,7 +140,8 @@ function renderPipeline(metadata) {
     desc: `Route to: ${metadata.source}`,
     data: metadata.source === 'loop_vision' ? 'Visual verification needed' :
           metadata.source === 'loop_tools' ? 'Tool execution required' : 'Direct conversation',
-    tokens: orchTokens
+    tokens: orchTokens,
+    role: 'orchestrator'
   });
 
   // Loop execution
@@ -130,6 +151,9 @@ function renderPipeline(metadata) {
     const loopType = metadata.source.replace('loop_', '');
     const loopTokens = getTokensForStep(loopType) || getTokensForStep('loop');
     const operation = res.metadata?.operation || '';
+    const loopRole = loopType === 'memory'
+      ? (operation === 'save' ? 'memory-helper' : `memory-${operation || 'op'}`)
+      : `${loopType}-${operation || 'op'}`;
     const formattedResult = formatToolResult(res.data, operation);
 
     steps.push({
@@ -140,21 +164,24 @@ function renderPipeline(metadata) {
             (formattedResult ? formattedResult :
               (res.data ? JSON.stringify(res.data, null, 2) : 'Completed')),
       formatted: !!formattedResult,
-      tokens: loopTokens
+      tokens: loopTokens,
+      role: loopRole
     });
   }
 
   // Synthesis
   const synthTokens = getTokensForStep('synthesis') || getTokensForStep('generate');
-  steps.push({ type: 'tool', title: 'Final Synthesis', desc: 'Response generation', data: null, tokens: synthTokens });
+  steps.push({ type: 'tool', title: 'Final Synthesis', desc: 'Response generation', data: null, tokens: synthTokens, role: 'synthesis' });
 
   const html = steps.map(step => {
     const icon = STEP_ICONS[step.type] || '⚡';
-    const modelLabel = step.tokens?.model?.includes('groq') ? 'groq' :
-                       step.tokens?.model?.includes('local') ? 'local' : '';
+    const modelInfo = parseModelTag(step.tokens?.model);
+    const modelLabel = modelInfo.provider === 'groq' ? 'groq' :
+      modelInfo.provider === 'local' ? 'local' : '';
     const tokenBadge = step.tokens
-      ? `<span class="token-badge" title="${step.tokens.input} in / ${step.tokens.output} out @ ${step.tokens.ms}ms (${step.tokens.model || 'unknown'})">
+      ? `<span class="token-badge" title="${step.tokens.input} in / ${step.tokens.output} out @ ${step.tokens.ms}ms (${modelInfo.provider}:${modelInfo.model})">
           ${modelLabel ? `<span class="model-label ${modelLabel}">${modelLabel}</span>` : ''}
+          ${step.role ? `<span class="source-badge" style="margin-left:6px; font-size:10px; opacity:0.8;">${escapeHtml(step.role)}</span>` : ''}
           <span class="token-count">${step.tokens.total}</span>
           <span class="token-time">${step.tokens.ms}ms</span>
         </span>` : '';

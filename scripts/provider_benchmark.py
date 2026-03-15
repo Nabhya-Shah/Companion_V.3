@@ -213,6 +213,100 @@ def _score_memory_case(result: dict[str, Any]) -> tuple[int, list[str]]:
     return score, notes
 
 
+def _score_memory_schema_case(result: dict[str, Any]) -> tuple[int, list[str]]:
+    notes: list[str] = []
+    parsed = result.get("parsed_json")
+    if not isinstance(parsed, dict):
+        return 0, ["response was not valid JSON"]
+
+    facts = parsed.get("facts")
+    if not isinstance(facts, list) or not facts:
+        return 0, ["facts key missing or empty"]
+
+    score = 5
+    valid_fact_count = 0
+    for fact in facts:
+        if not isinstance(fact, dict):
+            notes.append("fact entry was not an object")
+            continue
+        required = {"key", "value", "confidence", "evidence"}
+        missing = sorted(required.difference(fact.keys()))
+        if missing:
+            notes.append(f"fact missing keys: {', '.join(missing)}")
+            continue
+        if not isinstance(fact.get("confidence"), (int, float)):
+            notes.append("confidence was not numeric")
+            continue
+        valid_fact_count += 1
+
+    score += min(15, valid_fact_count * 5)
+    flattened = json.dumps(facts).lower()
+    for keyword in ("pistachio", "night owl", "typescript"):
+        if keyword in flattened:
+            score += 3
+        else:
+            notes.append(f"missing expected structured fact: {keyword}")
+
+    return min(30, score), notes
+
+
+def _score_memory_conflict_case(result: dict[str, Any]) -> tuple[int, list[str]]:
+    notes: list[str] = []
+    parsed = result.get("parsed_json")
+    if not isinstance(parsed, dict):
+        return 0, ["response was not valid JSON"]
+
+    facts = parsed.get("facts")
+    if not isinstance(facts, list):
+        return 0, ["facts key missing or not a list"]
+
+    flattened = json.dumps(facts).lower()
+    score = 10
+    if "chicago" in flattened:
+        score += 10
+    else:
+        notes.append("did not keep the latest explicit city value")
+
+    if "boston" in flattened:
+        notes.append("kept contradicted city value")
+    else:
+        score += 5
+
+    if any(token in flattened for token in ("cat", "cats")):
+        score += 5
+    else:
+        notes.append("missed stable pet preference fact")
+
+    return score, notes
+
+
+def _score_memory_precision_case(result: dict[str, Any]) -> tuple[int, list[str]]:
+    notes: list[str] = []
+    parsed = result.get("parsed_json")
+    if not isinstance(parsed, dict):
+        return 0, ["response was not valid JSON"]
+
+    facts = parsed.get("facts")
+    if not isinstance(facts, list):
+        return 0, ["facts key missing or not a list"]
+
+    flattened = json.dumps(facts).lower()
+    score = 10
+    if "coffee" in flattened:
+        score += 10
+    else:
+        notes.append("missed explicit coffee preference")
+
+    banned = ["anxious", "burned out", "depressed", "overworked"]
+    hallucinated = [token for token in banned if token in flattened]
+    if hallucinated:
+        notes.append(f"included unsupported inferred traits: {', '.join(hallucinated)}")
+    else:
+        score += 10
+
+    return score, notes
+
+
 def _score_persona_case(result: dict[str, Any]) -> tuple[int, list[str]]:
     text = (result.get("content") or "").strip()
     if not text:
@@ -366,6 +460,83 @@ def _build_cases() -> list[dict[str, Any]]:
                 "temperature": 0,
             },
             "scorer": _score_memory_case,
+        },
+        {
+            "id": "memory_structured_schema",
+            "weight": 30,
+            "mode": "json",
+            "payload": {
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Extract stable user facts. Return JSON only with a top-level facts array. "
+                            "Each fact must include key, value, confidence, and evidence."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "Please remember that my favorite snack is pistachios, I'm a night owl, "
+                            "and most of my work lately has been in TypeScript."
+                        ),
+                    },
+                ],
+                "response_format": {"type": "json_object"},
+                "temperature": 0,
+            },
+            "scorer": _score_memory_schema_case,
+        },
+        {
+            "id": "memory_conflict_resolution",
+            "weight": 30,
+            "mode": "json",
+            "payload": {
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Extract the user's stable facts from the conversation. Prefer the latest explicit "
+                            "user statement when two facts conflict. Return JSON only with a top-level facts array."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "Last year I was in Boston, but I live in Chicago now. Also, I still have two cats."
+                        ),
+                    },
+                ],
+                "response_format": {"type": "json_object"},
+                "temperature": 0,
+            },
+            "scorer": _score_memory_conflict_case,
+        },
+        {
+            "id": "memory_precision_no_inference",
+            "weight": 30,
+            "mode": "json",
+            "payload": {
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Extract only explicit stable user facts. Do not infer emotional state or personality traits "
+                            "unless the user directly states them. Return JSON only with a top-level facts array."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "I've been drinking a lot of coffee this week because deadlines are rough. "
+                            "Please remember that I prefer pour-over coffee at home."
+                        ),
+                    },
+                ],
+                "response_format": {"type": "json_object"},
+                "temperature": 0,
+            },
+            "scorer": _score_memory_precision_case,
         },
         {
             "id": "streaming_persona",

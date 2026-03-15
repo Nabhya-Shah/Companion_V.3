@@ -206,23 +206,22 @@ class TestConfidenceFactSystem:
         assert get_all_profile_facts()["city"] == "NYC"
 
     def test_list_pending_below_threshold(self, monkeypatch):
-        from companion_ai.memory.sqlite_backend import upsert_profile_fact, list_pending_profile_facts
+        from companion_ai.memory.sqlite_backend import queue_pending_profile_fact, list_pending_profile_facts
         monkeypatch.setattr("companion_ai.core.config.FACT_CONFIDENCE_THRESHOLD", 0.5)
-        upsert_profile_fact("hobby", "chess", confidence=0.3)
-        upsert_profile_fact("name", "Alice", confidence=0.9)
+        queue_pending_profile_fact("hobby", "chess", confidence=0.3, source="auto_extract")
         pending = list_pending_profile_facts()
         keys = [p["key"] for p in pending]
         assert "hobby" in keys
-        assert "name" not in keys
+        assert pending[0]["source"] == "auto_extract"
 
     def test_approve_boosts_confidence(self, monkeypatch):
         from companion_ai.memory.sqlite_backend import (
-            upsert_profile_fact, list_pending_profile_facts,
+            queue_pending_profile_fact, list_pending_profile_facts,
             approve_profile_fact, list_profile_facts_detailed,
         )
         monkeypatch.setattr("companion_ai.core.config.FACT_CONFIDENCE_THRESHOLD", 0.5)
         monkeypatch.setattr("companion_ai.core.config.FACT_AUTO_APPROVE_THRESHOLD", 0.85)
-        upsert_profile_fact("pet", "cat", confidence=0.3)
+        queue_pending_profile_fact("pet", "cat", confidence=0.3)
         pending = list_pending_profile_facts()
         assert len(pending) == 1
         pid = pending[0]["id"]
@@ -233,11 +232,11 @@ class TestConfidenceFactSystem:
 
     def test_reject_deletes_fact(self, monkeypatch):
         from companion_ai.memory.sqlite_backend import (
-            upsert_profile_fact, list_pending_profile_facts,
+            queue_pending_profile_fact, list_pending_profile_facts,
             reject_profile_fact, get_all_profile_facts,
         )
         monkeypatch.setattr("companion_ai.core.config.FACT_CONFIDENCE_THRESHOLD", 0.5)
-        upsert_profile_fact("bogus", "nonsense", confidence=0.2)
+        queue_pending_profile_fact("bogus", "nonsense", confidence=0.2)
         pending = list_pending_profile_facts()
         pid = pending[0]["id"]
         assert reject_profile_fact(pid)
@@ -333,7 +332,7 @@ class TestKnowledgeRecall:
             MagicMock(return_value=[]),
         )
         text = recall_context("developer", include_brain=False)
-        assert "[mem0]" in text
+        assert "[mem0 | Vector semantic match]" in text
         assert "developer" in text
 
 

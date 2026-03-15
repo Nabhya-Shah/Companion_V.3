@@ -515,6 +515,10 @@ def models_info():
                 'PRIMARY_MODEL': core_config.PRIMARY_MODEL,
                 'TOOLS_MODEL': core_config.TOOLS_MODEL,
                 'VISION_MODEL': core_config.VISION_MODEL,
+                'MEMORY_PROCESSING_MODEL': core_config.MEMORY_PROCESSING_MODEL,
+                'MEMORY_FAST_MODEL': core_config.MEMORY_FAST_MODEL,
+                'MEMORY_LOCAL_MODEL': core_config.MEMORY_LOCAL_MODEL,
+                'EMBEDDING_MODEL': core_config.EMBEDDING_MODEL,
             },
             'model_info': core_config.MODEL_INFO,
             'flags': {
@@ -523,9 +527,12 @@ def models_info():
                 'tool_calling': core_config.ENABLE_TOOL_CALLING,
                 'vision': core_config.ENABLE_VISION,
                 'auto_tools': core_config.ENABLE_AUTO_TOOLS,
+                'memory_extract_prefer_fast': core_config.MEMORY_EXTRACT_PREFER_FAST,
             },
             'roles': {
                 'SMART_PRIMARY_MODEL': core_config.PRIMARY_MODEL,
+                'MEMORY_PROCESSING_MODEL': core_config.MEMORY_PROCESSING_MODEL,
+                'EMBEDDING_MODEL': core_config.EMBEDDING_MODEL,
             },
             'ensemble': {
                 'enabled': False,

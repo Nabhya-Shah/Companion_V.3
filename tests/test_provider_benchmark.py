@@ -49,3 +49,76 @@ def test_score_memory_case_checks_expected_fact_keywords():
     )
     assert score == 30
     assert notes == []
+
+
+def test_score_memory_schema_case_rewards_structured_facts():
+    result = {
+        "parsed_json": {
+            "facts": [
+                {
+                    "key": "favorite_snack",
+                    "value": "pistachios",
+                    "confidence": 0.93,
+                    "evidence": "my favorite snack is pistachios",
+                },
+                {
+                    "key": "sleep_pattern",
+                    "value": "night owl",
+                    "confidence": 0.88,
+                    "evidence": "I'm a night owl",
+                },
+                {
+                    "key": "work_focus",
+                    "value": "TypeScript",
+                    "confidence": 0.8,
+                    "evidence": "my work lately has been in TypeScript",
+                },
+            ]
+        }
+    }
+
+    score, notes = provider_benchmark._score_memory_schema_case(result)
+
+    assert score >= 24
+    assert notes == []
+
+
+def test_score_memory_conflict_case_prefers_latest_fact():
+    result = {
+        "parsed_json": {
+            "facts": [
+                {"key": "city", "value": "Chicago"},
+                {"key": "pets", "value": "two cats"},
+            ]
+        }
+    }
+
+    score, notes = provider_benchmark._score_memory_conflict_case(result)
+
+    assert score >= 25
+    assert notes == []
+
+
+def test_score_memory_precision_case_penalizes_unsupported_inference():
+    result = {
+        "parsed_json": {
+            "facts": [
+                {"key": "drink_preference", "value": "pour-over coffee"},
+                {"key": "mood", "value": "anxious"},
+            ]
+        }
+    }
+
+    score, notes = provider_benchmark._score_memory_precision_case(result)
+
+    assert score < 30
+    assert any("unsupported inferred traits" in note for note in notes)
+
+
+def test_build_cases_includes_memory_evaluation_cases():
+    case_ids = [case["id"] for case in provider_benchmark._build_cases()]
+
+    assert "memory_fact_extraction" in case_ids
+    assert "memory_structured_schema" in case_ids
+    assert "memory_conflict_resolution" in case_ids
+    assert "memory_precision_no_inference" in case_ids

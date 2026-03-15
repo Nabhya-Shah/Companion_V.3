@@ -226,8 +226,21 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
             
             # Step 2: Execute decision
             response, metadata = await self._execute_decision(decision, user_message, context)
+
+            metadata = metadata or {}
+
+            # Step 3: Extract structured facts from the completed turn when safe.
+            extraction_meta = await self._maybe_extract_turn_facts(
+                decision,
+                user_message,
+                response,
+                metadata,
+                context,
+            )
+            if extraction_meta:
+                metadata.update(extraction_meta)
             
-            # Step 3: Handle memory saving (AFTER response is generated)
+            # Step 4: Handle explicit memory saving (AFTER response is generated)
             if decision.save_facts:
                 await self._save_facts(decision.save_facts, context)
             
@@ -357,12 +370,23 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
             loop_start = time.time()
             result = await loop.execute(task)
             loop_duration_ms = int((time.time() - loop_start) * 1000)
+
+            loop_provider = result.metadata.get("provider") if result and getattr(result, "metadata", None) else None
+            loop_model = result.metadata.get("model") if result and getattr(result, "metadata", None) else None
+            if loop_name == "browser":
+                step_model = "browser_agent"
+            elif loop_provider and loop_model:
+                step_model = f"{loop_provider}:{loop_model}"
+            elif loop_provider:
+                step_model = loop_provider
+            else:
+                step_model = "local"
             
             # Log loop execution as a step (no tokens, but has timing)
             from companion_ai.llm_interface import log_tokens_step
             log_tokens_step(
                 step_name=f"loop_{loop_name}",
-                model="local" if loop_name != "browser" else "browser_agent",
+                model=step_model,
                 input_tokens=0,
                 output_tokens=0,
                 duration_ms=loop_duration_ms
@@ -677,6 +701,104 @@ Don't mention "loops" or technical details. Be conversational."""
                 logger.info(f"Saved fact via knowledge.remember: {fact}")
             except Exception as e:
                 logger.error(f"Failed to save fact '{fact}': {e}")
+
+    async def _maybe_extract_turn_facts(
+        self,
+        decision: OrchestratorDecision,
+        user_message: str,
+        response: str,
+        metadata: Optional[Dict[str, Any]],
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Extract and persist structured facts from a completed turn."""
+        if not core_config.MEMORY_AUTO_EXTRACT:
+            return {}
+        if not user_message or not response:
+            return {}
+
+        source = (metadata or {}).get("source", "")
+        if decision.loop == "memory" or source == "loop_memory":
+            return {}
+
+        loop = get_loop("memory")
+        if not loop:
+            return {}
+
+        combined_text = f"User: {user_message}\nAI: {response}"
+        try:
+            result = await loop.execute({"operation": "extract", "text": combined_text})
+        except Exception as e:
+            logger.warning(f"Auto extraction failed before persistence: {e}")
+            return {"auto_extraction_error": str(e)}
+
+        if result.status.value == "error":
+            return {"auto_extraction_error": result.error or "extract_failed"}
+
+        extracted_facts = (result.data or {}).get("extracted_facts", [])
+        if not extracted_facts:
+            return {"auto_extracted_facts": 0, "auto_saved_facts": 0, "auto_review_facts": 0}
+
+        persistence_meta = self._store_extracted_facts(extracted_facts, context or {})
+        persistence_meta["auto_extracted_facts"] = len(extracted_facts)
+        return persistence_meta
+
+    def _store_extracted_facts(self, extracted_facts: List[Dict[str, Any]], context: Dict[str, Any]) -> Dict[str, int]:
+        """Persist extracted facts using confidence-gated storage rules."""
+        if not extracted_facts:
+            return {"auto_saved_facts": 0, "auto_review_facts": 0}
+
+        from companion_ai.memory.knowledge import remember
+        from companion_ai.memory.sqlite_backend import queue_pending_profile_fact, upsert_profile_fact
+
+        mem0_user_id = context.get("mem0_user_id")
+        auto_save_threshold = getattr(core_config, "FACT_AUTO_APPROVE_THRESHOLD", 0.85)
+        review_threshold = getattr(core_config, "FACT_CONFIDENCE_THRESHOLD", 0.5)
+        auto_saved = 0
+        review_only = 0
+
+        for item in extracted_facts:
+            key = str(item.get("key", "")).strip()
+            value = str(item.get("value", "")).strip()
+            if not key or not value:
+                continue
+
+            confidence = float(item.get("confidence", 0.0) or 0.0)
+            evidence = item.get("evidence")
+            fact_text = str(item.get("fact") or f"User {key.replace('_', ' ')} is {value}")
+
+            if confidence >= auto_save_threshold:
+                upsert_profile_fact(
+                    key,
+                    value,
+                    confidence,
+                    source="auto_extract",
+                    evidence=evidence,
+                    model_conf_label=item.get("conf_label"),
+                    justification=item.get("justification"),
+                )
+                try:
+                    remember(
+                        fact_text,
+                        source="auto_extract",
+                        user_id=mem0_user_id,
+                        skip_sqlite=True,
+                    )
+                    auto_saved += 1
+                except Exception as e:
+                    logger.warning(f"Failed to persist extracted fact to Mem0: {e}")
+            else:
+                queue_pending_profile_fact(
+                    key,
+                    value,
+                    confidence=max(confidence, min(review_threshold - 0.01, confidence)),
+                    source="auto_extract",
+                    evidence=evidence,
+                    model_conf_label=item.get("conf_label"),
+                    justification=item.get("justification"),
+                )
+                review_only += 1
+
+        return {"auto_saved_facts": auto_saved, "auto_review_facts": review_only}
 
 
 # Singleton instance

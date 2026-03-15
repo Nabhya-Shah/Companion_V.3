@@ -140,9 +140,18 @@ async function loadPendingFacts() {
     container.innerHTML = rows.map(row => {
       const pid = row.id;
       const text = escapeHtml(row.fact_value || row.value || '');
+      const conf = row.model_conf_label ? escapeHtml(row.model_conf_label) : `${Math.round((Number(row.confidence || 0)) * 100)}%`;
+      const source = row.source ? escapeHtml(row.source) : 'unknown';
+      const evidence = row.evidence ? `<div class="memory-subtext">Evidence: ${escapeHtml(row.evidence)}</div>` : '';
+      const why = row.justification ? `<div class="memory-subtext">Why: ${escapeHtml(row.justification)}</div>` : '';
+      const conflict = row.conflict_with ? `<div class="memory-subtext">Conflicts with: ${escapeHtml(row.conflict_with)}</div>` : '';
       return `
         <div class="memory-card" data-pending-id="${pid}">
           <div class="memory-text">${text}</div>
+          <div class="memory-meta">confidence: ${conf} · source: ${source}</div>
+          ${evidence}
+          ${why}
+          ${conflict}
           <div class="memory-meta" style="justify-content:flex-end; gap:6px;">
             <button class="small-btn" onclick="approvePendingFact(${pid})">Approve</button>
             <button class="small-btn" onclick="rejectPendingFact(${pid})">Reject</button>

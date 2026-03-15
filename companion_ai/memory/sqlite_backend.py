@@ -173,6 +173,13 @@ def _to_confidence_label(value: float) -> str:
     return 'low'
 
 
+def _format_fact_value(key: str, value: str) -> str:
+    label = str(key or '').replace('_', ' ').replace('-', ' ').strip()
+    if not label:
+        return str(value or '').strip()
+    return f"{label}: {str(value or '').strip()}"
+
+
 def _safe_float(value: object, default: float = 0.70) -> float:
     try:
         parsed = float(value)
@@ -367,9 +374,28 @@ def rank_memories_by_quality(memories: list[dict], user_scope: str, query: str |
 
         blended = base_score + (confidence * 0.60) + (overlap * 0.50) - contradiction_penalty
 
+        score_breakdown = {
+            "base_score": round(base_score, 4),
+            "confidence_boost": round(confidence * 0.60, 4),
+            "lexical_overlap": round(overlap * 0.50, 4),
+            "contradiction_penalty": round(contradiction_penalty, 4)
+        }
+
+        reasons = []
+        conf_label = quality.get('confidence_label', _to_confidence_label(confidence))
+        reasons.append(f"{conf_label.title()} confidence")
+        if overlap > 0.5:
+            reasons.append("Strong query match")
+        elif overlap > 0:
+            reasons.append("Partial query match")
+        if contradiction_penalty > 0:
+            reasons.append("Penalty applied" if contradiction_state == 'pending' else "Conflict penalty")
+
         row['score'] = round(blended, 4)
+        row['score_breakdown'] = score_breakdown
+        row['surfacing_reason'] = " - ".join(reasons) if reasons else "Base relevance"
         row['quality_confidence'] = confidence
-        row['quality_confidence_label'] = quality.get('confidence_label', _to_confidence_label(confidence))
+        row['quality_confidence_label'] = conf_label
         row['quality_contradiction_state'] = contradiction_state
         ranked.append(row)
 
@@ -430,6 +456,59 @@ def upsert_profile_fact(key: str, value: str, confidence: float = 1.0, source: s
 
     conn.commit()
     conn.close()
+
+
+def queue_pending_profile_fact(
+    key: str,
+    value: str,
+    confidence: float = 0.3,
+    source: str = 'conversation',
+    evidence: str | None = None,
+    model_conf_label: str | None = None,
+    justification: str | None = None,
+    conflict_with: str | None = None,
+) -> bool:
+    """Queue a low-confidence or contradictory fact for review."""
+    init_db()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        if conflict_with is None:
+            cursor.execute("SELECT value FROM user_profile WHERE key = ?", (key,))
+            existing = cursor.fetchone()
+            if existing and existing['value'] != value:
+                conflict_with = _format_fact_value(key, existing['value'])
+
+        label = model_conf_label or _to_confidence_label(confidence)
+        cursor.execute('''
+            INSERT INTO pending_profile_facts (
+                key, value, confidence, source, model_conf_label,
+                justification, evidence, status, conflict_with
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+            ON CONFLICT(key, value) DO UPDATE SET
+                confidence = excluded.confidence,
+                source = excluded.source,
+                model_conf_label = excluded.model_conf_label,
+                justification = excluded.justification,
+                evidence = excluded.evidence,
+                status = 'pending',
+                conflict_with = excluded.conflict_with,
+                reviewed_at = NULL,
+                suggested_at = CURRENT_TIMESTAMP
+        ''', (
+            key,
+            value,
+            confidence,
+            source,
+            label,
+            justification,
+            evidence,
+            conflict_with,
+        ))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
 
 def get_profile_fact(key: str) -> str | None:
     conn = get_db_connection()
@@ -529,21 +608,40 @@ def list_pending_profile_facts() -> list[dict]:
     """
     from companion_ai.core import config as core_config
     threshold = getattr(core_config, 'FACT_CONFIDENCE_THRESHOLD', 0.5)
+    init_db()
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
+        SELECT id, key, value, confidence, source, suggested_at, status,
+               conflict_with, model_conf_label, justification, evidence
+        FROM pending_profile_facts
+        WHERE status = 'pending'
+        ORDER BY suggested_at DESC
+    ''')
+    pending_rows = [dict(row) for row in cursor.fetchall()]
+
+    cursor.execute('''
         SELECT rowid AS id, key, value, confidence, source,
                COALESCE(last_updated, first_seen_ts) AS suggested_at,
-               CASE WHEN confidence < ? THEN 'pending' ELSE 'approved' END AS status,
+               'pending' AS status,
                NULL AS conflict_with,
-               NULL AS model_conf_label, NULL AS justification, evidence
+               NULL AS model_conf_label,
+               NULL AS justification,
+               evidence
         FROM user_profile
         WHERE confidence < ?
         ORDER BY last_updated DESC
-    ''', (threshold, threshold))
-    rows = cursor.fetchall()
+    ''', (threshold,))
+    legacy_rows = [dict(row) for row in cursor.fetchall()]
     conn.close()
-    return [dict(row) for row in rows]
+
+    seen = {(row['key'], row['value']) for row in pending_rows}
+    merged = pending_rows + [row for row in legacy_rows if (row['key'], row['value']) not in seen]
+    for row in merged:
+        row['fact_value'] = _format_fact_value(row.get('key', ''), row.get('value', ''))
+        if not row.get('model_conf_label'):
+            row['model_conf_label'] = _to_confidence_label(_safe_float(row.get('confidence', 0.0), 0.0))
+    return merged
 
 def get_stale_profile_facts(limit: int = 3) -> list[dict]:
     """Return older facts with low reaffirmations to gently reaffirm in prompts.
@@ -566,7 +664,7 @@ def get_stale_profile_facts(limit: int = 3) -> list[dict]:
     finally:
         conn.close()
 
-def approve_profile_fact(pending_id: int) -> bool:
+def approve_profile_fact(pending_id: int, user_id: str | None = None) -> bool:
     """Approve a low-confidence fact by boosting its confidence.
 
     ``pending_id`` is the ROWID of the ``user_profile`` row (returned by
@@ -574,9 +672,45 @@ def approve_profile_fact(pending_id: int) -> bool:
     """
     from companion_ai.core import config as core_config
     target_conf = getattr(core_config, 'FACT_AUTO_APPROVE_THRESHOLD', 0.85)
+    init_db()
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
+        cursor.execute('''
+            SELECT id, key, value, confidence, source, evidence, model_conf_label, justification
+            FROM pending_profile_facts
+            WHERE id = ? AND status = 'pending'
+        ''', (pending_id,))
+        pending_row = cursor.fetchone()
+        if pending_row:
+            row = dict(pending_row)
+            cursor.execute("DELETE FROM pending_profile_facts WHERE id = ?", (pending_id,))
+            conn.commit()
+            conn.close()
+
+            upsert_profile_fact(
+                row['key'],
+                row['value'],
+                max(_safe_float(row.get('confidence'), 0.0), target_conf),
+                source=row.get('source') or 'approved_pending',
+                evidence=row.get('evidence'),
+                model_conf_label=row.get('model_conf_label'),
+                justification=row.get('justification'),
+            )
+
+            if user_id:
+                try:
+                    from companion_ai.memory.knowledge import remember
+                    remember(
+                        f"User {str(row['key']).replace('_', ' ')} is {row['value']}",
+                        source='approved_pending',
+                        user_id=user_id,
+                        skip_sqlite=True,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to promote approved pending fact to Mem0: {e}")
+            return True
+
         cursor.execute('''
             UPDATE user_profile
             SET confidence = ?, last_updated = CURRENT_TIMESTAMP, last_seen_ts = CURRENT_TIMESTAMP
@@ -585,13 +719,21 @@ def approve_profile_fact(pending_id: int) -> bool:
         conn.commit()
         return cursor.rowcount > 0
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 def reject_profile_fact(pending_id: int) -> bool:
     """Reject (delete) a low-confidence fact by ROWID."""
+    init_db()
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
+        cursor.execute("DELETE FROM pending_profile_facts WHERE id = ?", (pending_id,))
+        if cursor.rowcount > 0:
+            conn.commit()
+            return True
         cursor.execute("DELETE FROM user_profile WHERE rowid = ?", (pending_id,))
         conn.commit()
         return cursor.rowcount > 0
@@ -1026,8 +1168,21 @@ def search_memory(query: str, limit: int = 10) -> list[dict]:
         blob = f"{key} {value}".lower()
         matches = sum(1 for t in token_set if t in blob)
         if matches:
-            score = matches / len(token_set) + 0.2  # small boost for explicit facts
-            results.append({'type': 'profile', 'text': f"{key}={value}", 'score': score})
+            overlap = matches / len(token_set)
+            score = overlap + 0.2  # small boost for explicit facts
+            reasons = ["Explicit profile fact"]
+            if overlap > 0.5:
+                reasons.append("Strong query match")
+            elif overlap > 0:
+                reasons.append("Partial query match")
+                
+            results.append({
+                'type': 'profile', 
+                'text': f"{key}={value}", 
+                'score': score,
+                'score_breakdown': {"overlap": round(overlap, 4), "fact_boost": 0.2},
+                'surfacing_reason': " - ".join(reasons)
+            })
 
     # Recent summaries
     cursor.execute("SELECT summary_text, timestamp FROM conversation_summaries ORDER BY timestamp DESC LIMIT 50")
@@ -1036,18 +1191,33 @@ def search_memory(query: str, limit: int = 10) -> list[dict]:
         blob = summary_text.lower()
         matches = sum(1 for t in token_set if t in blob)
         if matches:
+            overlap = matches / len(token_set)
             # recency boost (within ~7 days decays)
             try:
                 dt = datetime.fromisoformat(ts) if isinstance(ts, str) else now
-                # Ensure timezone awareness
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
             except Exception:
                 dt = now
             age_days = max((now - dt).total_seconds() / 86400.0, 0.0)
             recency = max(0.0, 1.0 - (age_days / 7.0)) * 0.3
-            score = matches / len(token_set) + recency
-            results.append({'type': 'summary', 'text': summary_text, 'score': score})
+            score = overlap + recency
+            
+            reasons = ["Recent summary"]
+            if overlap > 0.5:
+                reasons.append("Strong query match")
+            elif overlap > 0:
+                reasons.append("Partial query match")
+            if recency > 0.15:
+                reasons.append("Highly recent")
+                
+            results.append({
+                'type': 'summary', 
+                'text': summary_text, 
+                'score': score,
+                'score_breakdown': {"overlap": round(overlap, 4), "recency_boost": round(recency, 4)},
+                'surfacing_reason': " - ".join(reasons)
+            })
 
     # Recent insights
     cursor.execute("SELECT insight_text, timestamp FROM ai_insights ORDER BY timestamp DESC LIMIT 80")
@@ -1055,17 +1225,32 @@ def search_memory(query: str, limit: int = 10) -> list[dict]:
         blob = insight_text.lower()
         matches = sum(1 for t in token_set if t in blob)
         if matches:
+            overlap = matches / len(token_set)
             try:
                 dt = datetime.fromisoformat(ts) if isinstance(ts, str) else now
-                # Ensure timezone awareness
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
             except Exception:
                 dt = now
             age_days = max((now - dt).total_seconds() / 86400.0, 0.0)
             recency = max(0.0, 1.0 - (age_days / 14.0)) * 0.25
-            score = matches / len(token_set) + recency
-            results.append({'type': 'insight', 'text': insight_text, 'score': score})
+            score = overlap + recency
+            
+            reasons = ["Recent insight"]
+            if overlap > 0.5:
+                reasons.append("Strong query match")
+            elif overlap > 0:
+                reasons.append("Partial query match")
+            if recency > 0.12:
+                reasons.append("Highly recent")
+                
+            results.append({
+                'type': 'insight', 
+                'text': insight_text, 
+                'score': score,
+                'score_breakdown': {"overlap": round(overlap, 4), "recency_boost": round(recency, 4)},
+                'surfacing_reason': " - ".join(reasons)
+            })
 
     conn.close()
     results.sort(key=lambda r: r['score'], reverse=True)

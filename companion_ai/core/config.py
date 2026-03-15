@@ -100,6 +100,8 @@ PRIMARY_MODEL = "openai/gpt-oss-120b"  # Final synthesis, personality, smart res
 TOOLS_MODEL = "llama-3.1-8b-instant"  # Light tools via Groq (fast, free tier)
 TOOLS_MODEL_FAST = "llama-3.1-8b-instant"  # Backup
 VISION_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"  # Cloud vision (fallback)
+MEMORY_PROCESSING_MODEL = os.getenv("MEMORY_PROCESSING_MODEL", "llama-3.3-70b-versatile")
+MEMORY_FAST_MODEL = os.getenv("MEMORY_FAST_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
 
 # ============================================================================
 # HYBRID MODEL ROUTING - The Core of V5 Architecture
@@ -112,6 +114,11 @@ VISION_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"  # Cloud vision (
 # NOTE: Now using vLLM backend instead of Ollama - use HuggingFace format
 LOCAL_HEAVY_MODEL = os.getenv("LOCAL_HEAVY_MODEL", "Qwen/Qwen2.5-3B-Instruct")  # vLLM model
 LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "llava:13b")  # Vision analysis (still Ollama for now)
+MEMORY_LOCAL_MODEL = os.getenv("MEMORY_LOCAL_MODEL", LOCAL_HEAVY_MODEL)
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
+MEMORY_PROCESSING_PROVIDER = os.getenv("MEMORY_PROCESSING_PROVIDER", "groq").strip().lower()
+EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "ollama").strip().lower()
+MEMORY_EXTRACT_PREFER_FAST = os.getenv("MEMORY_EXTRACT_PREFER_FAST", "true").lower() == "true"
 
 # Tool categorization - determines routing
 LIGHT_TOOLS = {
@@ -178,6 +185,11 @@ MODEL_INFO = {
         "context_window": 131072,
         "tool_use": True,
     },
+    "llama-3.3-70b-versatile": {
+        "description": "Primary memory-processing baseline for extraction and review quality",
+        "context_window": 131072,
+        "tool_use": False,
+    },
 }
 
 
@@ -207,14 +219,18 @@ def choose_model(task: str = 'chat', complexity: int = 1, importance: float = 0.
     Returns:
         model name, or (model, routing_meta) if return_reason=True
     """
+    task = (task or 'chat').strip().lower()
+
     # Simple task-based routing
     if task in ('tools', 'function_calling'):
         model = TOOLS_MODEL
     elif task in ('vision', 'image', 'screen'):
         model = VISION_MODEL
+    elif task in ('memory_processing', 'memory', 'summary', 'facts', 'insight'):
+        model = MEMORY_PROCESSING_MODEL
     # V5: compound/web_search now use PRIMARY_MODEL (120B has built-in search)
     else:
-        # Everything else uses PRIMARY_MODEL (chat, summary, facts, insight, memory, reasoning, web_search)
+        # Everything else uses PRIMARY_MODEL (chat, reasoning, web_search)
         model = PRIMARY_MODEL
     
     if return_reason:
@@ -234,6 +250,26 @@ def get_model_for_task(task: str) -> str:
     return choose_model(task=task)
 
 
+def get_memory_processing_model(task: str = 'memory_processing', prefer_fast: bool = False) -> tuple[str, bool, str]:
+    """Return the configured memory-processing model.
+
+    Returns:
+        tuple: (model_name, is_local, provider)
+    """
+    provider = MEMORY_PROCESSING_PROVIDER if MEMORY_PROCESSING_PROVIDER in {'groq', 'local', 'auto'} else 'groq'
+    if provider == 'local':
+        return MEMORY_LOCAL_MODEL, True, 'local'
+    if prefer_fast and MEMORY_EXTRACT_PREFER_FAST:
+        return MEMORY_FAST_MODEL, False, 'groq'
+    return MEMORY_PROCESSING_MODEL, False, 'groq'
+
+
+def get_embedding_model() -> tuple[str, str]:
+    """Return the configured embedding model and provider."""
+    provider = EMBEDDING_PROVIDER or 'ollama'
+    return EMBEDDING_MODEL, provider
+
+
 # ============================================================================
 # MEMORY CONFIGURATION
 # ============================================================================
@@ -245,7 +281,7 @@ IMPORTANCE_MIN_STORE = 0.3  # Minimum importance score to store in memory
 IMPORTANCE_INSIGHT_MIN = 0.4  # Minimum importance to generate insights
 
 # Confidence-based fact system (D2)
-ENABLE_FACT_APPROVAL = False  # When True, low-confidence facts require review
+ENABLE_FACT_APPROVAL = os.getenv("ENABLE_FACT_APPROVAL", "true").lower() == "true"  # When True, low-confidence facts require review
 FACT_CONFIDENCE_THRESHOLD = 0.5  # Facts below this are "pending review"
 FACT_AUTO_APPROVE_THRESHOLD = 0.85  # Facts at/above this are auto-approved
 
@@ -267,7 +303,7 @@ USE_MEM0 = True  # Enabled for V4 testing
 # Mem0 settings
 MEM0_USER_ID = "default"  # Default user ID for single-user mode
 MEM0_MAX_RELEVANT = 10  # Max auto-retrieved memories per request (Increased for better recall)
-MEM0_MODEL = "llama-3.1-8b-instant"  # Fast model for memory operations
+MEM0_MODEL = MEMORY_FAST_MODEL  # Fast model for memory-side helper operations
 
 # ============================================================================
 # CONTEXT BUILDING
@@ -329,10 +365,14 @@ MODEL_ROLES = {
     "tools_fast": TOOLS_MODEL_FAST,  # Future: pure execution
     "vision": VISION_MODEL,        # Image analysis
     "compound": "DISABLED",        # Explicitly disabled
-    "memory": PRIMARY_MODEL,       # Memory operations
-    "summary": PRIMARY_MODEL,      # Summarization
-    "facts": PRIMARY_MODEL,        # Fact extraction
-    "insight": PRIMARY_MODEL,      # Analysis/insight
+    "memory": MEMORY_PROCESSING_MODEL,  # Memory operations
+    "memory_processing": MEMORY_PROCESSING_MODEL,
+    "memory_fast": MEMORY_FAST_MODEL,
+    "memory_local": MEMORY_LOCAL_MODEL,
+    "summary": MEMORY_PROCESSING_MODEL,      # Summarization
+    "facts": MEMORY_PROCESSING_MODEL,        # Fact extraction
+    "insight": MEMORY_PROCESSING_MODEL,      # Analysis/insight
+    "embeddings": EMBEDDING_MODEL,
 }
 
 # Feature flag: Use 8B for tool execution instead of Scout

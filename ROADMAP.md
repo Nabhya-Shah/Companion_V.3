@@ -1,8 +1,8 @@
 # Companion AI Roadmap
 
-> Last Updated: 2026-03-11
-> Status: Groq-first provider decision locked; next focus is memory foundation, retrieval quality, and persona depth
-> Tests: 222 passing
+> Last Updated: 2026-03-15
+> Status: Groq-first provider decision locked; Next focus is Persona depth
+> Tests: 238 passing
 
 ## How To Use This Doc
 
@@ -47,7 +47,7 @@ The near-term roadmap is therefore:
 
 ## Active Execution Window
 
-### P7-03 Memory Extraction Completion
+### P7-03 Memory Extraction Completion (Complete)
 
 Goal: replace placeholder or partial extraction behavior with a real model-backed path that can become the base layer for long-horizon memory.
 
@@ -56,14 +56,18 @@ Deliverables:
 - `MemoryLoop._extract()` backed by a real model call
 - focused regression coverage for extraction quality and failure handling
 - clear separation between extraction logic and persistence logic
+- orchestrator now auto-extracts structured facts after non-memory turns and gates Mem0 writes by confidence
+- lower-confidence extracted facts now flow into a dedicated pending-review queue with evidence, justification, and basic contradiction hints
+- review approval promotes queued facts into the main memory store instead of leaving them as weak profile rows
 
 Success criteria:
 
 - fact extraction works reliably on real conversation snippets
 - extraction failures degrade safely without corrupting memory state
 - the result format is stable enough to support later consolidation work
+- reviewable facts stay visible without polluting trusted memory until approved
 
-### P7-04 Memory Model Manager
+### P7-04 Memory Model Manager (Complete)
 
 Goal: introduce a minimal memory-focused routing layer for local models, Groq fallback, and future embedding selection without overbuilding a full provider abstraction platform.
 
@@ -72,6 +76,7 @@ Deliverables:
 - explicit model roles for `chat`, `memory_processing`, and `embeddings`
 - local-first vs Groq-fallback policy for memory jobs
 - documented configuration surface for memory-model selection
+- first benchmark lineup defined: `gpt-oss-120b` for chat/orchestration, `llama-3.3-70b-versatile` for primary memory processing, `llama-4-scout-17b-16e-instruct` as the fast memory path, and local `nomic-embed-text` for embeddings
 
 Success criteria:
 
@@ -79,7 +84,7 @@ Success criteria:
 - local and cloud memory paths are understandable and testable
 - future embedding work has a stable place to live
 
-### P8-01 Long-Horizon Memory Quality
+### P8-01 Long-Horizon Memory Quality (Complete)
 
 Goal: make stored memory trustworthy over weeks and months, not just collectible.
 
@@ -96,7 +101,7 @@ Success criteria:
 - stale or conflicting memories are less likely to dominate context
 - the system can justify why a surfaced memory matters
 
-### P8-02 Persona Grounded In Memory
+### P8-02 Persona Grounded In Memory (In Progress)
 
 Goal: make persona evolution reflect persistent user context rather than style-only prompt behavior.
 

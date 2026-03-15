@@ -140,6 +140,8 @@ def recall(
                     "score": score,
                     "source": "mem0",
                     "id": m.get("id"),
+                    "surfacing_reason": "Vector semantic match",
+                    "score_breakdown": {"vector_score": score}
                 })
         except Exception as e:
             logger.warning(f"recall Mem0 failed: {e}")
@@ -154,6 +156,8 @@ def recall(
                     "text": hit["text"],
                     "score": float(hit.get("score", 0.3)),
                     "source": hit.get("type", "profile"),
+                    "surfacing_reason": hit.get("surfacing_reason", "SQLite keyword match"),
+                    "score_breakdown": hit.get("score_breakdown", {})
                 })
         except Exception as e:
             logger.warning(f"recall SQLite failed: {e}")
@@ -173,6 +177,8 @@ def recall(
                     "score": score,
                     "source": "brain",
                     "file": hit.get("file"),
+                    "surfacing_reason": "Document content match",
+                    "score_breakdown": {"bm25_score": score}
                 })
         except Exception as e:
             logger.warning(f"recall BrainIndex failed: {e}")
@@ -197,10 +203,11 @@ def recall_context(query: str, *, limit: int = 8, user_id: str | None = None, **
     lines = []
     for r in results:
         src = r["source"]
+        reason = r.get("surfacing_reason", "Relevance match")
         text = r["text"].replace("\n", " ").strip()
         if len(text) > 200:
             text = text[:197] + "..."
-        lines.append(f"- [{src}] {text}")
+        lines.append(f"- [{src} | {reason}] {text}")
     return "\n".join(lines)
 
 

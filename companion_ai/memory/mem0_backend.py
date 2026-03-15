@@ -26,7 +26,35 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 # Fallback to Groq if Ollama not available
 USE_OLLAMA = os.getenv("MEM0_USE_OLLAMA", "true").lower() == "true"
-FALLBACK_GROQ_MODEL = os.getenv("MEM0_LLM_MODEL", "llama-3.1-8b-instant")
+
+
+def _get_mem0_groq_model() -> str:
+    """Return the Groq model Mem0 should use for helper operations."""
+    return (
+        os.getenv("MEM0_LLM_MODEL")
+        or getattr(core_config, "MEM0_MODEL", None)
+        or getattr(core_config, "MEMORY_FAST_MODEL", None)
+        or "llama-3.1-8b-instant"
+    )
+
+def get_runtime_descriptor(use_ollama: bool | None = None) -> dict[str, str]:
+    """Return the configured Mem0 runtime provider/model for UI and tracing."""
+    resolved_use_ollama = USE_OLLAMA if use_ollama is None else use_ollama
+    if resolved_use_ollama and USE_OLLAMA:
+        return {"provider": "local", "model": OLLAMA_MEM0_MODEL}
+    return {"provider": "groq", "model": _get_mem0_groq_model()}
+
+
+def _get_mem0_groq_api_key() -> str | None:
+    """Prefer the fast/tool key so Mem0 helper traffic does not fight 70B extraction."""
+    return (
+        os.getenv("MEM0_GROQ_API_KEY")
+        or os.getenv("GROQ_TOOL_API_KEY")
+        or getattr(core_config, "GROQ_TOOL_API_KEY", None)
+        or os.getenv("GROQ_MEMORY_API_KEY")
+        or (core_config.GROQ_API_KEYS[0] if core_config.GROQ_API_KEYS else None)
+        or core_config.GROQ_API_KEY
+    )
 
 # Lazy import - only load Mem0 when actually used
 _memory_instance = None
@@ -67,21 +95,18 @@ def _get_mem0_config(use_ollama: bool = True) -> dict:
         logger.info(f"Mem0 using Ollama: {OLLAMA_MEM0_MODEL}")
     else:
         # Fallback to Groq
-        api_key = (
-            os.getenv("GROQ_MEMORY_API_KEY")
-            or (core_config.GROQ_API_KEYS[0] if core_config.GROQ_API_KEYS else None)
-            or core_config.GROQ_API_KEY
-        )
+        fallback_groq_model = _get_mem0_groq_model()
+        api_key = _get_mem0_groq_api_key()
         llm_config = {
             "provider": "groq",
             "config": {
-                "model": FALLBACK_GROQ_MODEL,
+                "model": fallback_groq_model,
                 "temperature": 0.1,
                 "max_tokens": 1000,
                 "api_key": api_key,
             }
         }
-        logger.info(f"Mem0 using Groq: {FALLBACK_GROQ_MODEL}")
+        logger.info(f"Mem0 using Groq: {fallback_groq_model}")
 
     return {
         "llm": llm_config,
@@ -231,9 +256,10 @@ def add_memory(
         except Exception as e:
             error_text = str(e)
             if "model_decommissioned" in error_text or "has been decommissioned" in error_text:
+                fallback_groq_model = _get_mem0_groq_model()
                 logger.warning(
                     f"Mem0 add failed due to decommissioned model configuration. "
-                    f"Falling back to Groq model '{FALLBACK_GROQ_MODEL}'."
+                    f"Falling back to Groq model '{fallback_groq_model}'."
                 )
                 memory = _reset_memory(use_ollama=False)
                 result = memory.add(payload, user_id=user_id, metadata=metadata or {})
@@ -277,6 +303,8 @@ def add_memory(
         if restored:
             logger.warning(f"Guarded {len(restored)} unsafe DELETE/UPDATE events; restored originals: {restored}")
 
+        if isinstance(result, dict):
+            result.setdefault("runtime", get_runtime_descriptor(use_ollama=USE_OLLAMA))
         logger.info(f"Added memories for user {user_id}: {result}")
         return result
     except Exception as e:

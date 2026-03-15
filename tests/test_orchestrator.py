@@ -1,3 +1,4 @@
+from companion_ai.local_loops.base import LoopResult
 """Tests for the V6 Orchestrator — routing, parsing, fallback, integration."""
 import asyncio
 import json
@@ -348,6 +349,49 @@ class TestConversationManagerIntegration:
             
             # Mem0 auto-save SHOULD have been called (tools, not memory)
             assert len(mem0_called) >= 1
+
+    def test_delegation_logs_dynamic_loop_model(self, monkeypatch):
+        monkeypatch.setattr('companion_ai.core.config.USE_ORCHESTRATOR', True)
+
+        from companion_ai.orchestrator import Orchestrator, OrchestratorDecision
+
+        class FakeLoop:
+            async def execute(self, task):
+                return LoopResult.success(
+                    data={"saved": True},
+                    operation="save",
+                    provider="groq",
+                    model="meta-llama/llama-4-scout-17b-16e-instruct",
+                )
+
+        logged = {}
+        orch = Orchestrator()
+        monkeypatch.setattr('companion_ai.orchestrator.get_loop', lambda name: FakeLoop())
+        monkeypatch.setattr(
+            orch,
+            '_synthesize_response',
+            AsyncMock(return_value=("Saved it.", {"source": "loop_memory"}))
+        )
+        monkeypatch.setattr(
+            'companion_ai.llm_interface.log_tokens_step',
+            lambda step_name, model, input_tokens, output_tokens, duration_ms=0: logged.update({
+                'step_name': step_name,
+                'model': model,
+                'duration_ms': duration_ms,
+            })
+        )
+
+        decision = OrchestratorDecision(
+            action=OrchestratorAction.DELEGATE,
+            loop='memory',
+            task={'operation': 'save', 'fact': 'User lives in Portland'}
+        )
+
+        asyncio.run(orch._handle_delegation(decision, 'remember this', {}))
+
+        assert logged['step_name'] == 'loop_memory'
+        assert logged['model'] == 'groq:meta-llama/llama-4-scout-17b-16e-instruct'
+        assert logged['duration_ms'] >= 0
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,20 @@
 candidates:
-  - name: groq-baseline
+  - name: groq-chat-120b
     base_url: https://api.groq.com/openai/v1
     model: openai/gpt-oss-120b
     api_key_env: GROQ_API_KEY
+
+  - name: groq-memory-70b
+    base_url: https://api.groq.com/openai/v1
+    model: llama-3.3-70b-versatile
+    api_key_env: GROQ_MEMORY_API_KEY
+
+  - name: groq-memory-fast-scout
+    base_url: https://api.groq.com/openai/v1
+    model: meta-llama/llama-4-scout-17b-16e-instruct
+    api_key_env: GROQ_TOOL_API_KEY
+
+  - name: groq-memory-kimi-k2
+    base_url: https://api.groq.com/openai/v1
+    model: moonshotai/kimi-k2-instruct-0905
+    api_key_env: GROQ_MEMORY_API_KEY

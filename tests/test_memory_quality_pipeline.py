@@ -178,33 +178,24 @@ def test_mem0_search_uses_quality_ranking(monkeypatch):
 
 
 def test_approve_reject_pending_fact_transitions(tmp_path, monkeypatch):
-    """D2: approve/reject now operate on user_profile rows by ROWID."""
+    """Pending review facts can be promoted into user_profile or rejected cleanly."""
     db_path = tmp_path / "quality_transitions.db"
     monkeypatch.setattr(sqlite_memory, "DB_PATH", str(db_path))
     sqlite_memory.init_db()
     monkeypatch.setattr("companion_ai.core.config.FACT_CONFIDENCE_THRESHOLD", 0.5)
     monkeypatch.setattr("companion_ai.core.config.FACT_AUTO_APPROVE_THRESHOLD", 0.85)
 
-    # Insert low-confidence facts directly into user_profile
-    conn = sqlite_memory.get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO user_profile (key, value, confidence, source) VALUES ('favorite_color', 'blue', 0.3, 'conversation')"
-    )
-    approve_rowid = cur.lastrowid
-    cur.execute(
-        "INSERT INTO user_profile (key, value, confidence, source) VALUES ('food', 'pizza', 0.2, 'conversation')"
-    )
-    reject_rowid = cur.lastrowid
-    conn.commit()
-    conn.close()
+    assert sqlite_memory.queue_pending_profile_fact('favorite_color', 'blue', confidence=0.3, source='auto_extract') is True
+    assert sqlite_memory.queue_pending_profile_fact('food', 'pizza', confidence=0.2, source='auto_extract') is True
 
-    assert approve_rowid is not None
-    assert reject_rowid is not None
+    pending = sqlite_memory.list_pending_profile_facts()
+    pending_by_key = {row['key']: row['id'] for row in pending}
+    approve_rowid = pending_by_key['favorite_color']
+    reject_rowid = pending_by_key['food']
 
     # Approve boosts confidence
     assert sqlite_memory.approve_profile_fact(approve_rowid) is True
-    # Reject deletes the row
+    # Reject removes the queued row
     assert sqlite_memory.reject_profile_fact(reject_rowid) is True
 
     conn2 = sqlite_memory.get_db_connection()
@@ -251,3 +242,76 @@ def test_mem0_add_fallback_on_decommissioned_model(monkeypatch):
 
     assert "error" not in result
     assert calls["reset"] == 1
+
+
+def test_mem0_groq_config_uses_helper_model_and_tool_key(monkeypatch):
+    monkeypatch.delenv("MEM0_LLM_MODEL", raising=False)
+    monkeypatch.delenv("MEM0_GROQ_API_KEY", raising=False)
+    monkeypatch.setenv("GROQ_TOOL_API_KEY", "tool-key")
+    monkeypatch.delenv("GROQ_MEMORY_API_KEY", raising=False)
+    monkeypatch.setattr(mem0_backend.core_config, "MEM0_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+    monkeypatch.setattr(mem0_backend.core_config, "MEMORY_FAST_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+    monkeypatch.setattr(mem0_backend.core_config, "GROQ_TOOL_API_KEY", "tool-key")
+    monkeypatch.setattr(mem0_backend.core_config, "GROQ_API_KEYS", [])
+    monkeypatch.setattr(mem0_backend.core_config, "GROQ_API_KEY", "main-key")
+
+    config = mem0_backend._get_mem0_config(use_ollama=False)
+
+    assert config["llm"]["provider"] == "groq"
+    assert config["llm"]["config"]["model"] == "meta-llama/llama-4-scout-17b-16e-instruct"
+    assert config["llm"]["config"]["api_key"] == "tool-key"
+
+
+def test_mem0_runtime_descriptor_uses_groq_helper_model(monkeypatch):
+    monkeypatch.delenv("MEM0_LLM_MODEL", raising=False)
+    monkeypatch.setattr(mem0_backend.core_config, "MEM0_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+
+    runtime = mem0_backend.get_runtime_descriptor(use_ollama=False)
+
+    assert runtime == {
+        "provider": "groq",
+        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+    }
+
+def test_unified_recall_propagates_reasons(monkeypatch):
+    from companion_ai.memory import knowledge
+    from companion_ai.core import config as core_config
+    
+    monkeypatch.setattr(core_config, "USE_MEM0", False)
+    
+    # Fake sqlite hits returning explainability fields
+    def mock_search_memory(*args, **kwargs):
+        return [{
+            'type': 'profile',
+            'text': 'Fact = value',
+            'score': 0.9,
+            'surfacing_reason': 'Explicit profile fact',
+            'score_breakdown': {'overlap': 0.5}
+        }]
+        
+    monkeypatch.setattr('companion_ai.memory.sqlite_backend.search_memory', mock_search_memory)
+    
+    results = knowledge.recall('test query', include_brain=False, include_sqlite=True, include_mem0=False)
+    assert len(results) == 1
+    assert results[0]['surfacing_reason'] == 'Explicit profile fact'
+    assert 'score_breakdown' in results[0]
+import pytest
+from companion_ai.memory.sqlite_backend import rank_memories_by_quality
+
+def test_explainable_recall_signals_mocked(monkeypatch):
+    memories = [
+        {'id': 'mem-1', 'memory': 'I live in Lisbon', 'score': 0.8}
+    ]
+    def mock_get_memory_quality_map(scope):
+        return {
+            'mem-1': {'confidence': 0.95, 'confidence_label': 'high', 'contradiction_state': 'none'}
+        }
+    
+    monkeypatch.setattr('companion_ai.memory.sqlite_backend.get_memory_quality_map', mock_get_memory_quality_map)
+    ranked = rank_memories_by_quality(memories, 'user', query='Lisbon')
+    
+    assert len(ranked) == 1
+    assert 'score_breakdown' in ranked[0]
+    assert 'surfacing_reason' in ranked[0]
+    assert 'High' in ranked[0]['surfacing_reason']
+    assert 'query match' in ranked[0]['surfacing_reason'].lower()

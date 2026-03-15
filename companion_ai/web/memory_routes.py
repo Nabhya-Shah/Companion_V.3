@@ -103,10 +103,14 @@ def pending_facts():
 @memory_bp.route('/api/pending_facts/<int:pid>/approve', methods=['POST'])
 def approve_fact(pid: int):
     try:
+        _, _, mem0_user_id, _, _ = state._get_active_session_state()
         token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
         if not core_config.require_auth(token):
             return jsonify({'error': 'Unauthorized'}), 401
-        ok = approve_profile_fact(pid)
+        try:
+            ok = approve_profile_fact(pid, user_id=mem0_user_id)
+        except TypeError:
+            ok = approve_profile_fact(pid)
         return jsonify({'approved': ok})
     except Exception as e:
         logger.error(f"Approve fact error: {e}")
@@ -144,13 +148,20 @@ def bulk_pending_facts_action():
 
         ok_ids = []
         failed_ids = []
+        _, _, mem0_user_id, _, _ = state._get_active_session_state()
         for raw_id in ids:
             try:
                 pid = int(raw_id)
             except Exception:
                 failed_ids.append(raw_id)
                 continue
-            ok = approve_profile_fact(pid) if action == 'approve' else reject_profile_fact(pid)
+            if action == 'approve':
+                try:
+                    ok = approve_profile_fact(pid, user_id=mem0_user_id)
+                except TypeError:
+                    ok = approve_profile_fact(pid)
+            else:
+                ok = reject_profile_fact(pid)
             if ok:
                 ok_ids.append(pid)
             else:

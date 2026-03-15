@@ -11,6 +11,7 @@ Uses a small local text model (e.g., Qwen 3B) for fast fact extraction.
 """
 
 import logging
+import re
 from typing import Any, Dict, List
 from .base import Loop, LoopResult, LoopStatus
 from .registry import register_loop
@@ -105,28 +106,38 @@ relevant memories from the provided list. Return the indices of relevant memorie
             return LoopResult.failure(str(e))
     
     async def _extract(self, text: str) -> LoopResult:
-        """Extract facts from text using local model.
-        
-        TODO: Connect to Docker vLLM when ready.
-        For now, returns empty to avoid breaking things.
-        """
+        """Extract structured facts from text using the memory AI path."""
         if not text:
             return LoopResult.failure("No text provided")
-        
-        # EXCLUDE: Strip [Visual context...] from image analysis - not useful for memory
-        import re
+
+        # Strip image-analysis context from memory extraction input.
         text = re.sub(r'\[Visual context from user\'s uploaded file:.*?\]', '', text, flags=re.DOTALL)
-        
+
         try:
-            # TODO: Call local vLLM with extractor prompt
-            # For now, placeholder that returns empty
             logger.info(f"MemoryLoop._extract called with {len(text)} chars")
-            
-            # Placeholder - will use local model
+
+            from companion_ai.memory.ai_processor import extract_profile_facts_from_text
+
+            extracted = extract_profile_facts_from_text(text)
             extracted_facts = []
-            
+            for key, item in extracted.items():
+                extracted_facts.append({
+                    "key": key,
+                    "value": item.get("value", ""),
+                    "confidence": item.get("confidence", 0.0),
+                    "conf_label": item.get("conf_label"),
+                    "evidence": item.get("evidence"),
+                    "justification": item.get("justification"),
+                    "fact": item.get("fact"),
+                })
+
+            extracted_facts.sort(key=lambda item: item.get("confidence", 0.0), reverse=True)
+
             return LoopResult.success(
-                data={"extracted_facts": extracted_facts},
+                data={
+                    "extracted_facts": extracted_facts,
+                    "count": len(extracted_facts),
+                },
                 operation="extract",
                 text_length=len(text)
             )
@@ -162,10 +173,17 @@ relevant memories from the provided list. Return the indices of relevant memorie
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
             brain.write("memories/facts.md", f"- [{timestamp}] {fact}\n", append=True)
 
+            runtime = {}
+            mem0_result = result.get("mem0") if isinstance(result, dict) else None
+            if isinstance(mem0_result, dict):
+                runtime = mem0_result.get("runtime") or {}
+
             logger.info(f"Saved fact via knowledge.remember: {fact[:50]}...")
             return LoopResult.success(
                 data={"saved": True, "fact": fact, "result": result, "brain": "memories/facts.md"},
                 operation="save",
+                provider=runtime.get("provider", "unknown"),
+                model=runtime.get("model", "unknown"),
             )
         except Exception as e:
             logger.error(f"Memory save failed: {e}")
