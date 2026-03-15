@@ -1,0 +1,51 @@
+import os
+
+import pytest
+import requests
+
+
+def test_routine_run_ui_smoke_playwright():
+    """Browser regression: routine run should hit API and surface routine status feedback.
+
+    This test is optional in environments without Playwright or without a running web server.
+    """
+    sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
+
+    base_url = os.getenv("E2E_BASE_URL", "http://127.0.0.1:5000")
+    try:
+        health = requests.get(f"{base_url}/api/health", timeout=3)
+        if health.status_code != 200:
+            pytest.skip(f"web server not healthy at {base_url}")
+    except Exception:
+        pytest.skip(f"web server unavailable at {base_url}")
+
+    # Contract check first: workflow run must expose chat delivery metadata.
+    run_response = requests.post(f"{base_url}/api/workflows/morning_briefing/run", timeout=60)
+    if run_response.status_code != 200:
+        pytest.skip("workflow run endpoint unavailable for e2e assertion")
+    run_payload = run_response.json()
+    assert run_payload.get("status") == "success"
+    assert "chat_delivered" in run_payload
+
+    with sync_api.sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(viewport={"width": 1400, "height": 1200})
+        page.goto(base_url, wait_until="domcontentloaded")
+
+        # Ensure tasks panel is active before running routine.
+        tasks_btn = page.locator('button[data-panel="tasks"]')
+        if tasks_btn.count() > 0:
+            tasks_btn.first.click()
+
+        run_btn = page.locator('#routinesList button:has-text("Run now")').first
+        sync_api.expect(run_btn).to_be_visible(timeout=10000)
+
+        # Evaluate-click avoids viewport clipping in narrow side panel layouts.
+        run_btn.evaluate("el => el.click()")
+
+        sync_api.expect(page.locator("text=/Running routine:/i")).to_be_visible(timeout=15000)
+
+        # UI should present a routine status toast for user feedback.
+        sync_api.expect(page.locator("text=/Routine (complete|ran)/i")).to_be_visible(timeout=15000)
+
+        browser.close()

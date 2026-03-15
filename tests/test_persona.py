@@ -46,6 +46,8 @@ class TestPersonaState:
         st = persona.PersonaState(
             user_style=["casual", "brief"],
             evolved_traits=["witty", "sarcastic"],
+            ongoing_goals=["Learn Python"],
+            recurring_themes=["Coding"],
             rapport_level="Comfortable",
             interaction_count=99,
         )
@@ -53,6 +55,8 @@ class TestPersonaState:
         st2 = persona.PersonaState.from_dict(d)
         assert st2.user_style == st.user_style
         assert st2.evolved_traits == st.evolved_traits
+        assert st2.ongoing_goals == st.ongoing_goals
+        assert st2.recurring_themes == st.recurring_themes
         assert st2.rapport_level == st.rapport_level
         assert st2.interaction_count == st.interaction_count
 
@@ -60,6 +64,8 @@ class TestPersonaState:
         st = persona.PersonaState(
             evolved_traits=["direct", "humorous"],
             user_style=["technical", "brief"],
+            ongoing_goals=["write a book"],
+            recurring_themes=["literature"],
             rapport_level="Familiar",
         )
         frag = st.prompt_fragment()
@@ -67,6 +73,10 @@ class TestPersonaState:
         assert "direct" in frag
         assert "[User Communication Style]" in frag
         assert "technical" in frag
+        assert "[Ongoing Goals]" in frag
+        assert "write a book" in frag
+        assert "[Recurring Themes]" in frag
+        assert "literature" in frag
         assert "[Rapport Level]: Familiar" in frag
 
     def test_prompt_fragment_empty(self):
@@ -185,26 +195,38 @@ class TestApplyEvolution:
     def test_merges_incrementally(self):
         st = persona.get_state()
         st.evolved_traits = ["existing_trait"]
+        st.ongoing_goals = ["goal1"]
+        st.recurring_themes = ["theme1"]
 
         persona._apply_evolution({
             "evolved_traits": ["new_trait"],
             "user_style": ["concise"],
+            "ongoing_goals": ["goal2"],
+            "recurring_themes": ["theme2"],
             "rapport_level": "Familiar",
         })
 
         assert "existing_trait" in st.evolved_traits
         assert "new_trait" in st.evolved_traits
         assert "concise" in st.user_style
+        assert "goal1" in st.ongoing_goals
+        assert "goal2" in st.ongoing_goals
+        assert "theme1" in st.recurring_themes
+        assert "theme2" in st.recurring_themes
         assert st.rapport_level == "Familiar"
 
     def test_creates_history_snapshot(self):
         st = persona.get_state()
         st.evolved_traits = ["old"]
+        st.ongoing_goals = ["old_goal"]
+        st.recurring_themes = ["old_theme"]
 
         persona._apply_evolution({"evolved_traits": ["new"]})
 
         assert len(st.trait_history) == 1
         assert "old" in st.trait_history[0]["evolved_traits"]
+        assert "old_goal" in st.trait_history[0]["ongoing_goals"]
+        assert "old_theme" in st.trait_history[0]["recurring_themes"]
 
     def test_unknown_rapport_falls_back_to_count(self):
         st = persona.get_state()
@@ -268,6 +290,30 @@ class TestAnalyzeAndEvolve:
 
         st = persona.get_state()
         assert st.evolved_traits == []  # nothing changed
+
+    @patch("companion_ai.llm_interface.generate_model_response")
+    def test_memory_backed_signals_are_seeded(self, mock_gen):
+        mock_gen.return_value = '{"user_style": [], "evolved_traits": [], "ongoing_goals": [], "recurring_themes": [], "rapport_level": "Familiar"}'
+
+        with patch("companion_ai.memory.sqlite_backend.get_all_profile_facts") as mock_facts:
+            mock_facts.return_value = {
+                "project_focus": "Working on Companion roadmap hardening",
+                "hobby": "Miata restoration",
+            }
+            persona.analyze_and_evolve([{"user": "status", "ai": "ok"}])
+
+        st = persona.get_state()
+        assert any("companion roadmap" in g.lower() for g in st.ongoing_goals)
+        assert any("project focus" in t.lower() for t in st.recurring_themes)
+
+
+def test_memory_backed_signal_extractor():
+    signals = persona._memory_backed_signals({
+        "current_project": "Building a project continuity module",
+        "favorite_stack": "Python + Flask",
+    })
+    assert any("project continuity" in g.lower() for g in signals["ongoing_goals"])
+    assert any("current project" in t.lower() for t in signals["recurring_themes"])
 
 
 # ======================================================================

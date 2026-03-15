@@ -61,6 +61,11 @@ def build_system_prompt(user_message: str, recent_conversation: str = "", mem0_u
     brain_context = _build_brain_context()
     if brain_context:
         dynamic_parts.append(brain_context)
+
+    # 2b. Cross-session continuity snapshot (P8-03)
+    continuity_context = _build_continuity_context()
+    if continuity_context:
+        dynamic_parts.append(continuity_context)
     
     # 3. Capabilities Awareness - Tell 120B what tools it has
     # Skip for short greetings to save ~120 tokens
@@ -165,6 +170,41 @@ def _build_brain_context() -> str:
     except Exception as e:
         pass  # Fail silently
     return ""
+
+
+def _build_continuity_context() -> str:
+    """Inject latest continuity snapshot to support project/open-loop recall."""
+    try:
+        from companion_ai.services.continuity import get_latest_snapshot
+
+        snap = get_latest_snapshot()
+        if not snap:
+            return ""
+
+        parts: list[str] = ["[PROJECT CONTINUITY]"]
+        summary = str(snap.get('summary') or '').strip()
+        if summary:
+            parts.append(f"Summary: {summary[:320]}")
+
+        projects = snap.get('projects') or []
+        if projects:
+            parts.append("Projects: " + "; ".join(str(x)[:80] for x in projects[:4]))
+
+        blockers = snap.get('blockers') or []
+        if blockers:
+            parts.append("Blockers: " + "; ".join(str(x)[:80] for x in blockers[:3]))
+
+        next_steps = snap.get('next_steps') or []
+        if next_steps:
+            parts.append("Next steps: " + "; ".join(str(x)[:80] for x in next_steps[:3]))
+
+        open_questions = snap.get('open_questions') or []
+        if open_questions:
+            parts.append("Open questions: " + "; ".join(str(x)[:80] for x in open_questions[:3]))
+
+        return "\n".join(parts)
+    except Exception:
+        return ""
 
 def _build_mem0_context(user_message: str, mem0_user_id: str | None = None) -> str:
     """Build memory context using Mem0 hybrid memory system.

@@ -38,6 +38,8 @@ EVOLVE_EVERY_N_MESSAGES = 25  # periodic trigger interval
 MAX_TRAIT_HISTORY = 10  # keep last N evolution snapshots
 MAX_EVOLVED_TRAITS = 12  # cap trait list to prevent prompt bloat
 MAX_USER_STYLE = 8  # cap user-style observations
+MAX_ONGOING_GOALS = 5  # cap goals list
+MAX_RECURRING_THEMES = 5  # cap themes list
 
 RAPPORT_LEVELS = [
     "Stranger",  # 0-10   messages
@@ -74,6 +76,8 @@ class PersonaState:
     interaction_count: int = 0
     last_evolved: Optional[str] = None
     trait_history: List[Dict[str, Any]] = field(default_factory=list)
+    ongoing_goals: List[str] = field(default_factory=list)
+    recurring_themes: List[str] = field(default_factory=list)
 
     # --- serialisation helpers -------------------------------------------
     def to_dict(self) -> Dict[str, Any]:
@@ -84,6 +88,8 @@ class PersonaState:
             "interaction_count": self.interaction_count,
             "last_evolved": self.last_evolved,
             "trait_history": self.trait_history[-MAX_TRAIT_HISTORY:],
+            "ongoing_goals": self.ongoing_goals,
+            "recurring_themes": self.recurring_themes,
         }
 
     @classmethod
@@ -95,6 +101,8 @@ class PersonaState:
             interaction_count=d.get("interaction_count", 0),
             last_evolved=d.get("last_evolved"),
             trait_history=d.get("trait_history", []) or [],
+            ongoing_goals=d.get("ongoing_goals", []) or [],
+            recurring_themes=d.get("recurring_themes", []) or [],
         )
 
     # --- prompt fragment ---------------------------------------------------
@@ -108,6 +116,14 @@ class PersonaState:
         if self.user_style:
             parts.append(
                 "[User Communication Style]\n- " + "\n- ".join(self.user_style)
+            )
+        if self.ongoing_goals:
+            parts.append(
+                "[Ongoing Goals]\n- " + "\n- ".join(self.ongoing_goals)
+            )
+        if self.recurring_themes:
+            parts.append(
+                "[Recurring Themes]\n- " + "\n- ".join(self.recurring_themes)
             )
         if self.rapport_level:
             parts.append(f"[Rapport Level]: {self.rapport_level}")
@@ -206,6 +222,8 @@ def _apply_evolution(new_data: Dict[str, Any]):
                 "timestamp": datetime.now().isoformat(),
                 "evolved_traits": list(st.evolved_traits),
                 "user_style": list(st.user_style),
+                "ongoing_goals": list(st.ongoing_goals),
+                "recurring_themes": list(st.recurring_themes),
                 "rapport_level": st.rapport_level,
             }
         )
@@ -221,6 +239,16 @@ def _apply_evolution(new_data: Dict[str, Any]):
             new_data.get("user_style", []),
             MAX_USER_STYLE,
         )
+        st.ongoing_goals = _merge_list(
+            st.ongoing_goals,
+            new_data.get("ongoing_goals", []),
+            MAX_ONGOING_GOALS,
+        )
+        st.recurring_themes = _merge_list(
+            st.recurring_themes,
+            new_data.get("recurring_themes", []),
+            MAX_RECURRING_THEMES,
+        )
 
         # Rapport: accept LLM suggestion only if it's a known level,
         # otherwise derive from interaction count
@@ -233,6 +261,48 @@ def _apply_evolution(new_data: Dict[str, Any]):
         st.last_evolved = datetime.now().isoformat()
 
     persist_state()
+
+
+def _memory_backed_signals(profile_facts: Dict[str, Any]) -> Dict[str, List[str]]:
+    """Extract stable goals/themes from persisted profile facts.
+
+    This keeps persona evolution grounded in durable memory even when recent
+    conversation context is sparse.
+    """
+    goals: List[str] = []
+    themes: List[str] = []
+
+    if not isinstance(profile_facts, dict):
+        return {"ongoing_goals": goals, "recurring_themes": themes}
+
+    goal_markers = (
+        "working on",
+        "building",
+        "learning",
+        "goal",
+        "project",
+        "writing",
+        "restoration",
+        "trying to",
+    )
+
+    for key, value in list(profile_facts.items())[:20]:
+        key_text = str(key or "").replace("_", " ").strip()
+        value_text = str(value or "").strip()
+        merged = f"{key_text} {value_text}".lower()
+
+        if key_text and key_text not in themes:
+            themes.append(key_text)
+
+        if any(marker in merged for marker in goal_markers):
+            candidate = value_text or key_text
+            if candidate and candidate not in goals:
+                goals.append(candidate)
+
+    return {
+        "ongoing_goals": goals[:MAX_ONGOING_GOALS],
+        "recurring_themes": themes[:MAX_RECURRING_THEMES],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -256,29 +326,51 @@ def analyze_and_evolve(history: List[Dict[str, str]]):
 
     st = get_state()
 
-    prompt = f"""Analyze the following conversation between a User and an AI Companion.
+    # Inject long-term profile facts to guide goals & themes
+    profile_facts_str = "None recorded."
+    facts = {}
+    try:
+        from companion_ai.memory.sqlite_backend import get_all_profile_facts
+        facts = get_all_profile_facts() or {}
+        if facts:
+            profile_facts_str = "\n".join(f"- {k}: {v}" for k, v in facts.items())
+    except Exception as e:
+        logger.warning(f"Could not load profile facts for persona evolution: {e}")
+
+    seeded = _memory_backed_signals(facts)
+
+    prompt = f"""Analyze the following conversation between a User and an AI Companion, along with their long-term explicit profile facts.
+
+Explicit Profile Facts:
+{profile_facts_str}
 
 Current Perception:
 - User Style: {st.user_style}
 - Evolved Traits: {st.evolved_traits}
+- Ongoing Goals: {st.ongoing_goals}
+- Recurring Themes: {st.recurring_themes}
+- Memory-Backed Goal Seeds: {seeded.get('ongoing_goals', [])}
+- Memory-Backed Theme Seeds: {seeded.get('recurring_themes', [])}
 - Rapport: {st.rapport_level}
 - Total interactions: {st.interaction_count}
 
 Task:
-1. Identify NEW observations about the user's communication style (tone, length, technicality, humor).
-   Only list traits that are NOT already captured above.
-2. Suggest NEW personality adaptations for the AI to serve this user better.
-   Only list traits that are NOT already captured above.
-3. Assess the current rapport level from: {RAPPORT_LEVELS}
+1. Identify NEW observations about the user's communication style (tone, length, technicality, humor). Only list traits NOT already captured.
+2. Suggest NEW personality adaptations for the AI to serve this user better. Only list traits NOT already captured.
+3. Identify any NEW 'ongoing_goals' the user has expressed or seems to be working towards (e.g. 'Learn Spanish', 'Finish writing a novel').
+4. Identify any NEW 'recurring_themes' or topics the user frequently brings up (e.g. 'Startups', 'Cat care', 'Existential dread').
+5. Assess the current rapport level from: {RAPPORT_LEVELS}
 
 Return ONLY a JSON object:
 {{
     "user_style": ["new_trait_1", ...],
     "evolved_traits": ["new_trait_1", ...],
+    "ongoing_goals": ["new_goal_1", ...],
+    "recurring_themes": ["new_theme_1", ...],
     "rapport_level": "one of the levels above"
 }}
 
-If nothing new to add, return empty lists. Do NOT repeat existing traits.
+If nothing new to add for a specific category, return an empty list for it. Do NOT repeat existing items.
 
 Conversation:
 {history_text}"""
@@ -299,6 +391,9 @@ Conversation:
         end = response.rfind("}") + 1
         if start != -1 and end > start:
             new_data = json.loads(response[start:end])
+            # Always preserve deterministic memory-backed signals.
+            new_data["ongoing_goals"] = list(seeded.get("ongoing_goals", [])) + list(new_data.get("ongoing_goals", []))
+            new_data["recurring_themes"] = list(seeded.get("recurring_themes", [])) + list(new_data.get("recurring_themes", []))
             _apply_evolution(new_data)
             logger.info(
                 "Persona evolution applied: +%d traits, +%d style",

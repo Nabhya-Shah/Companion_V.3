@@ -220,6 +220,46 @@ Write a brief summary (max 200 words) for the AI's daily journal.'''
         return jsonify({'error': str(e)}), 500
 
 
+@system_bp.route('/api/continuity', methods=['GET'])
+def continuity_list_or_latest():
+    """Get latest continuity snapshot or recent snapshot history."""
+    try:
+        from companion_ai.services.continuity import get_latest_snapshot, list_snapshots
+
+        latest = request.args.get('latest', 'true').lower() in {'1', 'true', 'yes'}
+        if latest:
+            snapshot = get_latest_snapshot()
+            return jsonify({'snapshot': snapshot})
+
+        limit = int(request.args.get('limit') or 10)
+        return jsonify({'snapshots': list_snapshots(limit=limit)})
+    except Exception as e:
+        logger.error(f"Continuity list error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@system_bp.route('/api/continuity/refresh', methods=['POST'])
+def continuity_refresh():
+    """Force-generate a new continuity snapshot."""
+    try:
+        data = request.get_json(silent=True) or {}
+        token = (
+            request.headers.get('X-API-TOKEN')
+            or data.get('token')
+            or request.cookies.get('api_token')
+        )
+        if not core_config.require_auth(token):
+            return jsonify({'error': 'Unauthorized'}), 401
+
+        from companion_ai.services.continuity import generate_continuity_if_due
+
+        snapshot = generate_continuity_if_due(force=True)
+        return jsonify({'status': 'success', 'snapshot': snapshot})
+    except Exception as e:
+        logger.error(f"Continuity refresh error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @system_bp.route('/api/tasks', methods=['GET'])
 def get_tasks():
     """Get list of active background tasks."""

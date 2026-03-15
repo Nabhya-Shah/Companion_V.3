@@ -541,6 +541,13 @@ def _worker_loop():
             except Exception:
                 pass
 
+            # Generate continuity reflection once per day (best effort).
+            try:
+                from companion_ai.services.continuity import generate_continuity_if_due
+                generate_continuity_if_due()
+            except Exception:
+                pass
+
             _run_due_schedules()
             _cancel_current_flag = False # Reset flag for new job
             conn = _get_db()
@@ -583,7 +590,21 @@ def _worker_loop():
                             if res.get("output_target") == "chat":
                                 try:
                                     from companion_ai.web.sse import emit_event
-                                    emit_event("message", {"role": "assistant", "content": res["response"]})
+                                    from companion_ai.web import state
+                                    content = res["response"]
+                                    
+                                    # Create standard assistant message object
+                                    new_message = {"role": "assistant", "content": content}
+                                    
+                                    # We don't have a specific HTTP request, so session defaults apply
+                                    cv_sess, meta, mem, active_history = state._get_active_session_state({"session_id": "default", "profile_id": "default", "workspace_id": "default"})
+                                    active_history.append(new_message)
+                                    state.history_version += 1
+                                    
+                                    with state.history_condition:
+                                        state.history_condition.notify_all()
+                                        
+                                    emit_event("message", new_message)
                                 except Exception as e:
                                     logger.error(f"Failed to emit workflow SSE: {e}")
                     else:

@@ -154,7 +154,20 @@ async function runWorkflowNow(workflowId) {
   try {
     const res = await fetch(`/api/workflows/${workflowId}/run`, { method: 'POST', headers: authHeaders() });
     if (!res.ok) throw new Error('Run failed');
-    showToast('Routine complete!', 'success');
+    const data = await res.json();
+
+    const chatTargetCount = Number(data?.chat_target_count || 0);
+    const chatDelivered = Boolean(data?.chat_delivered);
+
+    if (chatTargetCount > 0 && chatDelivered) {
+      showToast('Routine complete!', 'success');
+    } else if (chatTargetCount > 0 && !chatDelivered) {
+      showToast('Routine ran, but chat output was not delivered.', 'warning');
+    } else {
+      showToast('Routine ran (no chat output target).', 'info');
+    }
+
+    loadTasks();
   } catch (err) {
     console.error(err);
     showToast('Failed to run routine.', 'error');
@@ -257,22 +270,21 @@ async function editSchedule(scheduleId) {
   const schedule = schedulesById[scheduleId];
   if (!schedule) { showToast('Schedule not found', 'error'); return; }
 
-  const description = prompt('Schedule description', schedule.description || '');
-  if (description === null) return;
+  const form = await openScheduleForm({
+    title: 'Edit Schedule',
+    submitLabel: 'Save',
+    description: schedule.description || '',
+    cadence: minutesToCadence(Number(schedule.interval_minutes || 15)),
+  });
+  if (!form) return;
 
-  const intervalInput = prompt('Run every how many minutes?', String(schedule.interval_minutes || 15));
-  if (intervalInput === null) return;
-  const intervalMinutes = Number(intervalInput);
-  if (!Number.isFinite(intervalMinutes) || intervalMinutes <= 0) {
-    showToast('Please enter a valid positive minute interval', 'error');
-    return;
-  }
+  const intervalMinutes = cadenceToMinutes(form.cadence);
 
   try {
     const r = await fetch(`/api/schedules/${scheduleId}`, {
       method: 'PUT', headers: authHeaders(),
       body: JSON.stringify({
-        description: description.trim(), interval_minutes: intervalMinutes,
+        description: form.description, interval_minutes: intervalMinutes,
         tool_name: schedule.tool_name || 'start_background_task',
         tool_args: schedule.tool_args || {},
         timezone: schedule.timezone || 'UTC',
@@ -308,20 +320,23 @@ async function deleteSchedule(scheduleId) {
 }
 
 export async function createSchedule() {
-  const description = prompt('Schedule description', 'Recurring background task');
-  if (description === null) return;
-  const trimmed = (description || '').trim();
-  if (!trimmed) { showToast('Description is required', 'error'); return; }
-
-  const cadence = prompt('Cadence (examples: 15m, 1h, 1d)', '30m');
-  if (cadence === null) return;
-  const val = (cadence || '').trim().toLowerCase();
-  if (!/^\d+[mhd]$/.test(val)) { showToast('Cadence must look like 15m, 1h, or 1d', 'error'); return; }
+  const form = await openScheduleForm({
+    title: 'Create Schedule',
+    submitLabel: 'Create',
+    description: 'Recurring background task',
+    cadence: '30m',
+  });
+  if (!form) return;
 
   try {
     const r = await fetch('/api/schedules', {
       method: 'POST', headers: authHeaders(),
-      body: JSON.stringify({ description: trimmed, cadence: val, tool_name: 'start_background_task', tool_args: { description: trimmed } })
+      body: JSON.stringify({
+        description: form.description,
+        cadence: form.cadence,
+        tool_name: 'start_background_task',
+        tool_args: { description: form.description }
+      })
     });
     const data = await r.json();
     if (!r.ok) { showToast(data.error || 'Failed to create schedule', 'error'); return; }
@@ -331,6 +346,102 @@ export async function createSchedule() {
     console.error('Error creating schedule:', e);
     showToast('Failed to create schedule', 'error');
   }
+}
+
+function cadenceToMinutes(cadence) {
+  const m = String(cadence || '').trim().toLowerCase().match(/^(\d+)([mhd])$/);
+  if (!m) return NaN;
+  const n = Number(m[1]);
+  const unit = m[2];
+  if (!Number.isFinite(n) || n <= 0) return NaN;
+  if (unit === 'm') return n;
+  if (unit === 'h') return n * 60;
+  return n * 1440;
+}
+
+function minutesToCadence(minutes) {
+  const m = Number(minutes);
+  if (!Number.isFinite(m) || m <= 0) return '30m';
+  if (m % 1440 === 0) return `${m / 1440}d`;
+  if (m % 60 === 0) return `${m / 60}h`;
+  return `${m}m`;
+}
+
+function openScheduleForm({ title, submitLabel, description, cadence }) {
+  return new Promise((resolve) => {
+    const existing = document.getElementById('scheduleModalOverlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'scheduleModalOverlay';
+    overlay.className = 'approval-overlay';
+    overlay.innerHTML = `
+      <div class="approval-modal schedule-modal" role="dialog" aria-modal="true" aria-labelledby="scheduleModalTitle">
+        <div class="approval-header" id="scheduleModalTitle">${escapeHtml(title)}</div>
+        <div class="approval-body schedule-modal-body">
+          <label class="schedule-label" for="scheduleDescriptionInput">Description</label>
+          <input id="scheduleDescriptionInput" class="schedule-input" type="text" maxlength="160" value="${escapeHtml(description || '')}" />
+          <label class="schedule-label" for="scheduleCadenceInput">Cadence</label>
+          <input id="scheduleCadenceInput" class="schedule-input" type="text" maxlength="16" value="${escapeHtml(cadence || '30m')}" placeholder="15m, 1h, 1d" />
+          <div class="schedule-hint">Use cadence like 15m, 1h, or 1d.</div>
+        </div>
+        <div class="approval-actions">
+          <button id="scheduleCancelBtn" class="approval-btn deny" type="button">Cancel</button>
+          <button id="scheduleSaveBtn" class="approval-btn approve" type="button">${escapeHtml(submitLabel)}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const descriptionInput = document.getElementById('scheduleDescriptionInput');
+    const cadenceInput = document.getElementById('scheduleCadenceInput');
+    const cancelBtn = document.getElementById('scheduleCancelBtn');
+    const saveBtn = document.getElementById('scheduleSaveBtn');
+
+    const closeWith = (result) => {
+      overlay.remove();
+      resolve(result);
+    };
+
+    cancelBtn?.addEventListener('click', () => closeWith(null));
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeWith(null);
+    });
+
+    const submit = () => {
+      const trimmedDescription = String(descriptionInput?.value || '').trim();
+      const trimmedCadence = String(cadenceInput?.value || '').trim().toLowerCase();
+
+      if (!trimmedDescription) {
+        showToast('Description is required', 'error');
+        descriptionInput?.focus();
+        return;
+      }
+      if (!/^\d+[mhd]$/.test(trimmedCadence)) {
+        showToast('Cadence must look like 15m, 1h, or 1d', 'error');
+        cadenceInput?.focus();
+        return;
+      }
+      const minutes = cadenceToMinutes(trimmedCadence);
+      if (!Number.isFinite(minutes) || minutes <= 0) {
+        showToast('Cadence must be a positive interval', 'error');
+        cadenceInput?.focus();
+        return;
+      }
+
+      closeWith({ description: trimmedDescription, cadence: trimmedCadence });
+    };
+
+    saveBtn?.addEventListener('click', submit);
+    cadenceInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submit();
+    });
+    descriptionInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submit();
+    });
+
+    setTimeout(() => descriptionInput?.focus(), 0);
+  });
 }
 
 async function cancelTask(taskId) {

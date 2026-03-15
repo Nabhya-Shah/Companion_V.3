@@ -103,6 +103,9 @@ def test_workflow_run_endpoint_executes_without_async_flask_extra(monkeypatch):
     assert payload["status"] == "success"
     assert payload["workflow_id"] == "sample"
     assert payload["results"][0]["response"] == "Done"
+    assert payload["chat_target_count"] == 1
+    assert payload["chat_appended_count"] == 1
+    assert payload["chat_delivered"] is True
 
 
 def test_workflow_run_endpoint_appends_chat_output_to_history(monkeypatch):
@@ -129,3 +132,28 @@ def test_workflow_run_endpoint_appends_chat_output_to_history(monkeypatch):
     assert res.status_code == 200
     assert state._session_histories[session_key][-1]["ai"] == "Workflow summary"
     assert state._session_histories[session_key][-1]["metadata"]["workflow_id"] == "sample"
+
+
+def test_workflow_run_endpoint_reports_chat_delivery_failure(monkeypatch):
+    app = create_app()
+    client = app.test_client()
+
+    manager = type("Manager", (), {})()
+    manager.execute_workflow = AsyncMock(return_value=[
+        {"step_id": "summary", "response": "Workflow summary", "output_target": "chat"}
+    ])
+
+    monkeypatch.setattr("companion_ai.web.workflow_routes.get_manager", lambda: manager)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("history unavailable")
+
+    monkeypatch.setattr("companion_ai.web.state._get_active_session_state", _boom)
+
+    res = client.post("/api/workflows/sample/run")
+
+    assert res.status_code == 200
+    payload = res.get_json()
+    assert payload["chat_target_count"] == 1
+    assert payload["chat_appended_count"] == 0
+    assert payload["chat_delivered"] is False

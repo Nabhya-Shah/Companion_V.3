@@ -39,8 +39,10 @@ def run_workflow(workflow_id):
         results = asyncio.run(manager.execute_workflow(workflow_id))
         # Check if we should broadcast back any chat targeted steps
         chat_updates = []
+        chat_target_count = 0
         for res in results:
             if res.get("output_target") == "chat":
+                chat_target_count += 1
                 chat_updates.append({
                     "ai": res.get("response", ""),
                     "timestamp": datetime.now().isoformat(),
@@ -51,20 +53,31 @@ def run_workflow(workflow_id):
                     },
                 })
 
+        chat_appended_count = 0
         if chat_updates:
             try:
                 from companion_ai.web import state
 
                 session_key, _, _, active_history, _ = state._get_active_session_state()
                 active_history.extend(chat_updates)
+                chat_appended_count = len(chat_updates)
                 with state.history_condition:
                     state.history_version += 1
                     state.history_condition.notify_all()
                 logger.info(f"Workflow {workflow_id} appended {len(chat_updates)} chat update(s) to session {session_key}")
             except Exception as broadcast_err:
                 logger.warning(f"Workflow chat history update skipped: {broadcast_err}")
+
+        chat_delivered = chat_target_count > 0 and chat_appended_count == chat_target_count
                 
-        return jsonify({"status": "success", "workflow_id": workflow_id, "results": results})
+        return jsonify({
+            "status": "success",
+            "workflow_id": workflow_id,
+            "results": results,
+            "chat_target_count": chat_target_count,
+            "chat_appended_count": chat_appended_count,
+            "chat_delivered": chat_delivered,
+        })
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
     except Exception as e:

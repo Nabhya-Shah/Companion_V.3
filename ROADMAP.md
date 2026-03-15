@@ -101,7 +101,7 @@ Success criteria:
 - stale or conflicting memories are less likely to dominate context
 - the system can justify why a surfaced memory matters
 
-### P8-02 Persona Grounded In Memory (In Progress)
+### P8-02 Persona Grounded In Memory (Complete)
 
 Goal: make persona evolution reflect persistent user context rather than style-only prompt behavior.
 
@@ -117,7 +117,14 @@ Success criteria:
 - style changes stay grounded in actual interaction history
 - user-specific preferences meaningfully shape responses over time
 
-### P8-03 Reflection And Project Continuity
+Shipped now:
+
+- persona state tracks ongoing goals and recurring themes
+- evolution merges are incremental with caps and history snapshots
+- memory-backed seeding from stable profile facts anchors goals/themes to persistent context
+- focused regression tests cover drift control and memory grounding
+
+### P8-03 Reflection And Project Continuity (Complete)
 
 Goal: give Companion a stronger sense of continuity across projects, open loops, and recent life context.
 
@@ -132,6 +139,13 @@ Success criteria:
 - Companion can summarize ongoing projects and open loops coherently
 - cross-day continuity feels intentional instead of accidental
 - the user gets strategic support, not just reactive answers
+
+Shipped now:
+
+- continuity snapshot service stores summary, projects, blockers, next steps, and open questions
+- daily continuity generation runs in background worker (with force-refresh endpoint)
+- latest continuity snapshot is injected into dynamic prompt context for cross-session recall
+- API endpoints expose latest/history continuity snapshots for UI and diagnostics
 
 ### Tactical Supporting Slice: Quick Tool Path
 

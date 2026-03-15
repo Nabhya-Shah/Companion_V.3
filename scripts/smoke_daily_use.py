@@ -4,7 +4,7 @@ Checks:
 - /api/health
 - /api/models
 - /api/memory
-- /api/chat
+- /api/chat/send
 
 Usage:
   python scripts/smoke_daily_use.py
@@ -43,18 +43,44 @@ def _check_get(session: requests.Session, base_url: str, path: str, token: str |
 
 
 def _check_chat(session: requests.Session, base_url: str, token: str | None) -> tuple[bool, str]:
-    url = f"{base_url}/api/chat"
+    url = f"{base_url}/api/chat/send"
     payload: dict[str, Any] = {
         "message": "smoke test ping",
         "tts_enabled": False,
     }
     try:
-        response = session.post(url, headers=_headers(token), data=json.dumps(payload), timeout=45)
+        response = session.post(
+            url,
+            headers=_headers(token),
+            data=json.dumps(payload),
+            timeout=45,
+        )
         if response.status_code != 200:
             return False, f"{response.status_code} - {response.text[:180]}"
-        data = response.json()
-        if not isinstance(data, dict) or not data.get("response"):
-            return False, "200 - missing response body"
+
+        # /api/chat/send streams SSE lines; validate we got a chunk and done marker.
+        saw_chunk = False
+        saw_done = False
+        full_response = ""
+        for raw_line in response.text.splitlines():
+            line = raw_line.strip()
+            if not line.startswith("data: "):
+                continue
+            try:
+                evt = json.loads(line[6:])
+            except Exception:
+                continue
+            if isinstance(evt, dict) and evt.get("chunk"):
+                saw_chunk = True
+            if isinstance(evt, dict) and evt.get("done"):
+                saw_done = True
+                full_response = str(evt.get("full_response") or "").strip()
+
+        if not saw_chunk and not full_response:
+            return False, "200 - missing streamed chunk/full_response"
+        if not saw_done:
+            return False, "200 - missing done event"
+
         return True, "200"
     except Exception as err:
         return False, str(err)
@@ -77,7 +103,7 @@ def main() -> int:
         checks.append((path, ok, detail))
 
     chat_ok, chat_detail = _check_chat(session, base_url, token)
-    checks.append(("/api/chat", chat_ok, chat_detail))
+    checks.append(("/api/chat/send", chat_ok, chat_detail))
 
     print("Companion daily-use smoke results")
     print("=" * 34)

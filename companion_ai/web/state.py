@@ -14,7 +14,7 @@ import logging
 import threading
 from typing import Dict, List, Tuple
 
-from flask import request, jsonify
+from flask import request, jsonify, has_request_context
 
 from companion_ai.conversation_manager import ConversationSession
 from companion_ai.core import config as core_config
@@ -122,32 +122,41 @@ def _sanitize_scope_value(value: str | None, default: str) -> str:
 
 
 def _resolve_session_key(payload: dict | None = None) -> str:
-    key = (
-        request.headers.get("X-Session-ID")
-        or request.args.get("session_id")
-        or ((payload or {}).get("session_id") if isinstance(payload, dict) else None)
-        or request.cookies.get("companion_session_id")
-    )
+    key = None
+    if has_request_context():
+        key = (
+            request.headers.get("X-Session-ID")
+            or request.args.get("session_id")
+            or request.cookies.get("companion_session_id")
+        )
+    if not key and isinstance(payload, dict):
+        key = payload.get("session_id")
     return _sanitize_scope_value(key, "default")
 
 
 def _resolve_profile_key(payload: dict | None = None) -> str:
-    key = (
-        request.headers.get("X-Profile-ID")
-        or request.args.get("profile_id")
-        or ((payload or {}).get("profile_id") if isinstance(payload, dict) else None)
-        or request.cookies.get("companion_profile_id")
-    )
+    key = None
+    if has_request_context():
+        key = (
+            request.headers.get("X-Profile-ID")
+            or request.args.get("profile_id")
+            or request.cookies.get("companion_profile_id")
+        )
+    if not key and isinstance(payload, dict):
+        key = payload.get("profile_id")
     return _sanitize_scope_value(key, "default")
 
 
 def _resolve_workspace_key(payload: dict | None = None) -> str:
-    key = (
-        request.headers.get("X-Workspace-ID")
-        or request.args.get("workspace_id")
-        or ((payload or {}).get("workspace_id") if isinstance(payload, dict) else None)
-        or request.cookies.get("companion_workspace_id")
-    )
+    key = None
+    if has_request_context():
+        key = (
+            request.headers.get("X-Workspace-ID")
+            or request.args.get("workspace_id")
+            or request.cookies.get("companion_workspace_id")
+        )
+    if not key and isinstance(payload, dict):
+        key = payload.get("workspace_id")
     return _sanitize_scope_value(key, "default")
 
 
