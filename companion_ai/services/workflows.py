@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import asyncio
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from companion_ai.orchestrator import Orchestrator
@@ -8,6 +9,7 @@ from companion_ai.orchestrator import Orchestrator
 logger = logging.getLogger(__name__)
 
 WORKFLOWS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'workflows')
+WORKFLOW_STEP_TIMEOUT_SECONDS = float(os.getenv("WORKFLOW_STEP_TIMEOUT_SECONDS", "15"))
 
 @dataclass
 class WorkflowStep:
@@ -124,10 +126,43 @@ class WorkflowManager:
             logger.info(f"Executing workflow {workflow_id} step {step.id}")
             if step.action == "prompt":
                 # Ensure the orchestrator acts on behalf of the workflow step
-                response, metadata = await orchestrator.process(
-                    user_message=step.text,
-                    context={"recent_conversation": accumulated_context}
-                )
+                try:
+                    response, metadata = await asyncio.wait_for(
+                        orchestrator.process(
+                            user_message=step.text,
+                            context={"recent_conversation": accumulated_context}
+                        ),
+                        timeout=WORKFLOW_STEP_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Workflow %s step %s timed out after %.1fs",
+                        workflow_id,
+                        step.id,
+                        WORKFLOW_STEP_TIMEOUT_SECONDS,
+                    )
+                    response = (
+                        "I couldn't complete this workflow step in time, "
+                        "but I'll keep moving and give you the best available summary."
+                    )
+                    metadata = {
+                        "error": "workflow_step_timeout",
+                        "step_id": step.id,
+                        "timeout_seconds": WORKFLOW_STEP_TIMEOUT_SECONDS,
+                    }
+                except Exception as exc:
+                    logger.warning(
+                        "Workflow %s step %s failed: %s",
+                        workflow_id,
+                        step.id,
+                        exc,
+                    )
+                    response = "I hit an issue during this step, but I'll continue with what I have."
+                    metadata = {
+                        "error": "workflow_step_error",
+                        "step_id": step.id,
+                        "detail": str(exc),
+                    }
                 
                 # Append to context so the next step is aware
                 accumulated_context += f"\nUser (Workflow): {step.text}\nAssistant: {response}\n"

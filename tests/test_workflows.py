@@ -85,6 +85,38 @@ def test_workflow_execution(temp_workflows_dir):
         assert "Response 1" in call_args[1].kwargs["context"]["recent_conversation"]
 
 
+def test_workflow_step_timeout_fallback(temp_workflows_dir, monkeypatch):
+    import asyncio
+
+    wf_file = temp_workflows_dir / "test_wf.json"
+    wf_file.write_text(json.dumps({
+        "name": "Test Timeout",
+        "description": "Desc",
+        "steps": [
+            {"id": "1", "action": "prompt", "text": "Step timeout", "output_target": "chat"}
+        ]
+    }))
+
+    manager = WorkflowManager()
+
+    async def _slow_process(*args, **kwargs):
+        await asyncio.sleep(0.05)
+        return ("late", {"meta": "late"})
+
+    monkeypatch.setattr("companion_ai.services.workflows.WORKFLOW_STEP_TIMEOUT_SECONDS", 0.01)
+
+    with patch("companion_ai.services.workflows.Orchestrator") as MockOrchestrator:
+        instance = MockOrchestrator.return_value
+        instance.process = _slow_process
+
+        results = asyncio.run(manager.execute_workflow("test_wf"))
+
+        assert len(results) == 1
+        assert "couldn't complete this workflow step in time" in results[0]["response"].lower()
+        assert results[0]["metadata"]["error"] == "workflow_step_timeout"
+        assert results[0]["output_target"] == "chat"
+
+
 def test_workflow_run_endpoint_executes_without_async_flask_extra(monkeypatch):
     app = create_app()
     client = app.test_client()

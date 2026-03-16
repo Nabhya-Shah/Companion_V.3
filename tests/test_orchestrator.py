@@ -393,6 +393,71 @@ class TestConversationManagerIntegration:
         assert logged['model'] == 'groq:meta-llama/llama-4-scout-17b-16e-instruct'
         assert logged['duration_ms'] >= 0
 
+    def test_smart_home_success_adds_action_feedback(self, monkeypatch):
+        from companion_ai.orchestrator import Orchestrator, OrchestratorDecision
+
+        class FakeLoop:
+            async def execute(self, task):
+                return LoopResult.success(
+                    data={"success": True, "room": "kitchen", "message": "Turned on kitchen lights"},
+                    operation="light_on",
+                    domain="smarthome",
+                )
+
+        orch = Orchestrator()
+        monkeypatch.setattr('companion_ai.orchestrator.get_loop', lambda name: FakeLoop())
+        synth = AsyncMock(return_value="Done.")
+        monkeypatch.setattr(orch, '_synthesize_response', synth)
+
+        decision = OrchestratorDecision(
+            action=OrchestratorAction.DELEGATE,
+            loop='tools',
+            task={'operation': 'light_on', 'room': 'kitchen'}
+        )
+
+        response, metadata = asyncio.run(orch._handle_delegation(decision, 'turn the kitchen lights on', {}))
+
+        assert response == "Done."
+        assert metadata['source'] == 'loop_tools'
+        assert metadata['action_feedback']['domain'] == 'smarthome'
+        assert metadata['action_feedback']['status'] == 'success'
+        assert 'kitchen' in metadata['action_feedback']['message'].lower()
+        assert synth.await_count == 1
+
+    def test_smart_home_failure_is_explicit_and_skips_fallback_generation(self, monkeypatch):
+        from companion_ai.orchestrator import Orchestrator, OrchestratorDecision
+
+        class FakeLoop:
+            async def execute(self, task):
+                return LoopResult.failure(
+                    "Unknown room: garage",
+                    operation="light_on",
+                    domain="smarthome",
+                )
+
+        orch = Orchestrator()
+        monkeypatch.setattr('companion_ai.orchestrator.get_loop', lambda name: FakeLoop())
+        synth = AsyncMock(return_value="should-not-run")
+        fallback = AsyncMock(return_value=("fallback", {"source": "120b_direct"}))
+        monkeypatch.setattr(orch, '_synthesize_response', synth)
+        monkeypatch.setattr(orch, '_generate_direct_response', fallback)
+
+        decision = OrchestratorDecision(
+            action=OrchestratorAction.DELEGATE,
+            loop='tools',
+            task={'operation': 'light_on', 'room': 'garage'}
+        )
+
+        response, metadata = asyncio.run(orch._handle_delegation(decision, 'turn on garage lights', {}))
+
+        assert "couldn't complete that lighting command" in response.lower()
+        assert 'unknown room' in response.lower()
+        assert metadata['source'] == 'loop_tools'
+        assert metadata['action_feedback']['status'] == 'error'
+        assert metadata['action_feedback']['domain'] == 'smarthome'
+        assert synth.await_count == 0
+        assert fallback.await_count == 0
+
 
 # ---------------------------------------------------------------------------
 # 7. Tool loop execution (unit, no LLM needed)

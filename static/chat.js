@@ -420,6 +420,17 @@ export async function sendMessage(retry = false) {
   let pendingText = '';
   let isTyping = false;
   let receivedMetadata = null;
+  let actionToastShown = false;
+
+  function maybeShowActionToast(metadata) {
+    if (actionToastShown || !metadata || !metadata.action_feedback || !window.showToast) return;
+    const feedback = metadata.action_feedback;
+    if (feedback.domain !== 'smarthome' || !feedback.message) return;
+
+    actionToastShown = true;
+    const toastType = feedback.status === 'success' ? 'success' : 'error';
+    showToast(feedback.message, toastType, toastType === 'error' ? 5000 : 3000);
+  }
 
   async function typeNextChar() {
     if (state.stopTyping || pendingText.length === 0) {
@@ -481,8 +492,14 @@ export async function sendMessage(retry = false) {
           try {
             const data = JSON.parse(line.slice(6));
 
-            if (data.meta) { receivedMetadata = data.meta; }
-            if (data.token_meta) { receivedMetadata = { ...receivedMetadata, ...data.token_meta }; }
+            if (data.meta) {
+              receivedMetadata = data.meta;
+              maybeShowActionToast(receivedMetadata);
+            }
+            if (data.token_meta) {
+              receivedMetadata = { ...receivedMetadata, ...data.token_meta };
+              maybeShowActionToast(receivedMetadata);
+            }
 
             // Plan events during streaming → forward to tasks module
             if (data.plan_event) {

@@ -404,13 +404,25 @@ and return the result. Be precise and concise."""
             if result.get("success"):
                 return LoopResult.success(
                     data=result,
-                    operation="light_on"
+                    operation="light_on",
+                    domain="smarthome",
+                    room=result.get("room") or room or "unknown",
                 )
             else:
-                return LoopResult.failure(result.get("error", "Failed to turn on lights"))
+                return LoopResult.failure(
+                    result.get("error", "Failed to turn on lights"),
+                    operation="light_on",
+                    domain="smarthome",
+                    room=room or "unknown",
+                )
         except Exception as e:
             logger.error(f"Light on failed: {e}")
-            return LoopResult.failure(str(e))
+            return LoopResult.failure(
+                str(e),
+                operation="light_on",
+                domain="smarthome",
+                room=room or "unknown",
+            )
     
     async def _light_off(self, room: str) -> LoopResult:
         """Turn off lights in specified room."""
@@ -421,13 +433,25 @@ and return the result. Be precise and concise."""
             if result.get("success"):
                 return LoopResult.success(
                     data=result,
-                    operation="light_off"
+                    operation="light_off",
+                    domain="smarthome",
+                    room=result.get("room") or room or "unknown",
                 )
             else:
-                return LoopResult.failure(result.get("error", "Failed to turn off lights"))
+                return LoopResult.failure(
+                    result.get("error", "Failed to turn off lights"),
+                    operation="light_off",
+                    domain="smarthome",
+                    room=room or "unknown",
+                )
         except Exception as e:
             logger.error(f"Light off failed: {e}")
-            return LoopResult.failure(str(e))
+            return LoopResult.failure(
+                str(e),
+                operation="light_off",
+                domain="smarthome",
+                room=room or "unknown",
+            )
     
     async def _light_dim(self, room: str, level: int) -> LoopResult:
         """Dim lights to specified level."""
@@ -438,13 +462,25 @@ and return the result. Be precise and concise."""
             if result.get("success"):
                 return LoopResult.success(
                     data=result,
-                    operation="light_dim"
+                    operation="light_dim",
+                    domain="smarthome",
+                    room=result.get("room") or room or "unknown",
                 )
             else:
-                return LoopResult.failure(result.get("error", "Failed to dim lights"))
+                return LoopResult.failure(
+                    result.get("error", "Failed to dim lights"),
+                    operation="light_dim",
+                    domain="smarthome",
+                    room=room or "unknown",
+                )
         except Exception as e:
             logger.error(f"Light dim failed: {e}")
-            return LoopResult.failure(str(e))
+            return LoopResult.failure(
+                str(e),
+                operation="light_dim",
+                domain="smarthome",
+                room=room or "unknown",
+            )
 
     # =========================================================================
     # File Reading Operations

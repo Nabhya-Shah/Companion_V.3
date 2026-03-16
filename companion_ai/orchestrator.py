@@ -118,8 +118,29 @@ class Orchestrator:
         groq_client = self._get_groq_client()
         if groq_client:
             return groq_client, core_config.PRIMARY_MODEL, False
-        
         return None, None, False
+
+    @staticmethod
+    def _is_smart_home_action(loop_name: str, operation: str) -> bool:
+        return loop_name == "tools" and operation in {"light_on", "light_off", "light_dim"}
+
+    @staticmethod
+    def _build_smart_home_feedback(operation: str, result: LoopResult) -> Dict[str, Any]:
+        data = result.data if isinstance(result.data, dict) else {}
+        success = result.status.value == "success"
+
+        if success:
+            message = data.get("message") or "Smart home command completed."
+        else:
+            message = f"Smart home command failed: {result.error or 'Unknown error'}"
+
+        return {
+            "domain": "smarthome",
+            "operation": operation,
+            "status": "success" if success else "error",
+            "message": message,
+            "prefer_toast": True,
+        }
     
     def _get_capabilities(self) -> str:
         """Get cached loop capabilities string."""
@@ -391,9 +412,23 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
                 output_tokens=0,
                 duration_ms=loop_duration_ms
             )
+
+            operation = result.metadata.get("operation") if isinstance(result.metadata, dict) else ""
+            metadata_payload = {
+                "source": f"loop_{loop_name}",
+                "loop_result": result.to_dict()
+            }
+
+            if self._is_smart_home_action(loop_name, operation):
+                metadata_payload["action_feedback"] = self._build_smart_home_feedback(operation, result)
             
             if result.status.value == "error":
                 logger.error(f"Loop {loop_name} failed: {result.error}")
+                if self._is_smart_home_action(loop_name, operation):
+                    return (
+                        f"I couldn't complete that lighting command: {result.error}",
+                        metadata_payload,
+                    )
                 return await self._generate_direct_response(user_message, context)
             
             # Synthesize response with loop result
@@ -403,11 +438,8 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
                 result.data, 
                 context
             )
-            
-            return response, {
-                "source": f"loop_{loop_name}",
-                "loop_result": result.to_dict()
-            }
+
+            return response, metadata_payload
             
         except Exception as e:
             logger.error(f"Loop execution failed: {e}")
