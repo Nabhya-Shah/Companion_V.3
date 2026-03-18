@@ -42,7 +42,7 @@ except ImportError:
             "required": ["description", "tool_name", "tool_args"]
         }
     }
-}, plugin='background')
+}, plugin='background', risk_tier='medium', category='automation')
 def tool_background_task(description: str, tool_name: str = "", tool_args: Dict = None) -> str:
     """Start a background task."""
     if tool_args is None:
@@ -74,7 +74,7 @@ def tool_background_task(description: str, tool_name: str = "", tool_args: Dict 
             "required": []
         }
     }
-})
+}, risk_tier='low', category='utility')
 def tool_time(_: str = "") -> str:
     """Get current time in ISO format."""
     return datetime.datetime.now().isoformat(timespec='seconds')
@@ -100,7 +100,7 @@ def tool_time(_: str = "") -> str:
             "required": ["query"]
         }
     }
-})
+}, risk_tier='low', category='memory')
 def tool_memory_search(query: str) -> str:
     """Search Mem0 vector database for relevant memories."""
     if not search_memories:
@@ -149,7 +149,7 @@ def tool_memory_search(query: str) -> str:
             "required": []
         }
     }
-})
+}, risk_tier='medium', category='vision')
 def tool_look_at_screen(prompt: str = "What is on the screen?") -> str:
     """Analyze the current screen content."""
     try:
@@ -180,7 +180,7 @@ def tool_look_at_screen(prompt: str = "What is on the screen?") -> str:
             "required": ["action"]
         }
     }
-})
+}, risk_tier='high', requires_approval=True, category='computer_control')
 def tool_use_computer(action: str, text: str = "") -> str:
     """Execute computer control actions."""
     if not core_config.ENABLE_COMPUTER_USE:

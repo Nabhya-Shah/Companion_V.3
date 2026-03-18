@@ -90,8 +90,8 @@ relevant memories from the provided list. Return the indices of relevant memorie
             return LoopResult.failure("No query provided")
 
         try:
-            from companion_ai.memory.knowledge import recall
-            results = recall(query, limit=10, user_id=user_id)
+            from companion_ai.memory.knowledge import recall_with_trace
+            results, retrieval_trace = recall_with_trace(query, limit=10, user_id=user_id)
             memories = [
                 {"source": r["source"], "content": r["text"], "priority": 1 if r["source"] == "brain" else 2}
                 for r in results
@@ -100,6 +100,7 @@ relevant memories from the provided list. Return the indices of relevant memorie
             return LoopResult.success(
                 data={"memories": memories, "count": len(memories), "query": query},
                 operation="search",
+                retrieval_trace=retrieval_trace,
             )
         except Exception as e:
             logger.error(f"Memory search failed: {e}")

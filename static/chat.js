@@ -25,6 +25,36 @@ const removeAttachmentBtn = document.getElementById('removeAttachment');
 // ============================================
 const STEP_ICONS = { decision: '🎯', vision: '👁️', result: '✅', error: '❌', tool: '🔧' };
 
+function renderRetrievalTimeline(stages) {
+  if (!Array.isArray(stages) || stages.length === 0) return '';
+  const byStage = new Map();
+  for (const evt of stages) {
+    const key = evt.stage || evt.name || 'unknown';
+    const prev = byStage.get(key);
+    if (!prev || evt.status === 'done' || evt.status === 'error') {
+      byStage.set(key, evt);
+    }
+  }
+
+  const rows = Array.from(byStage.values()).map((stage, idx) => {
+    const name = escapeHtml(stage.stage || stage.name || `stage_${idx + 1}`);
+    const ms = Number(stage.duration_ms || 0);
+    const status = escapeHtml(stage.status || 'done');
+    const meta = stage.meta || {};
+    const provider = escapeHtml(meta.provider || 'internal');
+    const details = meta.details || {};
+    const resultCount = details.ready_count ?? details.filtered_count ?? details.raw_count;
+    const detailsLabel = resultCount != null ? ` · ${Number(resultCount)} items` : '';
+    return `<div class="retrieval-stage-row">
+      <span class="retrieval-stage-name">${name}</span>
+      <span class="retrieval-stage-ms">${ms}ms</span>
+      <span class="retrieval-stage-status">${status}</span>
+      <span class="retrieval-stage-provider">${provider}${detailsLabel}</span>
+    </div>`;
+  }).join('');
+  return `<div class="retrieval-stage-list">${rows}</div>`;
+}
+
 function formatToolResult(data, operation) {
   if (!data) return null;
 
@@ -172,6 +202,18 @@ function renderPipeline(metadata) {
   // Synthesis
   const synthTokens = getTokensForStep('synthesis') || getTokensForStep('generate');
   steps.push({ type: 'tool', title: 'Final Synthesis', desc: 'Response generation', data: null, tokens: synthTokens, role: 'synthesis' });
+
+  // Retrieval diagnostics (Sprint 3)
+  if (Array.isArray(metadata.retrieval_stages) && metadata.retrieval_stages.length > 0) {
+    steps.push({
+      type: 'tool',
+      title: 'Retrieval Stages',
+      desc: `${metadata.retrieval_stages.length} stage events`,
+      data: renderRetrievalTimeline(metadata.retrieval_stages),
+      formatted: true,
+      role: 'retrieval'
+    });
+  }
 
   const html = steps.map(step => {
     const icon = STEP_ICONS[step.type] || '⚡';
@@ -499,6 +541,15 @@ export async function sendMessage(retry = false) {
             if (data.token_meta) {
               receivedMetadata = { ...receivedMetadata, ...data.token_meta };
               maybeShowActionToast(receivedMetadata);
+            }
+            if (data.retrieval_stage) {
+              const existing = (receivedMetadata && Array.isArray(receivedMetadata.retrieval_stages))
+                ? receivedMetadata.retrieval_stages
+                : [];
+              receivedMetadata = {
+                ...(receivedMetadata || {}),
+                retrieval_stages: [...existing, data.retrieval_stage]
+              };
             }
 
             // Plan events during streaming → forward to tasks module

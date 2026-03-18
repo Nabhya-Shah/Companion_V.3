@@ -39,6 +39,7 @@ and return the result. Be precise and concise."""
         return [
             "get_time", "calculate", "web_search", "wikipedia", "brain_read", "brain_list", "brain_search",
             "browser_goto", "browser_click", "browser_type", "browser_read", "browser_press",
+            "use_computer",
             "add_bookmark", "open_bookmark", "enable_browser_control",
             "light_on", "light_off", "light_dim",  # Loxone smart home
             "read_pdf", "read_document", "list_files", "find_file"  # File reading
@@ -101,6 +102,8 @@ and return the result. Be precise and concise."""
             return await self._browser_tool("browser_read", {"selector": task.get("selector", "")})
         elif operation == "browser_press":
             return await self._browser_tool("browser_press", {"key": task.get("key", "")})
+        elif operation == "use_computer":
+            return await self._computer_use(task.get("action", ""), task.get("text", ""))
         elif operation == "wikipedia":
             return await self._wikipedia(task.get("topic", ""))
         elif operation == "brain_read":
@@ -279,6 +282,24 @@ and return the result. Be precise and concise."""
         except Exception as e:
             logger.error(f"Browser tool {tool_name} failed: {e}")
             return LoopResult.failure(f"{tool_name} failed: {str(e)}")
+
+    async def _computer_use(self, action: str, text: str = "") -> LoopResult:
+        """Execute direct computer-control tool via function-call registry."""
+        try:
+            from companion_ai.tools import execute_function_call
+
+            result = execute_function_call(
+                "use_computer",
+                {"action": action, "text": text},
+            )
+
+            return LoopResult.success(
+                data={"result": result, "action": action, "text": text},
+                operation="use_computer",
+            )
+        except Exception as e:
+            logger.error(f"Computer tool failed: {e}")
+            return LoopResult.failure(f"use_computer failed: {str(e)}")
 
     async def _add_bookmark(self, name: str, url: str) -> LoopResult:
         """Save a bookmark to the brain."""

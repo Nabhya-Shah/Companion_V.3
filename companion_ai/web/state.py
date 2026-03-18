@@ -9,6 +9,7 @@ always mutate via ``state.X = val`` rather than ``from state import X``.
 """
 
 import os
+import json
 import uuid
 import logging
 import threading
@@ -39,6 +40,8 @@ _session_lock: threading.Lock = threading.Lock()
 _session_histories: Dict[str, List[dict]] = {}
 _session_managers: Dict[str, ConversationSession] = {}
 _scope_migration_done: set[str] = set()
+_permissions_lock: threading.Lock = threading.Lock()
+_permissions_cache: dict | None = None
 
 # ============================================================================
 # Security constants
@@ -52,6 +55,13 @@ _STRICT_TOKEN_PATH_PREFIXES = (
     "/api/brain/auto-write",
     "/api/tokens/reset",
 )
+
+_KNOWN_FEATURE_FLAGS = {
+    "tools_execute",
+    "memory_write",
+    "workflows_run",
+    "files_upload",
+}
 
 
 # ============================================================================
@@ -172,6 +182,99 @@ def _list_known_workspaces() -> list[str]:
     except Exception:
         pass
     return sorted(workspaces)
+
+
+def _normalize_workspace_permissions(raw: dict | None) -> dict:
+    defaults = dict(core_config.FEATURE_PERMISSION_DEFAULTS)
+    out = {"default": defaults}
+    if not isinstance(raw, dict):
+        return out
+
+    for workspace_id, perms in raw.items():
+        ws = _sanitize_scope_value(workspace_id, "default")
+        row = dict(defaults)
+        if isinstance(perms, dict):
+            for key in _KNOWN_FEATURE_FLAGS:
+                if key in perms:
+                    row[key] = bool(perms.get(key))
+        out[ws] = row
+    return out
+
+
+def _permissions_file_path() -> str:
+    root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    rel = core_config.WORKSPACE_PERMISSIONS_PATH
+    return rel if os.path.isabs(rel) else os.path.join(root, rel)
+
+
+def _load_permissions_cache() -> dict:
+    global _permissions_cache
+    with _permissions_lock:
+        if _permissions_cache is not None:
+            return _permissions_cache
+
+        path = _permissions_file_path()
+        raw = {}
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+            except Exception as e:
+                logger.warning(f"Failed to load workspace permissions ({path}): {e}")
+                raw = {}
+
+        _permissions_cache = _normalize_workspace_permissions(raw)
+        return _permissions_cache
+
+
+def get_workspace_permissions(workspace_id: str | None = None) -> dict:
+    ws = _sanitize_scope_value(workspace_id, "default") if workspace_id else _resolve_workspace_key()
+    cache = _load_permissions_cache()
+    defaults = dict(cache.get("default", core_config.FEATURE_PERMISSION_DEFAULTS))
+    row = cache.get(ws)
+    if not isinstance(row, dict):
+        return defaults
+    merged = dict(defaults)
+    merged.update({k: bool(v) for k, v in row.items() if k in _KNOWN_FEATURE_FLAGS})
+    return merged
+
+
+def set_workspace_permissions(workspace_id: str, updates: dict) -> dict:
+    ws = _sanitize_scope_value(workspace_id, "default")
+    if not isinstance(updates, dict):
+        raise ValueError("updates must be an object")
+
+    cache = _load_permissions_cache()
+    base = dict(cache.get(ws, cache.get("default", core_config.FEATURE_PERMISSION_DEFAULTS)))
+    for key in _KNOWN_FEATURE_FLAGS:
+        if key in updates:
+            base[key] = bool(updates.get(key))
+
+    with _permissions_lock:
+        cache[ws] = base
+        path = _permissions_file_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=2, sort_keys=True)
+
+    return base
+
+
+def enforce_feature_permission(feature: str, payload: dict | None = None):
+    """Return Flask response when feature is blocked, else None."""
+    if feature not in _KNOWN_FEATURE_FLAGS:
+        return None
+
+    workspace_id = _resolve_workspace_key(payload)
+    perms = get_workspace_permissions(workspace_id)
+    if perms.get(feature, False):
+        return None
+
+    return jsonify({
+        "error": f"Forbidden: feature '{feature}' is disabled for this workspace",
+        "workspace_id": workspace_id,
+        "feature": feature,
+    }), 403
 
 
 def _parse_interval_minutes(data: dict) -> int:

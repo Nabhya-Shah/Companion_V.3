@@ -115,6 +115,8 @@ def chat_streaming():
                         yield f"data: {json.dumps({'meta': chunk['data']})}\n\n"
                     elif isinstance(chunk, dict) and chunk.get('type') == 'token_meta':
                         yield f"data: {json.dumps({'token_meta': chunk['data']})}\n\n"
+                    elif isinstance(chunk, dict) and chunk.get('type') == 'retrieval_stage':
+                        yield f"data: {json.dumps({'retrieval_stage': chunk['data']})}\n\n"
                     else:
                         chunk = _EMOTION_TAG_RE.sub('', chunk)
                         full_response += chunk

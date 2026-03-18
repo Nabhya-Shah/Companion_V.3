@@ -20,7 +20,7 @@ from companion_ai.tools.registry import tool
             "required": ["url"]
         }
     }
-})
+}, risk_tier='medium', category='browser')
 def tool_browser_goto(url: str) -> str:
     """Navigate browser to URL."""
     try:
@@ -50,7 +50,7 @@ def tool_browser_goto(url: str) -> str:
             "required": []
         }
     }
-})
+}, risk_tier='medium', category='browser')
 def tool_browser_click(selector: str = "", text: str = None) -> str:
     """Click element by selector or text."""
     try:
@@ -80,7 +80,7 @@ def tool_browser_click(selector: str = "", text: str = None) -> str:
             "required": ["selector", "text"]
         }
     }
-})
+}, risk_tier='medium', category='browser')
 def tool_browser_type(selector: str, text: str) -> str:
     """Type into input field."""
     try:
@@ -106,7 +106,7 @@ def tool_browser_type(selector: str, text: str) -> str:
             "required": []
         }
     }
-})
+}, risk_tier='low', category='browser')
 def tool_browser_read(selector: str = None) -> str:
     """Read text from page/element."""
     try:
@@ -132,7 +132,7 @@ def tool_browser_read(selector: str = None) -> str:
             "required": ["key"]
         }
     }
-})
+}, risk_tier='medium', category='browser')
 def tool_browser_press(key: str) -> str:
     """Press keyboard key in browser."""
     try:

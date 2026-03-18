@@ -169,6 +169,9 @@ def _save_uploaded_file(file, analyze_images: bool = True):
 @files_bp.route('/api/upload', methods=['POST'])
 def upload_file():
     """Upload a file and optionally analyze it with vision."""
+    blocked = state.enforce_feature_permission('files_upload')
+    if blocked:
+        return blocked
     if 'file' not in request.files:
         return jsonify({'success': False, 'error': 'No file provided'}), 400
     payload, err, status = _save_uploaded_file(request.files['file'], analyze_images=True)
@@ -180,6 +183,9 @@ def upload_file():
 @files_bp.route('/api/upload/batch', methods=['POST'])
 def upload_files_batch():
     """Upload multiple files in one request."""
+    blocked = state.enforce_feature_permission('files_upload')
+    if blocked:
+        return blocked
     files = request.files.getlist('files')
     if not files and 'file' in request.files:
         files = [request.files['file']]
@@ -391,6 +397,9 @@ def _save_brain_file(file, target_dir: str, subfolder: str, index):
 @files_bp.route('/api/brain/upload', methods=['POST'])
 def brain_upload():
     """Upload a file to the brain folder and index it."""
+    blocked = state.enforce_feature_permission('files_upload')
+    if blocked:
+        return blocked
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
 
@@ -429,6 +438,9 @@ def brain_upload():
 @files_bp.route('/api/brain/upload/batch', methods=['POST'])
 def brain_upload_batch():
     """Upload and index multiple files for the brain workspace."""
+    blocked = state.enforce_feature_permission('files_upload')
+    if blocked:
+        return blocked
     files = request.files.getlist('files')
     if not files and 'file' in request.files:
         files = [request.files['file']]
@@ -574,6 +586,9 @@ def brain_summarize_text():
 @files_bp.route('/api/brain/file', methods=['DELETE'])
 def brain_file_delete():
     """Delete one brain file and its indexed chunks."""
+    blocked = state.enforce_feature_permission('files_upload')
+    if blocked:
+        return blocked
     data = request.get_json(silent=True) or {}
     rel = data.get('path')
     if not rel:
@@ -600,6 +615,9 @@ def brain_file_delete():
 @files_bp.route('/api/brain/reindex', methods=['POST'])
 def brain_reindex():
     """Trigger full reindex of brain folder."""
+    blocked = state.enforce_feature_permission('files_upload')
+    if blocked:
+        return blocked
     try:
         os.environ['BRAIN_DIR'] = _brain_dir_for_workspace()
         from companion_ai.brain_index import get_brain_index

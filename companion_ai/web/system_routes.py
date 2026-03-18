@@ -546,6 +546,37 @@ def config_info():
     })
 
 
+@system_bp.route('/api/permissions', methods=['GET', 'POST'])
+def workspace_permissions():
+    """Read or update workspace feature permissions."""
+    if request.method == 'GET':
+        workspace_id = state._resolve_workspace_key()
+        return jsonify({
+            'workspace_id': workspace_id,
+            'permissions': state.get_workspace_permissions(workspace_id),
+        })
+
+    token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
+    if not core_config.require_auth(token):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    workspace_id = state._resolve_workspace_key(data)
+    updates = data.get('permissions')
+    if not isinstance(updates, dict):
+        return jsonify({'error': 'permissions must be an object'}), 400
+
+    try:
+        updated = state.set_workspace_permissions(workspace_id, updates)
+    except ValueError as ve:
+        return jsonify({'error': str(ve)}), 400
+    except Exception as e:
+        logger.error(f"Permission update error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+    return jsonify({'workspace_id': workspace_id, 'permissions': updated})
+
+
 @system_bp.route('/api/models')
 def models_info():
     """Return structured model configuration metadata."""

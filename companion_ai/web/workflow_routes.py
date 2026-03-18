@@ -3,6 +3,7 @@ from datetime import datetime
 
 from flask import Blueprint, jsonify, request
 from companion_ai.services.workflows import get_manager
+from companion_ai.web import state
 import logging
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,10 @@ def get_workflow(workflow_id):
 @bp.route('/<workflow_id>/run', methods=['POST'])
 def run_workflow(workflow_id):
     """Execute a workflow and return the results."""
+    blocked = state.enforce_feature_permission('workflows_run')
+    if blocked:
+        return blocked
+
     manager = get_manager()
     try:
         results = asyncio.run(manager.execute_workflow(workflow_id))
@@ -56,8 +61,6 @@ def run_workflow(workflow_id):
         chat_appended_count = 0
         if chat_updates:
             try:
-                from companion_ai.web import state
-
                 session_key, _, _, active_history, _ = state._get_active_session_state()
                 active_history.extend(chat_updates)
                 chat_appended_count = len(chat_updates)

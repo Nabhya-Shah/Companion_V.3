@@ -34,6 +34,7 @@ _FUNCTION_SCHEMAS: Dict[str, Dict[str, Any]] = {}
 # Plugin metadata
 _TOOL_PLUGIN: Dict[str, str] = {}
 _PLUGIN_TOOLS: Dict[str, set[str]] = {}
+_TOOL_METADATA: Dict[str, Dict[str, Any]] = {}
 _EXEC_CONTEXT = threading.local()
 
 _PLUGIN_MANIFEST_HINTS: Dict[str, Dict[str, str]] = {
@@ -63,15 +64,20 @@ _APPROVAL_REQUIRED_TOOLS: set[str] = set()
 
 # Pending approval requests  {request_id: ApprovalRequest}
 _PENDING_APPROVALS: Dict[str, Any] = {}
-_APPROVAL_LOCK = threading.Lock()
+# Re-entrant lock is required because resolve_approval() can call helpers
+# that also touch approval state and acquire the same lock.
+_APPROVAL_LOCK = threading.RLock()
 _APPROVAL_EVENTS: Dict[str, threading.Event] = {}
+_APPROVAL_TOKENS: Dict[str, Dict[str, Any]] = {}
+
+_VALID_RISK_TIERS = {'low', 'medium', 'high'}
 
 # ---------------------------------------------------------------------------
 # @tool decorator
 # ---------------------------------------------------------------------------
 
 def tool(name: str, schema: Dict[str, Any] | None = None, plugin: str = 'core',
-         requires_approval: bool = False):
+         requires_approval: bool = False, risk_tier: str = 'low', category: str | None = None):
     """Decorator to register both legacy and modern function-calling tools.
 
     Args:
@@ -83,12 +89,24 @@ def tool(name: str, schema: Dict[str, Any] | None = None, plugin: str = 'core',
     def wrap(fn: ToolFn):
         _TOOLS[name] = fn
         normalized_plugin = (plugin or 'core').strip() or 'core'
+        normalized_risk = str(risk_tier or 'low').strip().lower()
+        if normalized_risk not in _VALID_RISK_TIERS:
+            normalized_risk = 'medium'
+        normalized_category = (category or normalized_plugin).strip() or normalized_plugin
         _TOOL_PLUGIN[name] = normalized_plugin
         _PLUGIN_TOOLS.setdefault(normalized_plugin, set()).add(name)
         if schema:
             _FUNCTION_SCHEMAS[name] = schema
-        if requires_approval:
+        enforced_approval = bool(requires_approval or normalized_risk == 'high')
+        if enforced_approval:
             _APPROVAL_REQUIRED_TOOLS.add(name)
+        _TOOL_METADATA[name] = {
+            'name': name,
+            'plugin': normalized_plugin,
+            'category': normalized_category,
+            'risk_tier': normalized_risk,
+            'requires_approval': enforced_approval,
+        }
         return fn
     return wrap
 
@@ -96,11 +114,15 @@ def tool(name: str, schema: Dict[str, Any] | None = None, plugin: str = 'core',
 def mark_tool_requires_approval(name: str) -> None:
     """Programmatically flag a tool as requiring approval."""
     _APPROVAL_REQUIRED_TOOLS.add(name)
+    if name in _TOOL_METADATA:
+        _TOOL_METADATA[name]['requires_approval'] = True
 
 
 def unmark_tool_requires_approval(name: str) -> None:
     """Remove the approval requirement from a tool."""
     _APPROVAL_REQUIRED_TOOLS.discard(name)
+    if name in _TOOL_METADATA:
+        _TOOL_METADATA[name]['requires_approval'] = False
 
 
 def tool_requires_approval(name: str) -> bool:
@@ -111,6 +133,49 @@ def tool_requires_approval(name: str) -> bool:
 def list_approval_required_tools() -> list[str]:
     """List all tools that require approval."""
     return sorted(_APPROVAL_REQUIRED_TOOLS)
+
+
+def set_approval_required_tools(tool_names: list[str]) -> list[str]:
+    """Replace approval-required set with provided names (unknown tools ignored)."""
+    _APPROVAL_REQUIRED_TOOLS.clear()
+    for name in (tool_names or []):
+        if name in _TOOLS:
+            _APPROVAL_REQUIRED_TOOLS.add(name)
+
+    for name, meta in _TOOL_METADATA.items():
+        meta['requires_approval'] = name in _APPROVAL_REQUIRED_TOOLS
+
+    return list_approval_required_tools()
+
+
+def get_tool_runtime(name: str) -> dict:
+    """Return runtime metadata for one tool."""
+    if name in _TOOL_METADATA:
+        return dict(_TOOL_METADATA[name])
+    if name in _TOOLS:
+        plugin = _TOOL_PLUGIN.get(name, 'core')
+        return {
+            'name': name,
+            'plugin': plugin,
+            'category': plugin,
+            'risk_tier': 'low',
+            'requires_approval': name in _APPROVAL_REQUIRED_TOOLS,
+        }
+    return {
+        'name': name,
+        'plugin': 'unknown',
+        'category': 'unknown',
+        'risk_tier': 'low',
+        'requires_approval': False,
+    }
+
+
+def list_tool_runtime() -> list[dict]:
+    """List runtime metadata for all tools."""
+    rows = []
+    for name in sorted(_TOOLS.keys()):
+        rows.append(get_tool_runtime(name))
+    return rows
 
 # ---------------------------------------------------------------------------
 # Plugin system
@@ -160,10 +225,14 @@ def get_plugin_catalog() -> list[dict]:
             description = ''
             if isinstance(fn_data, dict):
                 description = str(fn_data.get('description') or '').strip()
+            runtime_meta = get_tool_runtime(tool_name)
             tool_entries.append({
                 'name': tool_name,
                 'description': description,
                 'sandbox_blocked_in_restricted': tool_name in _SANDBOX_BLOCKED_TOOLS,
+                'risk_tier': runtime_meta.get('risk_tier', 'low'),
+                'requires_approval': runtime_meta.get('requires_approval', False),
+                'category': runtime_meta.get('category', plugin_name),
             })
 
         catalog.append({
@@ -361,12 +430,32 @@ def _blocked_tool_message(name: str) -> str:
     core_metrics.record_tool(name, blocked=True, success=False, decision_type=decision_type)
     return decision.get('message') or f"Tool '{name}' blocked by safety allowlist policy"
 
+
+def _approval_timeout_seconds() -> float:
+    """Return approval wait timeout, with a shorter default during pytest runs."""
+    raw = os.getenv('TOOL_APPROVAL_TIMEOUT_SECONDS', '300')
+    try:
+        timeout = float(raw)
+    except Exception:
+        timeout = 300.0
+
+    timeout = max(0.5, timeout)
+
+    # Prevent long-lived accidental waits from making tests appear hung.
+    if 'PYTEST_CURRENT_TEST' in os.environ and 'TOOL_APPROVAL_TIMEOUT_SECONDS' not in os.environ:
+        return min(timeout, 5.0)
+
+    return timeout
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
-def _wait_for_approval(name: str, args_summary: str, timeout: float = 300.0) -> bool:
+def _wait_for_approval(name: str, args_summary: str, timeout: float | None = None) -> bool:
     """Block until user approves/denies this tool call. Returns True if approved."""
+    if timeout is None:
+        timeout = _approval_timeout_seconds()
+
     import uuid as _uuid
     request_id = str(_uuid.uuid4())[:8]
     event = threading.Event()
@@ -396,6 +485,41 @@ def _wait_for_approval(name: str, args_summary: str, timeout: float = 300.0) -> 
     return req.get('status') == 'approved'
 
 
+def _issue_approval_token(tool_name: str, ttl_seconds: int = 180) -> str:
+    import uuid as _uuid
+
+    token = str(_uuid.uuid4())
+    expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=max(5, int(ttl_seconds)))
+    with _APPROVAL_LOCK:
+        _APPROVAL_TOKENS[token] = {
+            'tool': tool_name,
+            'expires_at': expires_at,
+            'used': False,
+        }
+    return token
+
+
+def consume_approval_token(token: str, tool_name: str) -> bool:
+    """Consume single-use approval token for a specific tool."""
+    if not token:
+        return False
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    with _APPROVAL_LOCK:
+        record = _APPROVAL_TOKENS.get(token)
+        if not record:
+            return False
+        if record.get('used'):
+            return False
+        if record.get('tool') != tool_name:
+            return False
+        if record.get('expires_at') is None or record.get('expires_at') <= now:
+            _APPROVAL_TOKENS.pop(token, None)
+            return False
+        record['used'] = True
+    return True
+
+
 def resolve_approval(request_id: str, approved: bool) -> dict | None:
     """Approve or deny a pending tool execution request."""
     with _APPROVAL_LOCK:
@@ -404,6 +528,8 @@ def resolve_approval(request_id: str, approved: bool) -> dict | None:
         if not req or not event:
             return None
         req['status'] = 'approved' if approved else 'denied'
+        if approved:
+            req['approval_token'] = _issue_approval_token(req.get('tool', ''))
     event.set()
     return req
 
@@ -450,9 +576,16 @@ def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
     if not _is_tool_allowed(function_name):
         return _blocked_tool_message(function_name)
     if function_name in _APPROVAL_REQUIRED_TOOLS:
-        summary = json.dumps(arguments, default=str)[:200]
-        if not _wait_for_approval(function_name, summary):
-            return f"Tool '{function_name}' was denied or timed out waiting for approval."
+        approval_token = ''
+        if isinstance(arguments, dict):
+            approval_token = str(arguments.get('approval_token') or '').strip()
+
+        if approval_token and consume_approval_token(approval_token, function_name):
+            pass
+        else:
+            summary = json.dumps(arguments, default=str)[:200]
+            if not _wait_for_approval(function_name, summary):
+                return f"Tool '{function_name}' was denied or timed out waiting for approval."
 
     # Handle different function signatures
     if function_name == 'get_current_time':

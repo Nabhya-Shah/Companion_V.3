@@ -11,6 +11,7 @@ from companion_ai.memory.sqlite_backend import search_memory
 from companion_ai.tools import (
     run_tool,
     list_tools,
+    list_tool_runtime,
     list_plugins,
     get_plugin_catalog,
     get_plugin_policy_state,
@@ -18,6 +19,7 @@ from companion_ai.tools import (
     get_pending_approvals,
     resolve_approval,
     list_approval_required_tools,
+    set_approval_required_tools,
     mark_tool_requires_approval,
     unmark_tool_requires_approval,
 )
@@ -31,6 +33,11 @@ tools_bp = Blueprint('tools', __name__)
 @tools_bp.route('/api/tools')
 def tools():
     return jsonify({'tools': list_tools()})
+
+
+@tools_bp.route('/api/tools/catalog')
+def tools_catalog():
+    return jsonify({'tools': list_tool_runtime()})
 
 
 @tools_bp.route('/api/plugins')
@@ -116,6 +123,9 @@ def api_context_switch():
 @tools_bp.route('/api/search')
 def search():
     try:
+        blocked = state.enforce_feature_permission('tools_execute')
+        if blocked:
+            return blocked
         q = request.args.get('q', '').strip()
         if not q:
             return jsonify({'query': q, 'memory_hits': [], 'web_snippet': None})
@@ -157,7 +167,12 @@ def resolve_approval_endpoint(request_id):
     if result is None:
         return jsonify({'error': 'Approval request not found or already resolved'}), 404
 
-    return jsonify({'status': result.get('status'), 'tool': result.get('tool'), 'id': request_id})
+    return jsonify({
+        'status': result.get('status'),
+        'tool': result.get('tool'),
+        'id': request_id,
+        'approval_token': result.get('approval_token'),
+    })
 
 
 @tools_bp.route('/api/approvals/config', methods=['GET', 'POST'])
@@ -181,9 +196,6 @@ def approval_config():
             unmark_tool_requires_approval(t)
     else:
         # Full replace
-        from companion_ai.tools.registry import _APPROVAL_REQUIRED_TOOLS
-        _APPROVAL_REQUIRED_TOOLS.clear()
-        for t in tools_list:
-            mark_tool_requires_approval(t)
+        set_approval_required_tools(tools_list)
 
     return jsonify({'requires_approval': list_approval_required_tools()})

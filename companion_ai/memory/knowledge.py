@@ -17,9 +17,168 @@ orchestrator, conversation_manager, and memory_loop.
 """
 
 import logging
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def _append_trace_stage(trace: dict[str, Any] | None, stage: str, started_at: float, **details) -> None:
+    """Append a completed stage event to retrieval trace."""
+    if not trace:
+        return
+    duration_ms = int((time.perf_counter() - started_at) * 1000)
+    trace.setdefault("stages", []).append({
+        "name": stage,
+        "status": "ok",
+        "duration_ms": duration_ms,
+        "details": details,
+    })
+
+
+def _recall_impl(
+    query: str,
+    *,
+    limit: int,
+    user_id: str | None,
+    include_brain: bool,
+    include_mem0: bool,
+    include_sqlite: bool,
+    min_score: float,
+    trace: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Shared recall implementation with optional trace capture."""
+    from companion_ai.core import config as core_config
+
+    effective_user_id = user_id or core_config.MEM0_USER_ID
+    raw_results: list[dict[str, Any]] = []
+
+    query_expand_started = time.perf_counter()
+    query_tokens = [token for token in query.lower().split() if token.strip()]
+    expanded_terms = query_tokens[:5]
+    _append_trace_stage(
+        trace,
+        "query_expand",
+        query_expand_started,
+        query_tokens=len(query_tokens),
+        expanded_terms=expanded_terms,
+        provider="internal",
+    )
+
+    retrieve_started = time.perf_counter()
+    backend_counts = {"mem0": 0, "sqlite": 0, "brain": 0}
+    backend_ms = {"mem0": 0, "sqlite": 0, "brain": 0}
+
+    # --- Mem0 vector search ---
+    if include_mem0 and core_config.USE_MEM0:
+        started = time.perf_counter()
+        try:
+            from companion_ai.memory.mem0_backend import search_memories
+            mem0_hits = search_memories(query, user_id=effective_user_id, limit=limit)
+            for m in mem0_hits:
+                text = m.get("memory", m.get("text", ""))
+                if not text:
+                    continue
+                score = float(m.get("score", 0.5))
+                raw_results.append({
+                    "text": text,
+                    "score": score,
+                    "source": "mem0",
+                    "id": m.get("id"),
+                    "surfacing_reason": "Vector semantic match",
+                    "score_breakdown": {"vector_score": score}
+                })
+            backend_counts["mem0"] = len(mem0_hits)
+        except Exception as e:
+            logger.warning(f"recall Mem0 failed: {e}")
+        finally:
+            backend_ms["mem0"] = int((time.perf_counter() - started) * 1000)
+
+    # --- SQLite profile facts + summaries + insights ---
+    if include_sqlite:
+        started = time.perf_counter()
+        try:
+            from companion_ai.memory.sqlite_backend import search_memory
+            sqlite_hits = search_memory(query, limit=limit)
+            for hit in sqlite_hits:
+                raw_results.append({
+                    "text": hit["text"],
+                    "score": float(hit.get("score", 0.3)),
+                    "source": hit.get("type", "profile"),
+                    "surfacing_reason": hit.get("surfacing_reason", "SQLite keyword match"),
+                    "score_breakdown": hit.get("score_breakdown", {})
+                })
+            backend_counts["sqlite"] = len(sqlite_hits)
+        except Exception as e:
+            logger.warning(f"recall SQLite failed: {e}")
+        finally:
+            backend_ms["sqlite"] = int((time.perf_counter() - started) * 1000)
+
+    # --- Brain index (document chunks) ---
+    if include_brain:
+        started = time.perf_counter()
+        try:
+            from companion_ai.brain_index import get_brain_index
+            index = get_brain_index()
+            brain_hits = index.search(query, limit=limit)
+            for hit in brain_hits:
+                score = float(hit.get("score", 0.0))
+                if score < 0.35:
+                    continue  # below relevance floor
+                raw_results.append({
+                    "text": hit["text"],
+                    "score": score,
+                    "source": "brain",
+                    "file": hit.get("file"),
+                    "surfacing_reason": "Document content match",
+                    "score_breakdown": {"bm25_score": score}
+                })
+            backend_counts["brain"] = len(brain_hits)
+        except Exception as e:
+            logger.warning(f"recall BrainIndex failed: {e}")
+        finally:
+            backend_ms["brain"] = int((time.perf_counter() - started) * 1000)
+
+    _append_trace_stage(
+        trace,
+        "retrieve",
+        retrieve_started,
+        raw_count=len(raw_results),
+        backend_counts=backend_counts,
+        backend_ms=backend_ms,
+        providers=[k for k in ("mem0", "sqlite", "brain") if backend_counts.get(k, 0) > 0],
+        provider="hybrid",
+    )
+
+    rerank_started = time.perf_counter()
+    deduped = _dedup_results(raw_results)
+    filtered = [r for r in deduped if r["score"] >= min_score] if min_score > 0 else deduped
+    filtered.sort(key=lambda r: r["score"], reverse=True)
+    capped = filtered[:limit]
+    _append_trace_stage(
+        trace,
+        "rerank",
+        rerank_started,
+        deduped_count=len(deduped),
+        filtered_count=len(filtered),
+        top_scores=[round(r["score"], 3) for r in capped[:3]],
+        provider="internal",
+    )
+
+    answer_started = time.perf_counter()
+    _append_trace_stage(
+        trace,
+        "answer",
+        answer_started,
+        ready_count=len(capped),
+        provider="internal",
+    )
+
+    if trace is not None:
+        trace["query"] = query
+        trace["result_count"] = len(capped)
+
+    return capped
 
 
 # ---------------------------------------------------------------------------
@@ -120,79 +279,41 @@ def recall(
 
     Results are sorted by ``score`` descending and capped at *limit*.
     """
-    from companion_ai.core import config as core_config
+    return _recall_impl(
+        query,
+        limit=limit,
+        user_id=user_id,
+        include_brain=include_brain,
+        include_mem0=include_mem0,
+        include_sqlite=include_sqlite,
+        min_score=min_score,
+        trace=None,
+    )
 
-    effective_user_id = user_id or core_config.MEM0_USER_ID
-    raw_results: list[dict[str, Any]] = []
 
-    # --- Mem0 vector search ---
-    if include_mem0 and core_config.USE_MEM0:
-        try:
-            from companion_ai.memory.mem0_backend import search_memories
-            mem0_hits = search_memories(query, user_id=effective_user_id, limit=limit)
-            for m in mem0_hits:
-                text = m.get("memory", m.get("text", ""))
-                if not text:
-                    continue
-                score = float(m.get("score", 0.5))
-                raw_results.append({
-                    "text": text,
-                    "score": score,
-                    "source": "mem0",
-                    "id": m.get("id"),
-                    "surfacing_reason": "Vector semantic match",
-                    "score_breakdown": {"vector_score": score}
-                })
-        except Exception as e:
-            logger.warning(f"recall Mem0 failed: {e}")
-
-    # --- SQLite profile facts + summaries + insights ---
-    if include_sqlite:
-        try:
-            from companion_ai.memory.sqlite_backend import search_memory
-            sqlite_hits = search_memory(query, limit=limit)
-            for hit in sqlite_hits:
-                raw_results.append({
-                    "text": hit["text"],
-                    "score": float(hit.get("score", 0.3)),
-                    "source": hit.get("type", "profile"),
-                    "surfacing_reason": hit.get("surfacing_reason", "SQLite keyword match"),
-                    "score_breakdown": hit.get("score_breakdown", {})
-                })
-        except Exception as e:
-            logger.warning(f"recall SQLite failed: {e}")
-
-    # --- Brain index (document chunks) ---
-    if include_brain:
-        try:
-            from companion_ai.brain_index import get_brain_index
-            index = get_brain_index()
-            brain_hits = index.search(query, limit=limit)
-            for hit in brain_hits:
-                score = float(hit.get("score", 0.0))
-                if score < 0.35:
-                    continue  # below relevance floor
-                raw_results.append({
-                    "text": hit["text"],
-                    "score": score,
-                    "source": "brain",
-                    "file": hit.get("file"),
-                    "surfacing_reason": "Document content match",
-                    "score_breakdown": {"bm25_score": score}
-                })
-        except Exception as e:
-            logger.warning(f"recall BrainIndex failed: {e}")
-
-    # --- Dedup by text similarity ---
-    deduped = _dedup_results(raw_results)
-
-    # --- Filter by min_score ---
-    if min_score > 0:
-        deduped = [r for r in deduped if r["score"] >= min_score]
-
-    # --- Sort and cap ---
-    deduped.sort(key=lambda r: r["score"], reverse=True)
-    return deduped[:limit]
+def recall_with_trace(
+    query: str,
+    *,
+    limit: int = 10,
+    user_id: str | None = None,
+    include_brain: bool = True,
+    include_mem0: bool = True,
+    include_sqlite: bool = True,
+    min_score: float = 0.0,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Recall memories and include retrieval-stage timing diagnostics."""
+    trace: dict[str, Any] = {"stages": []}
+    results = _recall_impl(
+        query,
+        limit=limit,
+        user_id=user_id,
+        include_brain=include_brain,
+        include_mem0=include_mem0,
+        include_sqlite=include_sqlite,
+        min_score=min_score,
+        trace=trace,
+    )
+    return results, trace
 
 
 def recall_context(query: str, *, limit: int = 8, user_id: str | None = None, **kwargs) -> str:

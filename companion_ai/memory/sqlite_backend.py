@@ -104,6 +104,22 @@ def init_db():
         )
     ''')
 
+    # Durable memory write status log (Phase 1)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS memory_write_log (
+            request_id TEXT PRIMARY KEY,
+            user_scope TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            status TEXT NOT NULL,
+            backend TEXT NOT NULL,
+            reason TEXT,
+            payload_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            committed_at TIMESTAMP
+        )
+    ''')
+
     # --- Lightweight schema upgrades (idempotent) ---
     # user_profile extra columns
     for alter in [
@@ -401,6 +417,106 @@ def rank_memories_by_quality(memories: list[dict], user_scope: str, query: str |
 
     ranked.sort(key=lambda x: x.get('score', 0), reverse=True)
     return ranked
+
+
+def log_memory_write_status(
+    request_id: str,
+    user_scope: str,
+    operation: str,
+    status: str,
+    backend: str,
+    reason: str | None = None,
+    payload: dict | None = None,
+    committed_at: str | None = None,
+) -> bool:
+    """Insert or update durable write status for one memory write envelope."""
+    if not request_id:
+        return False
+
+    payload_json = json.dumps(payload or {}, ensure_ascii=False)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute('''
+            INSERT INTO memory_write_log (
+                request_id, user_scope, operation, status, backend, reason,
+                payload_json, committed_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(request_id) DO UPDATE SET
+                user_scope = excluded.user_scope,
+                operation = excluded.operation,
+                status = excluded.status,
+                backend = excluded.backend,
+                reason = excluded.reason,
+                payload_json = excluded.payload_json,
+                committed_at = excluded.committed_at,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (
+            request_id,
+            user_scope or 'default',
+            operation or 'add',
+            status or 'failed',
+            backend or 'unknown',
+            reason,
+            payload_json,
+            committed_at,
+        ))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to log memory write status for {request_id}: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_memory_write_status(request_id: str) -> dict | None:
+    """Fetch one durable write status row."""
+    if not request_id:
+        return None
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute('''
+            SELECT request_id, user_scope, operation, status, backend, reason,
+                   payload_json, created_at, updated_at, committed_at
+            FROM memory_write_log
+            WHERE request_id = ?
+        ''', (request_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        out = dict(row)
+        try:
+            out['payload'] = json.loads(out.get('payload_json') or '{}')
+        except Exception:
+            out['payload'] = {}
+        return out
+    finally:
+        conn.close()
+
+
+def list_memory_write_status(limit: int = 100) -> list[dict]:
+    """List latest memory write statuses."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute('''
+            SELECT request_id, user_scope, operation, status, backend, reason,
+                   payload_json, created_at, updated_at, committed_at
+            FROM memory_write_log
+            ORDER BY updated_at DESC
+            LIMIT ?
+        ''', (limit,))
+        rows = [dict(r) for r in cur.fetchall()]
+        for row in rows:
+            try:
+                row['payload'] = json.loads(row.get('payload_json') or '{}')
+            except Exception:
+                row['payload'] = {}
+        return rows
+    finally:
+        conn.close()
 
 # Enhanced Profile functions
 def upsert_profile_fact(key: str, value: str, confidence: float = 1.0, source: str = 'conversation', evidence: str | None = None,
@@ -1131,6 +1247,7 @@ def clear_all_memory():
         cursor.execute("DELETE FROM ai_insights")
         cursor.execute("DELETE FROM memory_consolidation")
         cursor.execute("DELETE FROM memory_quality_ledger")
+        cursor.execute("DELETE FROM memory_write_log")
         
         conn.commit()
         print("[OK] All memory data cleared successfully")

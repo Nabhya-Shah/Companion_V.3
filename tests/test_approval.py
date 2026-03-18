@@ -54,7 +54,7 @@ def test_resolve_approval_approved():
     def background():
         result_holder['value'] = registry._wait_for_approval('get_current_time', 'no args', timeout=5.0)
 
-    t = threading.Thread(target=background)
+    t = threading.Thread(target=background, daemon=True)
     t.start()
 
     # Wait for the approval request to appear
@@ -88,7 +88,7 @@ def test_resolve_approval_denied():
     def background():
         result_holder['value'] = registry._wait_for_approval('get_current_time', 'no args', timeout=5.0)
 
-    t = threading.Thread(target=background)
+    t = threading.Thread(target=background, daemon=True)
     t.start()
 
     for _ in range(50):
@@ -114,7 +114,7 @@ def test_resolve_approval_timeout():
     def background():
         result_holder['value'] = registry._wait_for_approval('get_current_time', 'no args', timeout=0.3)
 
-    t = threading.Thread(target=background)
+    t = threading.Thread(target=background, daemon=True)
     t.start()
     t.join(timeout=2)
 
@@ -147,7 +147,7 @@ def test_run_tool_blocks_until_approved(monkeypatch):
     def background():
         result_holder['value'] = registry.run_tool('get_current_time', '')
 
-    t = threading.Thread(target=background)
+    t = threading.Thread(target=background, daemon=True)
     t.start()
 
     for _ in range(50):
@@ -175,7 +175,7 @@ def test_run_tool_denied_returns_message(monkeypatch):
     def background():
         result_holder['value'] = registry.run_tool('get_current_time', '')
 
-    t = threading.Thread(target=background)
+    t = threading.Thread(target=background, daemon=True)
     t.start()
 
     for _ in range(50):
@@ -190,6 +190,20 @@ def test_run_tool_denied_returns_message(monkeypatch):
     t.join(timeout=5)
     assert 'denied' in (result_holder['value'] or '').lower()
     _reset_approval_state()
+
+
+def test_approval_timeout_shortened_under_pytest(monkeypatch):
+    _reset_approval_state()
+    monkeypatch.delenv('TOOL_APPROVAL_TIMEOUT_SECONDS', raising=False)
+
+    # Under pytest, default timeout should be bounded to keep test runs responsive.
+    assert registry._approval_timeout_seconds() <= 5.0
+
+
+def test_approval_timeout_env_override(monkeypatch):
+    _reset_approval_state()
+    monkeypatch.setenv('TOOL_APPROVAL_TIMEOUT_SECONDS', '42')
+    assert registry._approval_timeout_seconds() == 42.0
 
 
 # -------------------------------------------------------------------

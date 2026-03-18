@@ -12,11 +12,14 @@ from __future__ import annotations
 import os
 import re
 import logging
+from datetime import datetime
+from uuid import uuid4
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 
 from companion_ai.core import config as core_config
 from companion_ai.memory import sqlite_backend as sqlite_memory
+from companion_ai.memory import write_queue
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +61,35 @@ def _get_mem0_groq_api_key() -> str | None:
 
 # Lazy import - only load Mem0 when actually used
 _memory_instance = None
+
+
+def _status_envelope(
+    request_id: str,
+    status: str,
+    backend: str,
+    reason: str | None = None,
+    committed_at: str | None = None,
+) -> dict:
+    return {
+        'request_id': request_id,
+        'status': status,
+        'backend': backend,
+        'reason': reason,
+        'committed_at': committed_at,
+    }
+
+
+def _maybe_existing_committed_status(request_id: str) -> dict | None:
+    row = sqlite_memory.get_memory_write_status(request_id)
+    if row and row.get('status') == 'accepted_committed':
+        return _status_envelope(
+            request_id=request_id,
+            status='accepted_committed',
+            backend=row.get('backend') or 'mem0',
+            reason='idempotent_replay',
+            committed_at=row.get('committed_at'),
+        )
+    return None
 
 
 @dataclass
@@ -175,7 +207,9 @@ def get_memory() -> Any:
 def add_memory(
     messages: List[Dict[str, str]],
     user_id: str = "default",
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None,
+    request_id: str | None = None,
+    allow_queue: bool = True,
 ) -> Dict[str, Any]:
     """Add memories from a conversation.
     
@@ -190,6 +224,22 @@ def add_memory(
     Returns:
         Result from Mem0
     """
+    request_id = request_id or str(uuid4())
+    existing = _maybe_existing_committed_status(request_id)
+    if existing:
+        return existing
+
+    envelope = {
+        'request_id': request_id,
+        'user_scope': user_id or 'default',
+        'operation': 'add',
+        'payload': {
+            'messages': messages,
+            'metadata': metadata or {},
+        },
+        'created_at': datetime.now().isoformat(),
+    }
+
     try:
         memory = get_memory()
 
@@ -238,7 +288,6 @@ def add_memory(
                             return {"skipped": True, "reason": f"Similar {category} fact exists", "existing": mem_text}
 
         # Add timestamp to metadata
-        from datetime import datetime
         if metadata is None:
             metadata = {}
         metadata['created_at'] = datetime.now().isoformat()
@@ -303,13 +352,53 @@ def add_memory(
         if restored:
             logger.warning(f"Guarded {len(restored)} unsafe DELETE/UPDATE events; restored originals: {restored}")
 
+        committed_at = datetime.now().isoformat()
+        sqlite_memory.log_memory_write_status(
+            request_id=request_id,
+            user_scope=user_id,
+            operation='add',
+            status='accepted_committed',
+            backend='mem0',
+            payload=envelope.get('payload'),
+            committed_at=committed_at,
+        )
+
         if isinstance(result, dict):
             result.setdefault("runtime", get_runtime_descriptor(use_ollama=USE_OLLAMA))
+            result['write_status'] = _status_envelope(
+                request_id=request_id,
+                status='accepted_committed',
+                backend='mem0',
+                committed_at=committed_at,
+            )
         logger.info(f"Added memories for user {user_id}: {result}")
         return result
     except Exception as e:
         logger.error(f"Failed to add memory: {e}")
-        return {"error": str(e)}
+        if allow_queue:
+            queued = write_queue.enqueue_write(envelope)
+            sqlite_memory.log_memory_write_status(
+                request_id=request_id,
+                user_scope=user_id,
+                operation='add',
+                status='accepted_queued',
+                backend='spool',
+                reason=str(e),
+                payload=envelope.get('payload'),
+            )
+            queued['reason'] = str(e)
+            return {'error': str(e), 'write_status': queued}
+
+        sqlite_memory.log_memory_write_status(
+            request_id=request_id,
+            user_scope=user_id,
+            operation='add',
+            status='failed',
+            backend='mem0',
+            reason=str(e),
+            payload=envelope.get('payload'),
+        )
+        return {'error': str(e), 'write_status': _status_envelope(request_id, 'failed', 'mem0', reason=str(e))}
 
 
 def search_memories(
@@ -490,14 +579,70 @@ def delete_memory(memory_id: str) -> bool:
     Returns:
         True if successful
     """
+    result = delete_memory_with_status(memory_id)
+    return result.get('status') in {'accepted_committed', 'accepted_queued'}
+
+
+def delete_memory_with_status(
+    memory_id: str,
+    user_id: str = "default",
+    request_id: str | None = None,
+    allow_queue: bool = True,
+) -> dict:
+    """Delete memory with explicit write status envelope."""
+    request_id = request_id or str(uuid4())
+    existing = _maybe_existing_committed_status(request_id)
+    if existing:
+        return existing
+
+    envelope = {
+        'request_id': request_id,
+        'user_scope': user_id or 'default',
+        'operation': 'delete',
+        'payload': {'memory_id': memory_id},
+        'created_at': datetime.now().isoformat(),
+    }
+
     try:
         memory = get_memory()
         memory.delete(memory_id)
+        committed_at = datetime.now().isoformat()
+        sqlite_memory.log_memory_write_status(
+            request_id=request_id,
+            user_scope=user_id,
+            operation='delete',
+            status='accepted_committed',
+            backend='mem0',
+            payload=envelope['payload'],
+            committed_at=committed_at,
+        )
         logger.info(f"Deleted memory: {memory_id}")
-        return True
+        return _status_envelope(request_id, 'accepted_committed', 'mem0', committed_at=committed_at)
     except Exception as e:
         logger.error(f"Failed to delete memory: {e}")
-        return False
+        if allow_queue:
+            queued = write_queue.enqueue_write(envelope)
+            sqlite_memory.log_memory_write_status(
+                request_id=request_id,
+                user_scope=user_id,
+                operation='delete',
+                status='accepted_queued',
+                backend='spool',
+                reason=str(e),
+                payload=envelope['payload'],
+            )
+            queued['reason'] = str(e)
+            return queued
+        sqlite_memory.log_memory_write_status(
+            request_id=request_id,
+            user_scope=user_id,
+            operation='delete',
+            status='failed',
+            backend='mem0',
+            reason=str(e),
+            payload=envelope['payload'],
+        )
+        return _status_envelope(request_id, 'failed', 'mem0', reason=str(e))
 
 
 def update_memory(memory_id: str, new_data: str) -> bool:
@@ -510,15 +655,129 @@ def update_memory(memory_id: str, new_data: str) -> bool:
     Returns:
         True if successful
     """
+    result = update_memory_with_status(memory_id, new_data)
+    return result.get('status') in {'accepted_committed', 'accepted_queued'}
+
+
+def update_memory_with_status(
+    memory_id: str,
+    new_data: str,
+    user_id: str = "default",
+    request_id: str | None = None,
+    allow_queue: bool = True,
+) -> dict:
+    """Update memory with explicit write status envelope."""
+    request_id = request_id or str(uuid4())
+    existing = _maybe_existing_committed_status(request_id)
+    if existing:
+        return existing
+
+    envelope = {
+        'request_id': request_id,
+        'user_scope': user_id or 'default',
+        'operation': 'update',
+        'payload': {'memory_id': memory_id, 'new_data': new_data},
+        'created_at': datetime.now().isoformat(),
+    }
+
     try:
         memory = get_memory()
-        # Mem0's update method takes memory_id and new data
         memory.update(memory_id, data=new_data)
+        committed_at = datetime.now().isoformat()
+        sqlite_memory.log_memory_write_status(
+            request_id=request_id,
+            user_scope=user_id,
+            operation='update',
+            status='accepted_committed',
+            backend='mem0',
+            payload=envelope['payload'],
+            committed_at=committed_at,
+        )
         logger.info(f"Updated memory {memory_id}: {new_data[:50]}...")
-        return True
+        return _status_envelope(request_id, 'accepted_committed', 'mem0', committed_at=committed_at)
     except Exception as e:
         logger.error(f"Failed to update memory: {e}")
-        return False
+        if allow_queue:
+            queued = write_queue.enqueue_write(envelope)
+            sqlite_memory.log_memory_write_status(
+                request_id=request_id,
+                user_scope=user_id,
+                operation='update',
+                status='accepted_queued',
+                backend='spool',
+                reason=str(e),
+                payload=envelope['payload'],
+            )
+            queued['reason'] = str(e)
+            return queued
+        sqlite_memory.log_memory_write_status(
+            request_id=request_id,
+            user_scope=user_id,
+            operation='update',
+            status='failed',
+            backend='mem0',
+            reason=str(e),
+            payload=envelope['payload'],
+        )
+        return _status_envelope(request_id, 'failed', 'mem0', reason=str(e))
+
+
+def replay_queued_writes(max_items: int | None = None) -> dict:
+    """Replay durable queued writes to Mem0 backends."""
+
+    def _handler(envelope: dict) -> dict:
+        req_id = envelope.get('request_id') or str(uuid4())
+        op = (envelope.get('operation') or 'add').strip().lower()
+        payload = envelope.get('payload') or {}
+        user_scope = envelope.get('user_scope') or 'default'
+
+        existing = _maybe_existing_committed_status(req_id)
+        if existing:
+            return existing
+
+        if op == 'add':
+            messages = payload.get('messages') or []
+            metadata = payload.get('metadata') or {}
+            result = add_memory(
+                messages=messages,
+                user_id=user_scope,
+                metadata=metadata,
+                request_id=req_id,
+                allow_queue=False,
+            )
+            if isinstance(result, dict):
+                return result.get('write_status') or _status_envelope(req_id, 'failed', 'mem0', reason='missing_write_status')
+            return _status_envelope(req_id, 'failed', 'mem0', reason='invalid_add_result')
+
+        if op == 'delete':
+            return delete_memory_with_status(
+                memory_id=payload.get('memory_id', ''),
+                user_id=user_scope,
+                request_id=req_id,
+                allow_queue=False,
+            )
+
+        if op == 'update':
+            return update_memory_with_status(
+                memory_id=payload.get('memory_id', ''),
+                new_data=payload.get('new_data', ''),
+                user_id=user_scope,
+                request_id=req_id,
+                allow_queue=False,
+            )
+
+        sqlite_memory.log_memory_write_status(
+            request_id=req_id,
+            user_scope=user_scope,
+            operation=op,
+            status='failed',
+            backend='replay',
+            reason='unknown_operation',
+            payload=payload,
+        )
+        return _status_envelope(req_id, 'failed', 'replay', reason='unknown_operation')
+
+    return write_queue.replay_writes(_handler, max_items=max_items)
 
 def clear_all_memories(user_id: str = "default") -> bool:
     """Clear all memories for a user.

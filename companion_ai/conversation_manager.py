@@ -34,6 +34,57 @@ else:
 
 logger = logging.getLogger(__name__)
 
+
+def _build_retrieval_stage_events(metadata: Dict) -> List[Dict]:
+    """Build retrieval stage lifecycle events from orchestrator metadata."""
+    if not isinstance(metadata, dict):
+        return []
+
+    loop_result = metadata.get("loop_result") or {}
+    loop_meta = loop_result.get("metadata") if isinstance(loop_result, dict) else {}
+    retrieval_trace = loop_meta.get("retrieval_trace") if isinstance(loop_meta, dict) else {}
+    stages = retrieval_trace.get("stages") if isinstance(retrieval_trace, dict) else None
+    if not isinstance(stages, list) or not stages:
+        return []
+
+    query = retrieval_trace.get("query")
+    default_provider = "internal"
+    events: List[Dict] = []
+    for idx, stage in enumerate(stages, start=1):
+        if not isinstance(stage, dict):
+            continue
+        stage_name = stage.get("name", "unknown")
+        stage_status = stage.get("status", "ok")
+        details = stage.get("details") or {}
+        provider = details.get("provider") or default_provider
+        lifecycle_status = "error" if stage_status == "error" else "done"
+
+        events.append({
+            "index": idx,
+            "stage": stage_name,
+            "name": stage_name,
+            "status": "start",
+            "duration_ms": 0,
+            "meta": {
+                "provider": provider,
+                "query": query,
+            },
+        })
+        events.append({
+            "index": idx,
+            "stage": stage_name,
+            "name": stage_name,
+            "status": lifecycle_status,
+            "stage_status": stage_status,
+            "duration_ms": int(stage.get("duration_ms", 0) or 0),
+            "meta": {
+                "provider": provider,
+                "query": query,
+                "details": details,
+            },
+        })
+    return events
+
 # Import knowledge graph (optional - graceful degradation if not available)
 try:
     from companion_ai.memory.knowledge_graph import add_conversation_to_graph, get_graph_stats
@@ -117,9 +168,11 @@ class ConversationSession:
                     {"role": "user", "content": user_message},
                     {"role": "assistant", "content": ai_response}
                 ]
-                mem0_add_memory(messages, user_id=effective_mem0_user_id)
-                logger.info("Mem0: Stored conversation exchange")
-                memory_saved = True
+                mem0_result = mem0_add_memory(messages, user_id=effective_mem0_user_id)
+                write_status = (mem0_result or {}).get('write_status', {}) if isinstance(mem0_result, dict) else {}
+                status = write_status.get('status')
+                memory_saved = status in {'accepted_committed', 'accepted_queued'}
+                logger.info(f"Mem0: Stored conversation exchange status={status or 'unknown'}")
             except Exception as e:
                 logger.warning(f"Mem0 storage failed: {e}")
         
@@ -171,6 +224,10 @@ class ConversationSession:
                 
                 # Yield metadata first
                 yield {"type": "meta", "data": final_metadata}
+
+                # Emit retrieval stages (query_expand/retrieve/rerank/answer) when available.
+                for stage_event in _build_retrieval_stage_events(final_metadata):
+                    yield {"type": "retrieval_stage", "data": stage_event}
                 
                 # Simulate streaming (orchestrator returns full text)
                 for word in response.split(' '):
@@ -231,8 +288,9 @@ class ConversationSession:
                         {"role": "user", "content": user_message},
                         {"role": "assistant", "content": full_response}
                     ]
-                    mem0_add_memory(messages, user_id=effective_mem0_user_id)
-                    logger.info("Mem0: Stored conversation exchange (async)")
+                    mem0_result = mem0_add_memory(messages, user_id=effective_mem0_user_id)
+                    write_status = (mem0_result or {}).get('write_status', {}) if isinstance(mem0_result, dict) else {}
+                    logger.info(f"Mem0: Stored conversation exchange (async) status={write_status.get('status', 'unknown')}")
                 except Exception as e:
                     logger.warning(f"Mem0 storage failed: {e}")
             

@@ -56,6 +56,33 @@ def test_generate_daily_if_due(tmp_path, monkeypatch):
     assert insights.unread_count() == 1
 
 
+def test_generate_daily_if_due_dedupes_existing_same_day_digest(tmp_path, monkeypatch):
+    _use_temp_insights_db(tmp_path, monkeypatch)
+
+    def fake_digest():
+        return (
+            "Daily Companion Brief",
+            "Top memory signals:",
+            {"facts": 1},
+        )
+
+    monkeypatch.setattr(insights, "build_digest_text", fake_digest)
+
+    pre = insights.create_insight(
+        "Daily Companion Brief",
+        "Top memory signals:",
+        category="daily_digest",
+        metadata={"facts": 1},
+        digest_day="2026-03-09",
+    )
+    assert pre is not None
+
+    generated = insights.generate_daily_insight_if_due(now=datetime(2026, 3, 9, 8, 0, 0), force=True)
+
+    assert generated is None
+    assert insights.unread_count() == 1
+
+
 def test_chat_history_injects_offline_insights_once(tmp_path, monkeypatch):
     _use_temp_insights_db(tmp_path, monkeypatch)
 

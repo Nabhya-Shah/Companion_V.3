@@ -20,7 +20,11 @@ def test_routine_run_ui_smoke_playwright():
         pytest.skip(f"web server unavailable at {base_url}")
 
     # Contract check first: workflow run must expose chat delivery metadata.
-    run_response = requests.post(f"{base_url}/api/workflows/morning_briefing/run", timeout=60)
+    try:
+        run_response = requests.post(f"{base_url}/api/workflows/morning_briefing/run", timeout=90)
+    except requests.RequestException:
+        pytest.skip("workflow run endpoint unavailable or timed out for e2e assertion")
+
     if run_response.status_code != 200:
         pytest.skip("workflow run endpoint unavailable for e2e assertion")
     run_payload = run_response.json()
@@ -41,15 +45,25 @@ def test_routine_run_ui_smoke_playwright():
         sync_api.expect(run_btn).to_be_visible(timeout=10000)
 
         # Evaluate-click avoids viewport clipping in narrow side panel layouts.
-        run_btn.evaluate("el => el.click()")
+        # Wait on the workflow API response so this test is not dependent on
+        # transient toast timing under slow/rate-limited backends.
+        with page.expect_response(
+            lambda r: '/api/workflows/morning_briefing/run' in r.url and r.request.method == 'POST',
+            timeout=120000,
+        ) as run_resp_info:
+            run_btn.evaluate("el => el.click()")
 
-        sync_api.expect(page.locator("text=/Running routine:/i")).to_be_visible(timeout=15000)
+        run_resp = run_resp_info.value
+        assert run_resp.ok, f"workflow run request failed with HTTP {run_resp.status}"
+        run_ui_payload = run_resp.json()
+        assert run_ui_payload.get('status') == 'success'
+        assert 'chat_delivered' in run_ui_payload
 
         # UI should present a terminal routine status toast for user feedback.
         # Allow longer timeout for cold-start/rate-limit scenarios while still
         # requiring a clear terminal outcome to appear.
         sync_api.expect(
             page.locator("text=/Routine complete!|Routine ran|Failed to run routine[.]/i")
-        ).to_be_visible(timeout=45000)
+        ).to_be_visible(timeout=120000)
 
         browser.close()

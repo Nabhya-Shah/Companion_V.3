@@ -186,6 +186,11 @@ class TestOrchestratorPrompt:
         assert "memory (save)" in prompt
         assert "memory (search)" in prompt
 
+    def test_prompt_has_personal_recall_memory_routing(self):
+        prompt = self.orch._build_orchestrator_prompt("test", {})
+        assert "what do you remember about me" in prompt.lower()
+        assert "what do you know about me" in prompt.lower()
+
     def test_prompt_has_vision_routing(self):
         prompt = self.orch._build_orchestrator_prompt("test", {})
         assert "vision" in prompt
@@ -194,6 +199,23 @@ class TestOrchestratorPrompt:
         prompt = self.orch._build_orchestrator_prompt("test", {})
         assert "light_on" in prompt
         assert "light_off" in prompt
+
+    def test_derive_use_computer_task_press_enter(self):
+        task = self.orch._derive_use_computer_task("Use computer control and press Enter once")
+        assert task is not None
+        assert task["operation"] == "use_computer"
+        assert task["action"] == "press"
+        assert task["text"] == "Enter"
+
+    def test_derive_memory_search_task_personal_recall(self):
+        task = self.orch._derive_memory_search_task("What do you remember about me and where I live?")
+        assert task is not None
+        assert task["operation"] == "search"
+        assert "remember" in task["query"].lower()
+
+    def test_derive_memory_search_task_ignores_instructional_remember(self):
+        task = self.orch._derive_memory_search_task("Remember to check the logs at 5pm")
+        assert task is None
 
 
 # ---------------------------------------------------------------------------
@@ -393,6 +415,26 @@ class TestConversationManagerIntegration:
         assert logged['model'] == 'groq:meta-llama/llama-4-scout-17b-16e-instruct'
         assert logged['duration_ms'] >= 0
 
+    def test_execute_decision_coerces_personal_recall_to_memory_loop(self, monkeypatch):
+        from companion_ai.orchestrator import Orchestrator, OrchestratorDecision
+
+        orch = Orchestrator()
+        delegated = AsyncMock(return_value=("From memory", {"source": "loop_memory"}))
+        monkeypatch.setattr(orch, '_handle_delegation', delegated)
+
+        decision = OrchestratorDecision(
+            action=OrchestratorAction.ANSWER,
+            content="I think...",
+        )
+
+        response, meta = asyncio.run(
+            orch._execute_decision(decision, "What do you remember about me?", {})
+        )
+
+        assert response == "From memory"
+        assert meta["source"] == "loop_memory"
+        assert delegated.await_count == 1
+
     def test_smart_home_success_adds_action_feedback(self, monkeypatch):
         from companion_ai.orchestrator import Orchestrator, OrchestratorDecision
 
@@ -490,6 +532,18 @@ class TestToolLoopExecution:
         result = asyncio.run(loop.execute({"operation": "nonexistent"}))
         assert result.status.value == "error"
 
+    def test_use_computer_operation_routes_through_registry(self, monkeypatch):
+        loop = get_loop("tools")
+
+        monkeypatch.setattr(
+            'companion_ai.tools.execute_function_call',
+            lambda name, arguments: f"ok:{name}:{arguments.get('action')}:{arguments.get('text')}"
+        )
+
+        result = asyncio.run(loop.execute({"operation": "use_computer", "action": "press", "text": "Enter"}))
+        assert result.status.value == "success"
+        assert "ok:use_computer:press:Enter" in result.data.get("result", "")
+
 
 # ---------------------------------------------------------------------------
 # 8. Config default
@@ -503,3 +557,81 @@ class TestOrchestratorConfig:
         from companion_ai.core import config as core_config
         # After P5-B, orchestrator should be ON by default
         assert core_config.USE_ORCHESTRATOR is True
+
+
+class TestOrchestratorToolChoiceFallback:
+    """Direct/synthesis calls should retry with fallback model on tool-choice mismatch."""
+
+    def test_generate_direct_response_retries_on_tool_choice_mismatch(self, monkeypatch):
+        from companion_ai.orchestrator import Orchestrator
+        from companion_ai.core import config as core_config
+
+        orch = Orchestrator()
+
+        err = Exception(
+            "Error code: 400 - {'error': {'message': 'Tool choice is none, but model called a tool'}}"
+        )
+        ok_response = MagicMock()
+        ok_response.choices = [MagicMock(message=MagicMock(content="Recovered response"))]
+
+        create_mock = MagicMock(side_effect=[err, ok_response])
+        fake_client = MagicMock()
+        fake_client.chat.completions.create = create_mock
+
+        monkeypatch.setattr(
+            orch,
+            "_get_client_and_model",
+            lambda: (fake_client, core_config.PRIMARY_MODEL, False),
+        )
+
+        monkeypatch.setattr(
+            "companion_ai.core.context_builder.build_system_prompt_with_meta",
+            lambda user_message, recent_conversation: {"system_prompt": "test prompt"},
+        )
+
+        response, meta = asyncio.run(orch._generate_direct_response("hello", {}))
+
+        assert response == "Recovered response"
+        assert meta["source"] == "groq_fallback"
+        assert create_mock.call_count == 2
+        assert create_mock.call_args_list[0].kwargs["model"] == core_config.PRIMARY_MODEL
+        assert create_mock.call_args_list[1].kwargs["model"] == core_config.MEMORY_PROCESSING_MODEL
+
+    def test_synthesize_response_retries_on_tool_choice_mismatch(self, monkeypatch):
+        from companion_ai.orchestrator import Orchestrator
+        from companion_ai.core import config as core_config
+
+        orch = Orchestrator()
+
+        err = Exception(
+            "Error code: 400 - {'error': {'message': 'Tool choice is none, but model called a tool'}}"
+        )
+        ok_response = MagicMock()
+        ok_response.choices = [MagicMock(message=MagicMock(content="Synthesized fallback text"))]
+        ok_response.usage = MagicMock(prompt_tokens=10, completion_tokens=8)
+
+        create_mock = MagicMock(side_effect=[err, ok_response])
+        fake_client = MagicMock()
+        fake_client.chat.completions.create = create_mock
+
+        monkeypatch.setattr(
+            orch,
+            "_get_client_and_model",
+            lambda: (fake_client, core_config.PRIMARY_MODEL, False),
+        )
+
+        monkeypatch.setattr("companion_ai.llm_interface.log_tokens_step", lambda **kwargs: None)
+
+        response = asyncio.run(
+            orch._synthesize_response(
+                user_message="summarize",
+                loop_name="memory",
+                loop_data={"foo": "bar"},
+                context={},
+            )
+        )
+
+        assert response == "Synthesized fallback text"
+        assert create_mock.call_count == 2
+        assert create_mock.call_args_list[0].kwargs["model"] == core_config.PRIMARY_MODEL
+        assert create_mock.call_args_list[1].kwargs["model"] == core_config.MEMORY_PROCESSING_MODEL

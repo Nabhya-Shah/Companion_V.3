@@ -15,6 +15,7 @@ The orchestrator:
 import logging
 import json
 import asyncio
+import re
 from enum import Enum
 from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass
@@ -121,6 +122,33 @@ class Orchestrator:
         return None, None, False
 
     @staticmethod
+    def _is_tool_choice_none_error(exc: Exception) -> bool:
+        """Detect provider error when model tries tool calls while tools are disabled."""
+        msg = str(exc).lower()
+        return "tool choice is none" in msg and "called a tool" in msg
+
+    def _chat_completion_with_fallback_model(self, client, model: str, **kwargs):
+        """Call chat completions and retry with fallback model on tool-choice mismatch."""
+        try:
+            response = client.chat.completions.create(model=model, **kwargs)
+            return response, model
+        except Exception as exc:
+            if not self._is_tool_choice_none_error(exc):
+                raise
+
+            fallback_model = core_config.MEMORY_PROCESSING_MODEL
+            if not fallback_model or fallback_model == model:
+                raise
+
+            logger.warning(
+                "Model %s attempted a tool call with tool_choice=none semantics; retrying with %s",
+                model,
+                fallback_model,
+            )
+            response = client.chat.completions.create(model=fallback_model, **kwargs)
+            return response, fallback_model
+
+    @staticmethod
     def _is_smart_home_action(loop_name: str, operation: str) -> bool:
         return loop_name == "tools" and operation in {"light_on", "light_off", "light_dim"}
 
@@ -178,6 +206,7 @@ Keep plans SHORT (2-4 steps max). Each step needs a brief description for the us
 - "What time?" / "What's today?" → tools (get_time)
 - "Calculate X" / "What's 2+2?" → tools (calculate)
 - "What's my name?" / "Remember about me" → memory (search)
+- Personal recall questions ("what do you remember about me", "what do you know about me", "where do I live", "who am I", "what is my ...") → memory (search)
 - "My name is X" / "I am called X" → memory (save) - ALWAYS route to memory!
 - "I live in X" / "I'm from X" → memory (save)
 - "I work at X" / "My job is X" → memory (save)
@@ -185,6 +214,7 @@ Keep plans SHORT (2-4 steps max). Each step needs a brief description for the us
 - "Save/Remember that X" → memory (save)
 - "Look at screen" / "What do you see?" → vision (describe)
 - "Go to website" / "Open bookmark" → tools (browser_goto/open_bookmark)
+- Direct computer-control commands ("press", "click", "type", "open", "launch", "scroll") → tools (use_computer)
 - "Turn on lights" / "Lights on" → tools (light_on, room: "all" or specific room)
 - "Turn off lights" / "Lights off" → tools (light_off, room: "all" or specific room)
 - "Dim lights to X%" → tools (light_dim, room: "...", level: X)
@@ -195,6 +225,9 @@ Keep plans SHORT (2-4 steps max). Each step needs a brief description for the us
 - "Search my documents for X" / "What do my notes say about X?" / "Find in brain" → tools (brain_search, query: "...")
 - Greetings (hi/hello) without personal info → answer directly
 - General questions → answer directly
+
+IMPORTANT: For actionable device-control requests, DO NOT answer with capability disclaimers.
+Delegate to tools/use_computer first; execution layer will return an honest error if unavailable.
 
 EXCEPTION: If the message contains "[Visual context" then DO NOT delegate to vision. The image was pre-analyzed. Respond based on the context:
 - If they ask you to SOLVE something (math, puzzle) → ATTEMPT to solve it with available info. Don't ask for clarification - try your best!
@@ -224,6 +257,83 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
         dynamic_part += recent_context if recent_context else "No prior context."
         
         return static_rules + dynamic_part
+
+    @staticmethod
+    def _is_explanatory_computer_question(msg: str) -> bool:
+        low = (msg or '').strip().lower()
+        return low.startswith('how ') or low.startswith('what ') or low.startswith('why ') or low.startswith('can you explain')
+
+    @classmethod
+    def _derive_use_computer_task(cls, user_message: str) -> Optional[Dict[str, Any]]:
+        """Derive a concrete tools-loop task for imperative computer-control requests."""
+        msg = (user_message or '').strip()
+        low = msg.lower()
+        if not msg or cls._is_explanatory_computer_question(low):
+            return None
+
+        if 'press enter' in low:
+            return {'operation': 'use_computer', 'action': 'press', 'text': 'Enter'}
+
+        press_match = re.search(r'\bpress\s+([a-z0-9+\-]+)\b', low)
+        if press_match:
+            key = press_match.group(1)
+            key = 'Enter' if key == 'enter' else key
+            return {'operation': 'use_computer', 'action': 'press', 'text': key}
+
+        launch_match = re.search(r'\b(?:open|launch)\s+([a-z0-9 _\-.]+)', low)
+        if launch_match:
+            return {
+                'operation': 'use_computer',
+                'action': 'launch',
+                'text': launch_match.group(1).strip()[:120],
+            }
+
+        if any(k in low for k in ['use computer', 'control my computer', 'computer control']):
+            return {'operation': 'use_computer', 'action': 'press', 'text': 'Enter'}
+
+        return None
+
+    @staticmethod
+    def _derive_memory_search_task(user_message: str) -> Optional[Dict[str, Any]]:
+        """Detect personal-recall intent and coerce to memory search when needed."""
+        msg = (user_message or '').strip()
+        if not msg:
+            return None
+
+        low = msg.lower()
+
+        # Common non-recall phrasing where "remember" is instructional, not autobiographical.
+        if low.startswith("remember to ") or low.startswith("remember this "):
+            return None
+
+        recall_cues = [
+            "what do you remember",
+            "do you remember",
+            "what do you know about me",
+            "what do you know about",
+            "tell me about me",
+            "what's my",
+            "what is my",
+            "who am i",
+            "where do i live",
+            "did i tell you",
+            "about me",
+            "my preferences",
+        ]
+
+        personal_refs = [" me", " my ", " i ", "i'", "i "]
+
+        cue_match = any(cue in low for cue in recall_cues)
+        personal_match = any(ref in f" {low} " for ref in personal_refs)
+
+        if cue_match and personal_match:
+            return {"operation": "search", "query": msg}
+
+        # Fallback: memory-intent questions that include explicit "my <fact>".
+        if "?" in low and ("remember" in low or "know" in low) and " my " in f" {low} ":
+            return {"operation": "search", "query": msg}
+
+        return None
     
     async def process(
         self, 
@@ -338,6 +448,26 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
         """Execute the orchestrator's decision."""
         
         if decision.action == OrchestratorAction.ANSWER:
+            forced_task = self._derive_use_computer_task(user_message)
+            if forced_task:
+                logger.info("Coercing actionable computer-control request to tools loop")
+                forced_decision = OrchestratorDecision(
+                    action=OrchestratorAction.DELEGATE,
+                    loop='tools',
+                    task=forced_task,
+                )
+                return await self._handle_delegation(forced_decision, user_message, context)
+
+            forced_memory_task = self._derive_memory_search_task(user_message)
+            if forced_memory_task:
+                logger.info("Coercing personal-recall request to memory search loop")
+                forced_decision = OrchestratorDecision(
+                    action=OrchestratorAction.DELEGATE,
+                    loop='memory',
+                    task=forced_memory_task,
+                )
+                return await self._handle_delegation(forced_decision, user_message, context)
+
             if decision.content:
                 return decision.content, {"source": "120b_direct"}
             else:
@@ -632,8 +762,9 @@ Do NOT mention "steps" or "plans" — just answer naturally."""
             result = build_system_prompt_with_meta(user_message, recent_conversation)
             system_prompt = result.get("system_prompt", "")
             
-            response = client.chat.completions.create(
-                model=model,
+            response, _used_model = self._chat_completion_with_fallback_model(
+                client,
+                model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
@@ -685,8 +816,9 @@ Don't mention "loops" or technical details. Be conversational."""
             pass
         
         try:
-            response = client.chat.completions.create(
-                model=model,
+            response, used_model = self._chat_completion_with_fallback_model(
+                client,
+                model,
                 messages=[
                     {"role": "system", "content": synthesis_prompt}
                 ],
@@ -701,13 +833,17 @@ Don't mention "loops" or technical details. Be conversational."""
             from companion_ai.llm_interface import log_tokens_step
             log_tokens_step(
                 step_name="synthesis",
-                model=f"{model_label}:{model}",
+                model=f"{model_label}:{used_model}",
                 input_tokens=response.usage.prompt_tokens if response.usage else 0,
                 output_tokens=response.usage.completion_tokens if response.usage else 0,
                 duration_ms=duration_ms
             )
             
-            logger.info(f"Synthesis via {model_label}: {response.usage.prompt_tokens}+{response.usage.completion_tokens if response.usage else 0} tokens in {duration_ms}ms")
+            logger.info(
+                f"Synthesis via {model_label}:{used_model}: "
+                f"{response.usage.prompt_tokens if response.usage else 0}+"
+                f"{response.usage.completion_tokens if response.usage else 0} tokens in {duration_ms}ms"
+            )
             return response.choices[0].message.content
             
         except Exception as e:

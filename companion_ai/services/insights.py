@@ -33,6 +33,7 @@ def init_db() -> None:
             title TEXT NOT NULL,
             body TEXT NOT NULL,
             category TEXT DEFAULT 'digest',
+            digest_day TEXT,
             status TEXT DEFAULT 'unread',
             metadata_json TEXT,
             delivered_live INTEGER DEFAULT 0,
@@ -47,6 +48,20 @@ def init_db() -> None:
             key TEXT PRIMARY KEY,
             value TEXT
         )
+        """
+    )
+
+    # Lightweight schema upgrade for existing DBs.
+    cols = [row[1] for row in cur.execute("PRAGMA table_info(insights)").fetchall()]
+    if "digest_day" not in cols:
+        cur.execute("ALTER TABLE insights ADD COLUMN digest_day TEXT")
+
+    # Ensure only one daily digest per day/category when digest_day is present.
+    cur.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_insights_daily_digest_unique
+        ON insights(category, digest_day)
+        WHERE digest_day IS NOT NULL
         """
     )
     conn.commit()
@@ -94,15 +109,27 @@ def _meta_set(key: str, value: str) -> None:
     conn.close()
 
 
-def create_insight(title: str, body: str, category: str = "digest", metadata: dict | None = None) -> dict[str, Any]:
+def create_insight(
+    title: str,
+    body: str,
+    category: str = "digest",
+    metadata: dict | None = None,
+    digest_day: str | None = None,
+) -> dict[str, Any]:
     conn = _get_db()
     cur = conn.cursor()
     cur.execute(
         """
-        INSERT INTO insights (title, body, category, status, metadata_json, delivered_live, delivered_chat)
-        VALUES (?, ?, ?, 'unread', ?, 0, 0)
+        INSERT INTO insights (title, body, category, digest_day, status, metadata_json, delivered_live, delivered_chat)
+        VALUES (?, ?, ?, ?, 'unread', ?, 0, 0)
         """,
-        (title.strip(), body.strip(), category.strip() or "digest", json.dumps(metadata or {})),
+        (
+            title.strip(),
+            body.strip(),
+            category.strip() or "digest",
+            digest_day,
+            json.dumps(metadata or {}),
+        ),
     )
     insight_id = cur.lastrowid
     conn.commit()
@@ -256,7 +283,17 @@ def generate_daily_insight_if_due(now: datetime | None = None, force: bool = Fal
         return None
 
     title, body, metadata = digest
-    return create_insight(title=title, body=body, category="daily_digest", metadata=metadata)
+    try:
+        return create_insight(
+            title=title,
+            body=body,
+            category="daily_digest",
+            metadata=metadata,
+            digest_day=today,
+        )
+    except sqlite3.IntegrityError:
+        # Another worker/request already created this day's digest.
+        return None
 
 
 init_db()

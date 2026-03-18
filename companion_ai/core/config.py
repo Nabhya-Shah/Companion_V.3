@@ -46,6 +46,20 @@ SERPER_API_KEY = os.getenv("SERPER_API_KEY")  # For custom web search if needed
 # Security
 API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN")  # Protects write endpoints
 
+# Workspace feature permissions (Sprint 4)
+WORKSPACE_PERMISSIONS_PATH = os.getenv("WORKSPACE_PERMISSIONS_PATH", os.path.join("data", "workspace_permissions.json"))
+DEFAULT_TOOLS_EXECUTE = os.getenv("DEFAULT_TOOLS_EXECUTE", "true").lower() == "true"
+DEFAULT_MEMORY_WRITE = os.getenv("DEFAULT_MEMORY_WRITE", "true").lower() == "true"
+DEFAULT_WORKFLOWS_RUN = os.getenv("DEFAULT_WORKFLOWS_RUN", "true").lower() == "true"
+DEFAULT_FILES_UPLOAD = os.getenv("DEFAULT_FILES_UPLOAD", "true").lower() == "true"
+
+FEATURE_PERMISSION_DEFAULTS = {
+    "tools_execute": DEFAULT_TOOLS_EXECUTE,
+    "memory_write": DEFAULT_MEMORY_WRITE,
+    "workflows_run": DEFAULT_WORKFLOWS_RUN,
+    "files_upload": DEFAULT_FILES_UPLOAD,
+}
+
 # Tool safety policy (Sprint B)
 # When TOOL_ALLOWLIST is set, only listed tool names can execute.
 # Use '*' to allow all tools.

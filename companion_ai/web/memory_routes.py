@@ -103,6 +103,9 @@ def pending_facts():
 @memory_bp.route('/api/pending_facts/<int:pid>/approve', methods=['POST'])
 def approve_fact(pid: int):
     try:
+        blocked = state.enforce_feature_permission('memory_write')
+        if blocked:
+            return blocked
         _, _, mem0_user_id, _, _ = state._get_active_session_state()
         token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
         if not core_config.require_auth(token):
@@ -120,6 +123,9 @@ def approve_fact(pid: int):
 @memory_bp.route('/api/pending_facts/<int:pid>/reject', methods=['POST'])
 def reject_fact(pid: int):
     try:
+        blocked = state.enforce_feature_permission('memory_write')
+        if blocked:
+            return blocked
         token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
         if not core_config.require_auth(token):
             return jsonify({'error': 'Unauthorized'}), 401
@@ -134,6 +140,9 @@ def reject_fact(pid: int):
 def bulk_pending_facts_action():
     """Approve or reject multiple pending facts in one request."""
     try:
+        blocked = state.enforce_feature_permission('memory_write')
+        if blocked:
+            return blocked
         token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
         if not core_config.require_auth(token):
             return jsonify({'error': 'Unauthorized'}), 401
@@ -181,6 +190,9 @@ def bulk_pending_facts_action():
 @memory_bp.route('/api/memory/clear', methods=['POST'])
 def clear_memory():
     try:
+        blocked = state.enforce_feature_permission('memory_write')
+        if blocked:
+            return blocked
         data = request.get_json(silent=True) or {}
         _, _, mem0_user_id, active_history, active_session = state._get_active_session_state(data)
         token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
@@ -225,6 +237,9 @@ def clear_memory():
 def delete_fact(key: str):
     local_logger = logging.getLogger(__name__)
     try:
+        blocked = state.enforce_feature_permission('memory_write')
+        if blocked:
+            return blocked
         _, _, mem0_user_id, _, _ = state._get_active_session_state()
         token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
         if not core_config.require_auth(token):
@@ -260,6 +275,9 @@ def update_fact(key: str):
     """Update a memory fact by key."""
     local_logger = logging.getLogger(__name__)
     try:
+        blocked = state.enforce_feature_permission('memory_write')
+        if blocked:
+            return blocked
         payload = request.get_json(silent=True) or {}
         _, _, mem0_user_id, _, _ = state._get_active_session_state(payload)
         token = request.headers.get('X-API-TOKEN') or payload.get('token') or request.cookies.get('api_token')
