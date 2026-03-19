@@ -172,8 +172,9 @@ class TestOrchestratorPrompt:
     def test_prompt_truncates_long_context(self):
         ctx = {"recent_conversation": "x" * 1000}
         prompt = self.orch._build_orchestrator_prompt("test", ctx)
-        # The dynamic part should be truncated to 500 chars
-        assert len(prompt) < 5000  # Static rules + 500 chars max context
+        # Recent context should be capped; full 1000-char input should not appear.
+        assert "x" * 1000 not in prompt
+        assert "x" * 500 in prompt
 
     def test_prompt_no_orpheus_when_tts_disabled(self):
         """Orpheus TTS tags should NOT appear in prompt when TTS is off."""
@@ -216,6 +217,40 @@ class TestOrchestratorPrompt:
     def test_derive_memory_search_task_ignores_instructional_remember(self):
         task = self.orch._derive_memory_search_task("Remember to check the logs at 5pm")
         assert task is None
+
+
+def test_orchestrator_remote_action_failure_surfaces_lifecycle_feedback(monkeypatch):
+    orch = Orchestrator()
+
+    class FakeLoop:
+        async def execute(self, _task):
+            return LoopResult.failure(
+                "Non-read actions require a valid approval token",
+                operation="remote_action_simulator",
+                domain="remote_action",
+                reason="approval_required",
+                envelope={
+                    "status": "rejected",
+                    "reason": "approval_required",
+                    "trace_id": "ra_test",
+                    "lifecycle": [{"state": "requested", "ts": "2026-01-01T00:00:00"}],
+                },
+            )
+
+    monkeypatch.setattr("companion_ai.orchestrator.get_loop", lambda _name: FakeLoop())
+
+    decision = OrchestratorDecision(
+        action=OrchestratorAction.DELEGATE,
+        loop="tools",
+        task={"operation": "remote_action_simulator", "capability": "notify", "action": "execute"},
+    )
+
+    response, metadata = asyncio.run(orch._handle_delegation(decision, "run action", {}))
+
+    assert "couldn't complete that remote action" in response.lower()
+    assert metadata["action_feedback"]["domain"] == "remote_action"
+    assert metadata["action_feedback"]["reason"] == "approval_required"
+    assert metadata["action_feedback"]["trace_id"] == "ra_test"
 
 
 # ---------------------------------------------------------------------------

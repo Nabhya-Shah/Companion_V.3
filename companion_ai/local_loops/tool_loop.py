@@ -40,6 +40,7 @@ and return the result. Be precise and concise."""
             "get_time", "calculate", "web_search", "wikipedia", "brain_read", "brain_list", "brain_search",
             "browser_goto", "browser_click", "browser_type", "browser_read", "browser_press",
             "use_computer",
+            "remote_action_simulator",
             "add_bookmark", "open_bookmark", "enable_browser_control",
             "light_on", "light_off", "light_dim",  # Loxone smart home
             "read_pdf", "read_document", "list_files", "find_file"  # File reading
@@ -104,6 +105,8 @@ and return the result. Be precise and concise."""
             return await self._browser_tool("browser_press", {"key": task.get("key", "")})
         elif operation == "use_computer":
             return await self._computer_use(task.get("action", ""), task.get("text", ""))
+        elif operation == "remote_action_simulator":
+            return await self._remote_action_simulator(task)
         elif operation == "wikipedia":
             return await self._wikipedia(task.get("topic", ""))
         elif operation == "brain_read":
@@ -300,6 +303,46 @@ and return the result. Be precise and concise."""
         except Exception as e:
             logger.error(f"Computer tool failed: {e}")
             return LoopResult.failure(f"use_computer failed: {str(e)}")
+
+    async def _remote_action_simulator(self, task: Dict[str, Any]) -> LoopResult:
+        """Execute simulator-only remote action envelope and return lifecycle-rich metadata."""
+        try:
+            import json
+            from companion_ai.tools import execute_function_call
+
+            payload = {
+                "capability": task.get("capability", ""),
+                "action": task.get("action", ""),
+                "target": task.get("target", ""),
+                "params": task.get("params") if isinstance(task.get("params"), dict) else {},
+                "approval_token": task.get("approval_token", ""),
+            }
+            result_raw = execute_function_call("remote_action_simulator", payload)
+            try:
+                envelope = json.loads(result_raw)
+            except Exception:
+                envelope = {"status": "error", "error": str(result_raw), "lifecycle": []}
+
+            operation = "remote_action_simulator"
+            if envelope.get("status") == "completed":
+                return LoopResult.success(
+                    data=envelope,
+                    operation=operation,
+                    domain="remote_action",
+                    lifecycle=envelope.get("lifecycle", []),
+                )
+
+            return LoopResult.failure(
+                envelope.get("error") or "Remote action rejected",
+                operation=operation,
+                domain="remote_action",
+                lifecycle=envelope.get("lifecycle", []),
+                reason=envelope.get("reason"),
+                envelope=envelope,
+            )
+        except Exception as e:
+            logger.error(f"Remote action simulator failed: {e}")
+            return LoopResult.failure(f"remote_action_simulator failed: {str(e)}", operation="remote_action_simulator", domain="remote_action")
 
     async def _add_bookmark(self, name: str, url: str) -> LoopResult:
         """Save a bookmark to the brain."""

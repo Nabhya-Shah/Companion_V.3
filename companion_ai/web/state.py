@@ -61,6 +61,7 @@ _KNOWN_FEATURE_FLAGS = {
     "memory_write",
     "workflows_run",
     "files_upload",
+    "retrieval_connectors",
 }
 
 

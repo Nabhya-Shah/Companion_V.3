@@ -141,7 +141,7 @@ Each loop:
 - Returns a `LoopResult` with output + metadata
 - Never persists to memory directly (orchestrator decides)
 
-**Shelved**: `ComputerLoop` and browser automation — unwired until needed.
+**Planned next**: `BrowserLoop` and `ComputerLoop` are the active roadmap focus for heavyweight automation.
 
 ### Layer 5: Unified Knowledge System
 
@@ -192,7 +192,7 @@ Each loop:
 |-------------|------|--------|
 | **Loxone Smart Home** | `integrations/loxone.py` | Live — room control, state sync, voice commands |
 | **Plugin System** | `services/jobs.py` + policy | Live — registry, gating, policy enforcement |
-| **Browser Agent** | `agents/browser.py` | Shelved — built but unwired |
+| **Browser Agent** | `agents/browser.py` | Built — baseline executor for upcoming `BrowserLoop` integration |
 | **Vision Agent** | `agents/vision.py` | Active — used by media_routes, files_routes |
 
 ---
@@ -208,7 +208,7 @@ companion_ai/
 │   ├── metrics.py             # Telemetry
 │   └── prompts.py             # System prompt templates
 ├── agents/
-│   ├── browser.py             # [shelved] Chrome automation
+│   ├── browser.py             # Built browser executor; routed via roadmap `BrowserLoop` work
 │   └── vision.py              # Active — used by media_routes, files_routes
 ├── integrations/
 │   └── loxone.py              # Loxone smart home

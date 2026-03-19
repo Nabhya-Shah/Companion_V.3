@@ -539,10 +539,31 @@ def last_request_tokens():
 @system_bp.route('/api/config')
 def config_info():
     tool_allowlist = sorted(core_config.get_tool_allowlist() or [])
+    retrieval_connectors = core_config.get_retrieval_connector_config()
+    remote_action_caps = []
+    try:
+        from companion_ai.tools.remote_actions import list_capabilities as _list_remote_action_capabilities
+
+        remote_action_caps = _list_remote_action_capabilities()
+    except Exception:
+        remote_action_caps = []
+    try:
+        from companion_ai.retrieval.adapters import get_connector_capabilities
+        retrieval_connectors['capabilities'] = get_connector_capabilities()
+    except Exception:
+        retrieval_connectors['capabilities'] = []
     return jsonify({
         'auth_required': bool(core_config.API_AUTH_TOKEN),
         'tool_allowlist_enabled': bool(tool_allowlist),
         'tool_allowlist': tool_allowlist,
+        'retrieval_connectors': retrieval_connectors,
+        'remote_actions': {
+            'enabled': bool(core_config.REMOTE_ACTIONS_ENABLED),
+            'capability_allowlist': sorted(core_config.get_remote_action_capability_allowlist() or []),
+            'capability_allowlist_enabled': bool(core_config.get_remote_action_capability_allowlist()),
+            'approval_ttl_seconds': int(core_config.REMOTE_ACTION_APPROVAL_TTL_SECONDS),
+            'capabilities': remote_action_caps,
+        },
     })
 
 
@@ -581,6 +602,20 @@ def workspace_permissions():
 def models_info():
     """Return structured model configuration metadata."""
     try:
+        connector_config = core_config.get_retrieval_connector_config()
+        remote_action_caps = []
+        try:
+            from companion_ai.retrieval.adapters import get_connector_capabilities
+            connector_config['capabilities'] = get_connector_capabilities()
+        except Exception:
+            connector_config['capabilities'] = []
+        try:
+            from companion_ai.tools.remote_actions import list_capabilities as _list_remote_action_capabilities
+
+            remote_action_caps = _list_remote_action_capabilities()
+        except Exception:
+            remote_action_caps = []
+
         data = {
             'models': {
                 'PRIMARY_MODEL': core_config.PRIMARY_MODEL,
@@ -609,6 +644,14 @@ def models_info():
                 'enabled': False,
                 'mode': None,
                 'candidates': None,
+            },
+            'connectors': connector_config,
+            'remote_actions': {
+                'enabled': bool(core_config.REMOTE_ACTIONS_ENABLED),
+                'capability_allowlist': sorted(core_config.get_remote_action_capability_allowlist() or []),
+                'capability_allowlist_enabled': bool(core_config.get_remote_action_capability_allowlist()),
+                'approval_ttl_seconds': int(core_config.REMOTE_ACTION_APPROVAL_TTL_SECONDS),
+                'capabilities': remote_action_caps,
             },
         }
         return jsonify(data)

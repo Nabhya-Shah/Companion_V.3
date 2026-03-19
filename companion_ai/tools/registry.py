@@ -520,6 +520,11 @@ def consume_approval_token(token: str, tool_name: str) -> bool:
     return True
 
 
+def issue_approval_token(tool_name: str, ttl_seconds: int = 180) -> str:
+    """Issue a single-use approval token for the given tool name."""
+    return _issue_approval_token(tool_name, ttl_seconds=ttl_seconds)
+
+
 def resolve_approval(request_id: str, approved: bool) -> dict | None:
     """Approve or deny a pending tool execution request."""
     with _APPROVAL_LOCK:
@@ -616,6 +621,14 @@ def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
         return tool_fn(arguments.get('prompt', 'What is on the screen?'))
     elif function_name == 'use_computer':
         return tool_fn(action=arguments.get('action'), text=arguments.get('text'))
+    elif function_name == 'remote_action_simulator':
+        return tool_fn(
+            capability=arguments.get('capability', ''),
+            action=arguments.get('action', ''),
+            target=arguments.get('target', ''),
+            params=arguments.get('params') if isinstance(arguments.get('params'), dict) else {},
+            approval_token=arguments.get('approval_token', ''),
+        )
     elif function_name == 'start_background_task':
         return tool_fn(
             description=arguments.get('description'),

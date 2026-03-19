@@ -189,3 +189,91 @@ def test_workflow_run_endpoint_reports_chat_delivery_failure(monkeypatch):
     assert payload["chat_target_count"] == 1
     assert payload["chat_appended_count"] == 0
     assert payload["chat_delivered"] is False
+
+
+def test_skill_can_be_disabled_and_blocks_run(temp_workflows_dir):
+    import asyncio
+
+    wf_file = temp_workflows_dir / "policy_wf.json"
+    wf_file.write_text(json.dumps({
+        "name": "Policy WF",
+        "description": "Desc",
+        "steps": [{"id": "1", "action": "prompt", "text": "Hi"}],
+    }))
+
+    manager = WorkflowManager()
+    manager.set_skill_enabled("policy_wf", False)
+
+    can_run, reason = manager.can_run_workflow("policy_wf")
+    assert can_run is False
+    assert reason == "skill_disabled"
+
+    manager.set_skill_enabled("policy_wf", True)
+    can_run, reason = manager.can_run_workflow("policy_wf")
+    assert can_run is True
+    assert reason is None
+
+    with patch("companion_ai.services.workflows.Orchestrator") as MockOrchestrator:
+        instance = MockOrchestrator.return_value
+        instance.process = AsyncMock(return_value=("ok", {}))
+        results = asyncio.run(manager.execute_workflow("policy_wf"))
+        assert results[0]["response"] == "ok"
+
+
+def test_high_risk_skill_requires_approval_token(temp_workflows_dir):
+    wf_file = temp_workflows_dir / "risky_wf.json"
+    wf_file.write_text(json.dumps({
+        "name": "Risky WF",
+        "description": "Desc",
+        "skill": {"risk_tier": "high"},
+        "steps": [{"id": "1", "action": "prompt", "text": "Hi"}],
+    }))
+
+    manager = WorkflowManager()
+
+    can_run, reason = manager.can_run_workflow("risky_wf")
+    assert can_run is False
+    assert reason == "approval_required"
+
+    token = manager.issue_skill_approval_token("risky_wf")
+    can_run, reason = manager.can_run_workflow("risky_wf", approval_token=token)
+    assert can_run is True
+    assert reason is None
+
+    # Token is single-use
+    can_run, reason = manager.can_run_workflow("risky_wf", approval_token=token)
+    assert can_run is False
+    assert reason == "approval_required"
+
+
+def test_record_workflow_outcome_preserves_full_text_for_insight(temp_workflows_dir, monkeypatch):
+    wf_file = temp_workflows_dir / "summary_wf.json"
+    wf_file.write_text(json.dumps({
+        "name": "Summary WF",
+        "description": "Desc",
+        "steps": [{"id": "1", "action": "prompt", "text": "Hi"}],
+    }))
+
+    manager = WorkflowManager()
+
+    captured = {}
+
+    monkeypatch.setattr(
+        "companion_ai.services.insights.create_insight",
+        lambda **kwargs: captured.update(kwargs) or {"id": 1},
+    )
+    monkeypatch.setattr(
+        "companion_ai.services.continuity.create_snapshot",
+        lambda **kwargs: {"id": 1},
+    )
+
+    long_text = "A" * 1200
+    manager.record_workflow_outcome(
+        "summary_wf",
+        results=[{"response": long_text, "output_target": "chat"}],
+        status="COMPLETED",
+    )
+
+    body = captured.get("body", "")
+    assert "Status: COMPLETED" in body
+    assert len(body) > 900

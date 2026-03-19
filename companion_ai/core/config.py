@@ -52,12 +52,14 @@ DEFAULT_TOOLS_EXECUTE = os.getenv("DEFAULT_TOOLS_EXECUTE", "true").lower() == "t
 DEFAULT_MEMORY_WRITE = os.getenv("DEFAULT_MEMORY_WRITE", "true").lower() == "true"
 DEFAULT_WORKFLOWS_RUN = os.getenv("DEFAULT_WORKFLOWS_RUN", "true").lower() == "true"
 DEFAULT_FILES_UPLOAD = os.getenv("DEFAULT_FILES_UPLOAD", "true").lower() == "true"
+DEFAULT_RETRIEVAL_CONNECTORS = os.getenv("DEFAULT_RETRIEVAL_CONNECTORS", "false").lower() == "true"
 
 FEATURE_PERMISSION_DEFAULTS = {
     "tools_execute": DEFAULT_TOOLS_EXECUTE,
     "memory_write": DEFAULT_MEMORY_WRITE,
     "workflows_run": DEFAULT_WORKFLOWS_RUN,
     "files_upload": DEFAULT_FILES_UPLOAD,
+    "retrieval_connectors": DEFAULT_RETRIEVAL_CONNECTORS,
 }
 
 # Tool safety policy (Sprint B)
@@ -98,6 +100,62 @@ def get_plugin_allowlist() -> set[str] | None:
     if not raw:
         return None
     if raw == "*":
+        return None
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+# Retrieval connector policy (Insert A - contract + feature flag, no behavior change)
+RETRIEVAL_CONNECTORS_ENABLED = os.getenv("RETRIEVAL_CONNECTORS_ENABLED", "false").lower() == "true"
+RETRIEVAL_CONNECTOR_ALLOWLIST = os.getenv("RETRIEVAL_CONNECTOR_ALLOWLIST", "").strip()
+RETRIEVAL_CONNECTOR_SOURCE_ALLOWLIST = os.getenv("RETRIEVAL_CONNECTOR_SOURCE_ALLOWLIST", "").strip()
+RETRIEVAL_CONNECTOR_TIMEOUT_MS = int(os.getenv("RETRIEVAL_CONNECTOR_TIMEOUT_MS", "1200"))
+RETRIEVAL_CONNECTOR_MAX_RESULTS = int(os.getenv("RETRIEVAL_CONNECTOR_MAX_RESULTS", "8"))
+RETRIEVAL_CONNECTOR_LOCAL_PRIMARY = os.getenv("RETRIEVAL_CONNECTOR_LOCAL_PRIMARY", "true").lower() == "true"
+
+# Remote action simulator policy (Insert C)
+REMOTE_ACTIONS_ENABLED = os.getenv("REMOTE_ACTIONS_ENABLED", "false").lower() == "true"
+REMOTE_ACTION_CAPABILITY_ALLOWLIST = os.getenv("REMOTE_ACTION_CAPABILITY_ALLOWLIST", "read_status,ping").strip()
+REMOTE_ACTION_APPROVAL_TTL_SECONDS = int(os.getenv("REMOTE_ACTION_APPROVAL_TTL_SECONDS", "180"))
+
+
+def get_retrieval_connector_allowlist() -> set[str] | None:
+    """Return normalized retrieval connector allowlist, or None when disabled."""
+    raw = (RETRIEVAL_CONNECTOR_ALLOWLIST or "").strip()
+    if not raw:
+        return None
+    if raw == "*":
+        return None
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+def get_retrieval_connector_source_allowlist() -> set[str] | None:
+    """Return normalized source-type allowlist for connector results."""
+    raw = (RETRIEVAL_CONNECTOR_SOURCE_ALLOWLIST or "").strip()
+    if not raw:
+        return None
+    if raw == "*":
+        return None
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+def get_retrieval_connector_config() -> dict:
+    """Return retrieval connector capability settings for APIs and diagnostics."""
+    allowlist = sorted(get_retrieval_connector_allowlist() or [])
+    return {
+        "enabled": RETRIEVAL_CONNECTORS_ENABLED,
+        "allowlist": allowlist,
+        "allowlist_enabled": bool(allowlist),
+        "source_allowlist": sorted(get_retrieval_connector_source_allowlist() or []),
+        "timeout_ms": RETRIEVAL_CONNECTOR_TIMEOUT_MS,
+        "max_results": RETRIEVAL_CONNECTOR_MAX_RESULTS,
+        "local_primary": RETRIEVAL_CONNECTOR_LOCAL_PRIMARY,
+    }
+
+
+def get_remote_action_capability_allowlist() -> set[str] | None:
+    """Return normalized remote-action capability allowlist, or None when open."""
+    raw = (REMOTE_ACTION_CAPABILITY_ALLOWLIST or "").strip()
+    if not raw or raw == "*":
         return None
     return {item.strip() for item in raw.split(",") if item.strip()}
 

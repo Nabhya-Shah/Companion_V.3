@@ -2894,6 +2894,40 @@ body {
   color: var(--text-muted);
 }
 
+.retrieval-stage-list {
+  display: grid;
+  gap: 8px;
+}
+
+.retrieval-stage-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) auto auto minmax(100px, 1fr);
+  gap: 8px;
+  align-items: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.retrieval-stage-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.retrieval-stage-ms,
+.retrieval-stage-status,
+.retrieval-stage-provider {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.retrieval-stage-meta {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .model-label {
   padding: 1px 4px;
   border-radius: 3px;

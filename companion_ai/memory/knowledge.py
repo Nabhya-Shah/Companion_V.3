@@ -68,6 +68,11 @@ def _recall_impl(
     retrieve_started = time.perf_counter()
     backend_counts = {"mem0": 0, "sqlite": 0, "brain": 0}
     backend_ms = {"mem0": 0, "sqlite": 0, "brain": 0}
+    connector_diag: dict[str, Any] = {
+        "connector_counts": {},
+        "connector_ms": {},
+        "enabled_count": 0,
+    }
 
     # --- Mem0 vector search ---
     if include_mem0 and core_config.USE_MEM0:
@@ -139,6 +144,23 @@ def _recall_impl(
         finally:
             backend_ms["brain"] = int((time.perf_counter() - started) * 1000)
 
+    # --- Optional connector layer (additive only; local retrieval remains primary) ---
+    if core_config.RETRIEVAL_CONNECTORS_ENABLED:
+        try:
+            from companion_ai.retrieval.adapters import search_connectors
+            from companion_ai.retrieval.connectors import RetrievalConnectorRequest
+
+            connector_request = RetrievalConnectorRequest(
+                query=query,
+                limit=min(limit, core_config.RETRIEVAL_CONNECTOR_MAX_RESULTS),
+                workspace_id="default",
+                user_id=effective_user_id,
+            )
+            connector_hits, connector_diag = search_connectors(connector_request)
+            raw_results.extend(connector_hits)
+        except Exception as e:
+            logger.warning(f"recall connectors failed: {e}")
+
     _append_trace_stage(
         trace,
         "retrieve",
@@ -146,6 +168,10 @@ def _recall_impl(
         raw_count=len(raw_results),
         backend_counts=backend_counts,
         backend_ms=backend_ms,
+        connector_counts=connector_diag.get("connector_counts", {}),
+        connector_ms=connector_diag.get("connector_ms", {}),
+        connector_paths=connector_diag.get("connector_paths", {}),
+        connectors_enabled=connector_diag.get("enabled_count", 0),
         providers=[k for k in ("mem0", "sqlite", "brain") if backend_counts.get(k, 0) > 0],
         provider="hybrid",
     )

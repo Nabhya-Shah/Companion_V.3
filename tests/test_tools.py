@@ -1,5 +1,6 @@
 """Tests for custom tools - V5 architecture."""
 import pytest
+import json
 
 from companion_ai.tools import (
     list_tools,
@@ -149,3 +150,23 @@ def test_execute_function_call_accepts_approval_token(monkeypatch):
     )
 
     assert isinstance(result, str)
+
+
+def test_remote_action_tool_rejects_when_disabled(monkeypatch):
+    monkeypatch.setattr(core_config, 'REMOTE_ACTIONS_ENABLED', False)
+    payload = json.loads(
+        execute_function_call('remote_action_simulator', {'capability': 'read_status', 'action': 'read'})
+    )
+    assert payload.get('status') == 'rejected'
+    assert payload.get('reason') == 'disabled'
+
+
+def test_remote_action_tool_requires_approval_for_non_read(monkeypatch):
+    monkeypatch.setattr(core_config, 'REMOTE_ACTIONS_ENABLED', True)
+    monkeypatch.setattr(core_config, 'REMOTE_ACTION_CAPABILITY_ALLOWLIST', '*')
+
+    denied = json.loads(
+        execute_function_call('remote_action_simulator', {'capability': 'notify', 'action': 'execute'})
+    )
+    assert denied.get('status') == 'rejected'
+    assert denied.get('reason') == 'approval_required'

@@ -23,6 +23,12 @@ from companion_ai.tools import (
     mark_tool_requires_approval,
     unmark_tool_requires_approval,
 )
+from companion_ai.tools.remote_actions import (
+    list_capabilities as list_remote_action_capabilities,
+    request_execution_token as request_remote_action_token,
+    execute_simulated_action,
+    RemoteActionRequest,
+)
 from companion_ai.web import state
 
 logger = logging.getLogger(__name__)
@@ -199,3 +205,52 @@ def approval_config():
         set_approval_required_tools(tools_list)
 
     return jsonify({'requires_approval': list_approval_required_tools()})
+
+
+@tools_bp.route('/api/remote-actions/capabilities', methods=['GET'])
+def remote_action_capabilities():
+    return jsonify({'capabilities': list_remote_action_capabilities()})
+
+
+@tools_bp.route('/api/remote-actions/approve', methods=['POST'])
+def remote_action_approve():
+    token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
+    if not core_config.require_auth(token):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    capability = str(data.get('capability') or '').strip()
+    action = str(data.get('action') or '').strip()
+    result = request_remote_action_token(capability, action)
+    if not result.get('ok'):
+        reason = result.get('reason')
+        code = 400
+        if reason in {'disabled', 'allowlist_denied', 'unsupported_capability'}:
+            code = 403
+        return jsonify({'error': result.get('error'), 'reason': reason}), code
+    return jsonify(result)
+
+
+@tools_bp.route('/api/remote-actions/simulate', methods=['POST'])
+def remote_action_simulate():
+    blocked = state.enforce_feature_permission('tools_execute')
+    if blocked:
+        return blocked
+
+    data = request.get_json(silent=True) or {}
+    req = RemoteActionRequest(
+        capability=str(data.get('capability') or '').strip(),
+        action=str(data.get('action') or '').strip(),
+        target=str(data.get('target') or '').strip(),
+        params=data.get('params') if isinstance(data.get('params'), dict) else {},
+        approval_token=str(data.get('approval_token') or '').strip() or None,
+    )
+    envelope = execute_simulated_action(req)
+    status = envelope.get('status')
+    if status == 'completed':
+        return jsonify(envelope)
+    if status == 'rejected':
+        reason = envelope.get('reason')
+        code = 403 if reason in {'disabled', 'allowlist_denied'} else 400
+        return jsonify(envelope), code
+    return jsonify(envelope), 500

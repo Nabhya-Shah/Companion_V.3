@@ -33,3 +33,11 @@ def test_models_endpoint_structure():
     assert data['roles']['MEMORY_PROCESSING_MODEL'] == core_config.MEMORY_PROCESSING_MODEL
     assert 'ensemble' in data
     assert data['ensemble']['enabled'] == False  # Ensemble is removed
+
+    # Connector capability metadata should be present for Insert A contract rollout
+    assert 'connectors' in data
+    connectors = data['connectors']
+    assert 'enabled' in connectors
+    assert 'timeout_ms' in connectors
+    assert 'max_results' in connectors
+    assert 'local_primary' in connectors

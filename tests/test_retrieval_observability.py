@@ -50,6 +50,126 @@ def test_memory_loop_search_attaches_retrieval_trace(monkeypatch):
     assert result.metadata["retrieval_trace"] == expected_trace
 
 
+def test_recall_with_trace_includes_connector_diagnostics(monkeypatch):
+    monkeypatch.setattr("companion_ai.core.config.USE_MEM0", False)
+    monkeypatch.setattr("companion_ai.core.config.RETRIEVAL_CONNECTORS_ENABLED", True)
+
+    def fake_search_connectors(request):
+        return (
+            [
+                {
+                    "text": "External context note",
+                    "score": 0.42,
+                    "source": "connector:file_stub",
+                    "source_id": "stub-1",
+                }
+            ],
+            {
+                "connector_counts": {"file_stub": 1},
+                "connector_ms": {"file_stub": 2},
+                "enabled_count": 1,
+            },
+        )
+
+    monkeypatch.setattr(
+        "companion_ai.retrieval.adapters.search_connectors",
+        fake_search_connectors,
+        raising=False,
+    )
+
+    results, trace = recall_with_trace(
+        "project context",
+        include_mem0=False,
+        include_sqlite=False,
+        include_brain=False,
+        limit=5,
+    )
+
+    assert len(results) == 1
+    retrieve_stage = [s for s in trace["stages"] if s["name"] == "retrieve"][0]
+    assert retrieve_stage["details"]["connectors_enabled"] == 1
+    assert retrieve_stage["details"]["connector_counts"]["file_stub"] == 1
+
+
+def test_connector_results_filtered_by_source_allowlist(monkeypatch):
+    monkeypatch.setattr("companion_ai.core.config.USE_MEM0", False)
+    monkeypatch.setattr("companion_ai.core.config.RETRIEVAL_CONNECTORS_ENABLED", True)
+    monkeypatch.setattr(
+        "companion_ai.core.config.get_retrieval_connector_source_allowlist",
+        lambda: {"allowed_source"},
+    )
+
+    from companion_ai.retrieval.connectors import RetrievalConnectorRecord, RetrievalConnectorRequest
+
+    class FakeConnector:
+        connector_id = "fake"
+        connector_type = "test"
+
+        def search(self, request):
+            return [
+                RetrievalConnectorRecord(
+                    connector_id="fake",
+                    connector_type="test",
+                    source_id="1",
+                    source_type="blocked_source",
+                    text="Should be filtered",
+                    score=0.4,
+                    latency_ms=1,
+                ),
+                RetrievalConnectorRecord(
+                    connector_id="fake",
+                    connector_type="test",
+                    source_id="2",
+                    source_type="allowed_source",
+                    text="Should stay",
+                    score=0.5,
+                    latency_ms=1,
+                ),
+            ]
+
+    monkeypatch.setattr(
+        "companion_ai.retrieval.adapters.get_enabled_connectors",
+        lambda: [FakeConnector()],
+    )
+
+    from companion_ai.retrieval.adapters import search_connectors
+
+    results, diagnostics = search_connectors(RetrievalConnectorRequest(query="q", limit=5))
+
+    assert len(results) == 1
+    assert results[0]["source_type"] == "allowed_source"
+    assert diagnostics["connector_counts"]["fake"] == 1
+
+
+def test_connector_permission_denied_falls_back_to_local_only(monkeypatch):
+    monkeypatch.setattr("companion_ai.core.config.USE_MEM0", False)
+    monkeypatch.setattr("companion_ai.core.config.RETRIEVAL_CONNECTORS_ENABLED", True)
+
+    monkeypatch.setattr(
+        "companion_ai.web.state.get_workspace_permissions",
+        lambda workspace_id=None: {
+            "tools_execute": True,
+            "memory_write": True,
+            "workflows_run": True,
+            "files_upload": True,
+            "retrieval_connectors": False,
+        },
+        raising=False,
+    )
+
+    results, trace = recall_with_trace(
+        "project context",
+        include_mem0=False,
+        include_sqlite=False,
+        include_brain=False,
+        limit=5,
+    )
+
+    assert results == []
+    retrieve_stage = [s for s in trace["stages"] if s["name"] == "retrieve"][0]
+    assert retrieve_stage["details"]["connectors_enabled"] == 0
+
+
 def test_streaming_emits_retrieval_stage_events(monkeypatch):
     monkeypatch.setattr("companion_ai.core.config.USE_ORCHESTRATOR", True)
     monkeypatch.setattr("companion_ai.conversation_manager.MEM0_AVAILABLE", False)

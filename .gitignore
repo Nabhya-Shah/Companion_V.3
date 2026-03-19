@@ -244,3 +244,5 @@ cython_debug/
 # Planning docs - internal only, may contain sensitive discussion
 V4_PLANNING.md
 *_PLANNING.md
+# Backlog tracking
+GITHUB PROJECT.md

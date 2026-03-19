@@ -169,6 +169,37 @@ class Orchestrator:
             "message": message,
             "prefer_toast": True,
         }
+
+    @staticmethod
+    def _is_remote_action(operation: str) -> bool:
+        return operation == "remote_action_simulator"
+
+    @staticmethod
+    def _build_remote_action_feedback(result: LoopResult) -> Dict[str, Any]:
+        envelope = result.data if isinstance(result.data, dict) else result.metadata.get("envelope", {})
+        lifecycle = envelope.get("lifecycle") if isinstance(envelope, dict) else []
+        status = envelope.get("status") if isinstance(envelope, dict) else None
+        reason = envelope.get("reason") if isinstance(envelope, dict) else None
+        trace_id = envelope.get("trace_id") if isinstance(envelope, dict) else None
+
+        if status == "completed":
+            message = "Remote action completed"
+        elif status == "rejected":
+            message = f"Remote action rejected: {reason or result.error or 'policy denied'}"
+        else:
+            message = result.error or "Remote action pending"
+
+        return {
+            "domain": "remote_action",
+            "operation": "remote_action_simulator",
+            "status": "success" if status == "completed" else "error",
+            "message": message,
+            "prefer_toast": True,
+            "trace_id": trace_id,
+            "reason": reason,
+            "lifecycle": lifecycle if isinstance(lifecycle, list) else [],
+            "envelope": envelope if isinstance(envelope, dict) else {},
+        }
     
     def _get_capabilities(self) -> str:
         """Get cached loop capabilities string."""
@@ -551,12 +582,24 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
 
             if self._is_smart_home_action(loop_name, operation):
                 metadata_payload["action_feedback"] = self._build_smart_home_feedback(operation, result)
+            elif self._is_remote_action(operation):
+                metadata_payload["action_feedback"] = self._build_remote_action_feedback(result)
             
             if result.status.value == "error":
                 logger.error(f"Loop {loop_name} failed: {result.error}")
                 if self._is_smart_home_action(loop_name, operation):
                     return (
                         f"I couldn't complete that lighting command: {result.error}",
+                        metadata_payload,
+                    )
+                if self._is_remote_action(operation):
+                    reason = ""
+                    feedback = metadata_payload.get("action_feedback") if isinstance(metadata_payload, dict) else {}
+                    if isinstance(feedback, dict):
+                        reason = str(feedback.get("reason") or "").strip()
+                    extra = f" (reason: {reason})" if reason else ""
+                    return (
+                        f"I couldn't complete that remote action{extra}.",
                         metadata_payload,
                     )
                 return await self._generate_direct_response(user_message, context)

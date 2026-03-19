@@ -580,10 +580,31 @@ def _worker_loop():
                         import asyncio
                         
                         manager = get_manager()
-                        results = asyncio.run(manager.execute_workflow(tool_args["workflow_id"]))
-                        
-                        result = f"Workflow '{tool_args['workflow_id']}' completed."
-                        status = 'COMPLETED'
+                        workflow_id = str(tool_args["workflow_id"])
+                        can_run, reason = manager.can_run_workflow(workflow_id, approval_token=tool_args.get('approval_token'))
+                        if not can_run:
+                            result = f"Workflow '{workflow_id}' blocked: {reason}"
+                            status = 'FAILED'
+                            results = []
+                            manager.record_workflow_outcome(
+                                workflow_id,
+                                results=[],
+                                status='FAILED',
+                                workspace_id='default',
+                                source='scheduled',
+                                error=result,
+                            )
+                        else:
+                            results = asyncio.run(manager.execute_workflow(workflow_id))
+                            result = f"Workflow '{workflow_id}' completed."
+                            status = 'COMPLETED'
+                            manager.record_workflow_outcome(
+                                workflow_id,
+                                results=results,
+                                status='COMPLETED',
+                                workspace_id='default',
+                                source='scheduled',
+                            )
                         
                         # Forward chat output if needed
                         for res in results:

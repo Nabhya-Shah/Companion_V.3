@@ -29,6 +29,7 @@ from companion_ai.tools.registry import (        # noqa: F401
     list_approval_required_tools,
     set_approval_required_tools,
     consume_approval_token,
+    issue_approval_token,
     resolve_approval,
     get_pending_approvals,
 )
@@ -78,6 +79,7 @@ __all__ = [
     'mark_tool_requires_approval', 'unmark_tool_requires_approval',
     'tool_requires_approval', 'list_approval_required_tools', 'set_approval_required_tools',
     'consume_approval_token', 'resolve_approval', 'get_pending_approvals',
+    'issue_approval_token',
     # Tool functions (used by tool_loop.py and tests)
     'tool_brain_read', 'tool_brain_write', 'tool_brain_list', 'tool_brain_search',
     'tool_read_pdf', 'tool_read_image', 'tool_read_docx', 'tool_list_files', 'tool_find_file',

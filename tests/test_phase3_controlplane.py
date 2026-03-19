@@ -298,3 +298,70 @@ def test_events_diagnostics_shape():
     assert 'history_version' in payload
     assert 'sse_sequence' in payload
     assert 'counters' in payload
+
+
+def test_remote_action_capabilities_endpoint():
+    client = app.test_client()
+    res = client.get('/api/remote-actions/capabilities')
+    assert res.status_code == 200
+    payload = res.get_json()
+    assert isinstance(payload.get('capabilities'), list)
+
+
+def test_remote_action_simulate_rejects_when_disabled(monkeypatch):
+    monkeypatch.setattr(web_companion.core_config, 'REMOTE_ACTIONS_ENABLED', False)
+    client = app.test_client()
+    res = client.post('/api/remote-actions/simulate', json={'capability': 'read_status', 'action': 'read'})
+    assert res.status_code == 403
+    payload = res.get_json()
+    assert payload.get('reason') == 'disabled'
+
+
+def test_remote_action_simulate_non_read_requires_token(monkeypatch):
+    monkeypatch.setattr(web_companion.core_config, 'REMOTE_ACTIONS_ENABLED', True)
+    monkeypatch.setattr(web_companion.core_config, 'REMOTE_ACTION_CAPABILITY_ALLOWLIST', '*')
+    monkeypatch.setattr(web_companion.core_config, 'API_AUTH_TOKEN', 'secret')
+
+    client = app.test_client()
+
+    denied = client.post(
+        '/api/remote-actions/simulate',
+        json={'capability': 'notify', 'action': 'execute'},
+        headers={'X-API-TOKEN': 'secret'},
+    )
+    assert denied.status_code == 400
+    assert denied.get_json().get('reason') == 'approval_required'
+
+    approval = client.post(
+        '/api/remote-actions/approve',
+        json={'capability': 'notify', 'action': 'execute'},
+        headers={'X-API-TOKEN': 'secret'},
+    )
+    assert approval.status_code == 200
+    token = approval.get_json().get('approval_token')
+    assert token
+
+    ok = client.post(
+        '/api/remote-actions/simulate',
+        json={'capability': 'notify', 'action': 'execute', 'approval_token': token},
+        headers={'X-API-TOKEN': 'secret'},
+    )
+    assert ok.status_code == 200
+    payload = ok.get_json()
+    assert payload.get('status') == 'completed'
+
+
+def test_workflow_skills_endpoint_exposes_enabled_flag(monkeypatch):
+    class _Manager:
+        def reload_workflows(self):
+            return True
+
+        def list_skills(self):
+            return [{'id': 'wf', 'enabled': True, 'can_run': True}]
+
+    monkeypatch.setattr('companion_ai.web.workflow_routes.get_manager', lambda: _Manager())
+
+    client = app.test_client()
+    res = client.get('/api/workflows/skills')
+    assert res.status_code == 200
+    assert res.get_json()['skills'][0]['id'] == 'wf'

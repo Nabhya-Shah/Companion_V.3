@@ -7,6 +7,7 @@ from typing import Dict
 from companion_ai.services.jobs import add_job
 from companion_ai.core import config as core_config
 from companion_ai.tools.registry import tool
+from companion_ai.tools.remote_actions import RemoteActionRequest, execute_simulated_action
 
 try:
     from companion_ai.memory.mem0_backend import search_memories
@@ -212,3 +213,42 @@ def tool_use_computer(action: str, text: str = "") -> str:
 
     except Exception as e:
         return f"Computer Use Error: {e}"
+
+
+@tool('remote_action_simulator', schema={
+    "type": "function",
+    "function": {
+        "name": "remote_action_simulator",
+        "description": "Run a simulator-only remote/mobile action envelope for capability and policy testing. No real device calls are executed.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "capability": {"type": "string", "description": "Remote capability name, e.g. read_status or notify."},
+                "action": {"type": "string", "description": "Action verb, e.g. read, ping, execute."},
+                "target": {"type": "string", "description": "Optional target identifier."},
+                "params": {"type": "object", "description": "Optional simulator parameters."},
+                "approval_token": {"type": "string", "description": "Required for non-read actions."},
+            },
+            "required": ["capability", "action"]
+        }
+    }
+}, plugin='background', risk_tier='medium', category='automation')
+def tool_remote_action_simulator(
+    capability: str,
+    action: str,
+    target: str = "",
+    params: Dict | None = None,
+    approval_token: str = "",
+) -> str:
+    envelope = execute_simulated_action(
+        RemoteActionRequest(
+            capability=capability,
+            action=action,
+            target=target,
+            params=params or {},
+            approval_token=approval_token,
+        )
+    )
+    import json
+
+    return json.dumps(envelope, ensure_ascii=True)

@@ -45,11 +45,40 @@ function renderRetrievalTimeline(stages) {
     const details = meta.details || {};
     const resultCount = details.ready_count ?? details.filtered_count ?? details.raw_count;
     const detailsLabel = resultCount != null ? ` · ${Number(resultCount)} items` : '';
+    const connectorCounts = details.connector_counts || {};
+    const connectorPaths = details.connector_paths || {};
+    const connectorSummary = Object.entries(connectorCounts)
+      .filter(([, count]) => Number(count) > 0)
+      .map(([id, count]) => `${id}:${count}`)
+      .join(', ');
+    const pathSummary = Object.entries(connectorPaths)
+      .slice(0, 1)
+      .map(([id, paths]) => `${id}→${Array.isArray(paths) && paths.length > 0 ? paths[0] : 'root'}`)
+      .join(', ');
+    const connectorMeta = connectorSummary
+      ? `<div class="retrieval-stage-meta">connectors ${escapeHtml(connectorSummary)}${pathSummary ? ` · ${escapeHtml(pathSummary)}` : ''}</div>`
+      : '';
     return `<div class="retrieval-stage-row">
       <span class="retrieval-stage-name">${name}</span>
       <span class="retrieval-stage-ms">${ms}ms</span>
       <span class="retrieval-stage-status">${status}</span>
       <span class="retrieval-stage-provider">${provider}${detailsLabel}</span>
+      ${connectorMeta}
+    </div>`;
+  }).join('');
+  return `<div class="retrieval-stage-list">${rows}</div>`;
+}
+
+function renderActionLifecycle(lifecycle) {
+  if (!Array.isArray(lifecycle) || lifecycle.length === 0) return '';
+  const rows = lifecycle.map((step, idx) => {
+    const state = escapeHtml(step.state || `state_${idx + 1}`);
+    const ts = escapeHtml(step.ts || '');
+    return `<div class="retrieval-stage-row">
+      <span class="retrieval-stage-name">${state}</span>
+      <span class="retrieval-stage-ms">&nbsp;</span>
+      <span class="retrieval-stage-status">${idx === lifecycle.length - 1 ? 'current' : 'done'}</span>
+      <span class="retrieval-stage-provider">${ts || 'n/a'}</span>
     </div>`;
   }).join('');
   return `<div class="retrieval-stage-list">${rows}</div>`;
@@ -202,6 +231,22 @@ function renderPipeline(metadata) {
   // Synthesis
   const synthTokens = getTokensForStep('synthesis') || getTokensForStep('generate');
   steps.push({ type: 'tool', title: 'Final Synthesis', desc: 'Response generation', data: null, tokens: synthTokens, role: 'synthesis' });
+
+  // Remote action lifecycle diagnostics (Insert C2)
+  if (metadata.action_feedback && metadata.action_feedback.domain === 'remote_action') {
+    const af = metadata.action_feedback;
+    const lifecycle = Array.isArray(af.lifecycle) ? af.lifecycle : [];
+    const reason = af.reason ? ` · ${af.reason}` : '';
+    const trace = af.trace_id ? ` · ${af.trace_id}` : '';
+    steps.push({
+      type: af.status === 'success' ? 'result' : 'error',
+      title: 'Remote Action',
+      desc: `${af.message || 'Remote action feedback'}${reason}${trace}`,
+      data: renderActionLifecycle(lifecycle),
+      formatted: true,
+      role: 'remote_action'
+    });
+  }
 
   // Retrieval diagnostics (Sprint 3)
   if (Array.isArray(metadata.retrieval_stages) && metadata.retrieval_stages.length > 0) {
@@ -467,7 +512,8 @@ export async function sendMessage(retry = false) {
   function maybeShowActionToast(metadata) {
     if (actionToastShown || !metadata || !metadata.action_feedback || !window.showToast) return;
     const feedback = metadata.action_feedback;
-    if (feedback.domain !== 'smarthome' || !feedback.message) return;
+    if (!feedback.message) return;
+    if (feedback.domain !== 'smarthome' && feedback.domain !== 'remote_action') return;
 
     actionToastShown = true;
     const toastType = feedback.status === 'success' ? 'success' : 'error';
