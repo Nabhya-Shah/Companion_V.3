@@ -8,7 +8,7 @@ The brain folder allows the AI to:
 4. Maintain bookmarks and browser-related memory
 
 Structure:
-  C:\Main Folder\BRAIN\
+    BRAIN/
   ├── system/          (read-only, human-edited)
   │   └── core_rules.md
   ├── memories/        (persistent facts)

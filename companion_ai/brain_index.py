@@ -331,7 +331,7 @@ def brain_search(query: str, limit: int = 3) -> str:
     # Concise output - just file and key excerpt
     output = []
     for r in relevant[:3]:  # Max 3 results
-        filename = r['file'].split('\\')[-1]  # Just filename, not path
+        filename = os.path.basename(str(r['file']))  # Just filename, not path
         score = int(r['score'] * 100)
         excerpt = r['text'][:100].replace('\n', ' ').strip()
         output.append(f"• {filename} ({score}%): {excerpt}...")

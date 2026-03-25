@@ -402,36 +402,67 @@ and return the result. Be precise and concise."""
             return LoopResult.failure(f"Failed to open bookmark: {e}")
 
     async def _enable_browser_control(self) -> LoopResult:
-        """Restart Chrome in debug mode and reset browser agent to reconnect."""
+        """Restart a local browser in debug mode and reset browser agent to reconnect."""
         try:
-            import subprocess
             import os
-            import time
+            import platform
+            import shutil
             import socket
+            import subprocess
+            import time
             
             # STEP 1: Reset Playwright state (discard isolated browser)
             logger.info("Resetting browser agent state...")
-            from companion_ai.browser_agent import sync_reset
+            from companion_ai.agents.browser import sync_reset
             sync_reset()
-            
-            # STEP 2: Kill Chrome
-            logger.info("Killing Chrome processes...")
-            subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"], capture_output=True)
+
+            system = platform.system().lower()
+            user_data = os.path.join(os.path.expanduser("~"), ".companion_chrome")
+            os.makedirs(user_data, exist_ok=True)
+
+            # STEP 2: Stop existing browser processes (best effort)
+            logger.info("Stopping existing browser processes...")
+            if system == "windows":
+                subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"], capture_output=True)
+                subprocess.run(["taskkill", "/F", "/IM", "msedge.exe"], capture_output=True)
+            else:
+                for proc in ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge"]:
+                    subprocess.run(["pkill", "-f", proc], capture_output=True)
             time.sleep(2)  # Wait for Chrome to fully close
-            
-            # STEP 3: Launch Chrome with debug flag
-            chrome_path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-            local_app_data = os.environ.get('LOCALAPPDATA', '')
-            user_data = os.path.join(local_app_data, r"Google\Chrome\User Data")
-            
-            if not os.path.exists(chrome_path):
-                return LoopResult.failure("Chrome executable not found at standard location.")
-            
-            logger.info("Launching Chrome with debug flag...")
+
+            # STEP 3: Launch browser with debug flag
+            browser_bin = None
+            if system == "windows":
+                for candidate in [
+                    os.environ.get("CHROME_PATH", ""),
+                    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+                ]:
+                    if candidate and os.path.exists(candidate):
+                        browser_bin = candidate
+                        break
+            else:
+                for candidate in [
+                    os.environ.get("CHROME_PATH", ""),
+                    shutil.which("google-chrome") or "",
+                    shutil.which("google-chrome-stable") or "",
+                    shutil.which("chromium") or "",
+                    shutil.which("chromium-browser") or "",
+                    shutil.which("microsoft-edge") or "",
+                ]:
+                    if candidate and os.path.exists(candidate):
+                        browser_bin = candidate
+                        break
+
+            if not browser_bin:
+                return LoopResult.failure("No Chrome/Chromium executable found. Set CHROME_PATH or install a Chromium-based browser.")
+
+            logger.info(f"Launching browser with debug flag: {browser_bin}")
             subprocess.Popen([
-                chrome_path,
+                browser_bin,
                 "--remote-debugging-port=9222",
-                f"--user-data-dir={user_data}"
+                f"--user-data-dir={user_data}",
             ])
             
             # STEP 4: Wait for port 9222 to become available
@@ -449,7 +480,7 @@ and return the result. Be precise and concise."""
                 time.sleep(0.5)
             
             return LoopResult.success(
-                "Chrome restarted in AI Mode! Browser agent will now use YOUR Chrome with all your logins and bookmarks.",
+                "Browser restarted in AI mode. Remote debugging is enabled and the automation agent can reconnect.",
                 operation="enable_browser_control"
             )
         except Exception as e:

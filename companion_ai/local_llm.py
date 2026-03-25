@@ -283,7 +283,7 @@ class LocalLLM:
     """
     Main interface for local LLM operations.
     
-    Uses vLLM backend for fast GPU inference via WSL2.
+    Uses vLLM backend for fast GPU inference.
     """
     
     # Default models for different tasks
@@ -306,8 +306,6 @@ class LocalLLM:
             model = vllm.get_current_model()
             logger.info(f"LocalLLM: Using vLLM backend with model: {model}")
             return
-        
-        logger.warning("LocalLLM: vLLM server not available. Start it with the vLLM command in WSL.")
     
     def is_available(self) -> bool:
         """Check if vLLM backend is available."""
@@ -334,14 +332,14 @@ class LocalLLM:
             Generated response text
         """
         if not self.is_available():
-            raise RuntimeError("vLLM server not available. Start it in WSL.")
+            raise RuntimeError("vLLM server not available. Start a compatible local model server.")
         
         return self.backend.generate(prompt, model)
     
     def generate_streaming(self, prompt: str, task: str = "text", model: str = None) -> Generator[str, None, None]:
         """Stream response tokens."""
         if not self.is_available():
-            raise RuntimeError("vLLM server not available. Start it in WSL.")
+            raise RuntimeError("vLLM server not available. Start a compatible local model server.")
         
         if isinstance(self.backend, VLLMBackend):
             yield from self.backend.generate_streaming(prompt, model)
@@ -355,7 +353,7 @@ class LocalLLM:
         Note: Requires a vision-capable model to be loaded in vLLM.
         """
         if not self.is_available():
-            raise RuntimeError("vLLM server not available. Start it in WSL.")
+            raise RuntimeError("vLLM server not available. Start a compatible local model server.")
         
         return self.backend.generate_with_image(prompt, image_path, model)
     

@@ -10,8 +10,10 @@ Provides reliable DOM-based browser control:
 import asyncio
 import logging
 import base64
+import os
+import shutil
+import sys
 from typing import Optional
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +23,40 @@ _context = None
 _page = None
 _playwright = None
 
-# Path to store browser data (bookmarks, cookies, etc.)
-import os
-BROWSER_DATA_DIR = os.path.join(os.path.expanduser("~"), ".companion_browser")
+def _find_chrome_executable() -> str | None:
+    """Return a best-effort Chrome/Chromium executable path for this OS."""
+    candidates: list[str] = []
+
+    if sys.platform.startswith("win"):
+        candidates = [
+            os.environ.get("CHROME_PATH", ""),
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        ]
+    elif sys.platform == "darwin":
+        candidates = [
+            os.environ.get("CHROME_PATH", ""),
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            shutil.which("google-chrome") or "",
+            shutil.which("chromium") or "",
+        ]
+    else:
+        candidates = [
+            os.environ.get("CHROME_PATH", ""),
+            shutil.which("google-chrome") or "",
+            shutil.which("google-chrome-stable") or "",
+            shutil.which("chromium") or "",
+            shutil.which("chromium-browser") or "",
+            "/usr/bin/google-chrome",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+        ]
+
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return None
 
 
 async def _ensure_browser(headless: bool = False):
@@ -49,7 +82,6 @@ async def _ensure_browser(headless: bool = False):
             _browser = None
     
     from playwright.async_api import async_playwright
-    import os
     
     if not _playwright:
         try:
@@ -59,11 +91,11 @@ async def _ensure_browser(headless: bool = False):
     
     # Use dedicated AI profile (avoids Chrome's remote debugging restriction)
     ai_profile_dir = os.path.join(os.path.expanduser("~"), ".companion_chrome")
-    chrome_exe = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+    chrome_exe = _find_chrome_executable()
 
     # If Chrome isn't installed at the standard path, fall back to Playwright-bundled Chromium
-    if not os.path.exists(chrome_exe):
-        logger.warning("Chrome not found at standard path; falling back to Playwright-bundled Chromium.")
+    if not chrome_exe:
+        logger.warning("Chrome/Chromium not found on PATH; falling back to Playwright-bundled Chromium.")
         chrome_exe = None
 
     # Ensure profile dir exists

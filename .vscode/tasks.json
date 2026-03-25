@@ -4,38 +4,56 @@
 		{
 			"label": "run-pytests",
 			"type": "shell",
-			"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' tools/pytest_watchdog.py --idle-timeout 0 --max-duration 600 -- -q",
+			"command": "${workspaceFolder}/.venv/bin/python tools/pytest_watchdog.py --idle-timeout 0 --max-duration 600 -- -q",
+			"windows": {
+				"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' tools/pytest_watchdog.py --idle-timeout 0 --max-duration 600 -- -q"
+			},
 			"group": { "kind": "test", "isDefault": true }
 		},
 		{
 			"label": "install-pytest",
 			"type": "shell",
-			"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' -m pip install pytest",
+			"command": "${workspaceFolder}/.venv/bin/python -m pip install pytest",
+			"windows": {
+				"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' -m pip install pytest"
+			},
 			"group": "build"
 		},
 		{
 			"label": "setup-py311",
 			"type": "shell",
-			"command": "powershell -ExecutionPolicy Bypass -File .\\scripts\\setup_python311.ps1",
+			"command": "python3 -m venv .venv && ./.venv/bin/python -m pip install --upgrade pip && ./.venv/bin/python -m pip install -r requirements.txt",
+			"windows": {
+				"command": "powershell -ExecutionPolicy Bypass -File .\\scripts\\setup_python311.ps1"
+			},
 			"group": "build",
 			"detail": "Install Python 3.11, recreate .venv, and install dependencies"
 		},
 		{
 			"label": "run-chat",
 			"type": "shell",
-			"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' chat_cli.py",
+			"command": "${workspaceFolder}/.venv/bin/python chat_cli.py",
+			"windows": {
+				"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' chat_cli.py"
+			},
 			"group": { "kind": "none" }
 		},
 		{
 			"label": "run-companion",
 			"type": "shell",
-			"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' run_companion.py",
+			"command": "${workspaceFolder}/.venv/bin/python run_companion.py",
+			"windows": {
+				"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' run_companion.py"
+			},
 			"group": { "kind": "none" }
 		},
 		{
 			"label": "run-web",
 			"type": "shell",
-			"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' run_companion.py --web",
+			"command": "${workspaceFolder}/.venv/bin/python run_companion.py --web",
+			"windows": {
+				"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' run_companion.py --web"
+			},
 			"group": { "kind": "none" },
 			"isBackground": true,
 			"problemMatcher": [],
@@ -49,7 +67,10 @@
 		{
 			"label": "watch-logs",
 			"type": "shell",
-			"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' tools/watch_logs.py",
+			"command": "${workspaceFolder}/.venv/bin/python tools/watch_logs.py",
+			"windows": {
+				"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' tools/watch_logs.py"
+			},
 			"isBackground": true,
 			"problemMatcher": [],
 			"presentation": {
