@@ -1,23 +1,20 @@
 # Documentation Index
 
-This folder contains organized supporting documentation.
+Documentation is centralized into two canonical files at repository root:
 
-## Structure
+1. PLAN.md (current-state architecture, features, operations, validation)
+2. ROADMAP.md (future plan, milestones, prioritization, Plan B integration)
 
-- archive/
-  - FEATURE_TRACKER_ARTIFACT.md
-  - ROADMAP_ARTIFACT.md
-- notes/
-  - IMPLEMENTATION_SPEC_REPO_INSIGHTS.md
-- ops/
-  - RELEASE_DAILY_USE_CHECKLIST.md
+This docs directory now primarily contains supporting notes and historical artifacts.
 
-## Canonical and Active Docs
+## Folder Structure
 
-Primary project docs remain at repository root:
+1. archive/: historical snapshots and superseded long-form planning docs.
+2. notes/: lightweight notes/index pointers.
+3. ops/: lightweight operational index pointers.
 
-- PLAN.md (current-state canonical technical reference)
-- IMPROVEMENTS_ROADMAP.md (active big-sprint roadmap)
-- ROADMAP.md (roadmap index)
-- ARCHITECTURE.md (architecture index)
-- README.md (onboarding)
+## Guidance
+
+1. Do not duplicate canonical content in nested docs.
+2. Add implementation truth to PLAN.md and future changes to ROADMAP.md.
+3. Move superseded long-form docs to docs/archive/.

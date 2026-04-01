@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from companion_ai.core import config as core_config
@@ -78,7 +78,7 @@ def request_execution_token(capability: str, action: str) -> dict[str, Any]:
 
 def execute_simulated_action(request: RemoteActionRequest) -> dict[str, Any]:
     trace_id = f"ra_{uuid.uuid4().hex[:12]}"
-    now_iso = datetime.utcnow().isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
 
     capability = (request.capability or "").strip()
     action = (request.action or "").strip().lower()
@@ -131,8 +131,8 @@ def execute_simulated_action(request: RemoteActionRequest) -> dict[str, Any]:
             envelope["error"] = "Non-read actions require a valid approval token"
             return envelope
 
-    envelope["lifecycle"].append({"state": "approved", "ts": datetime.utcnow().isoformat()})
-    envelope["lifecycle"].append({"state": "running", "ts": datetime.utcnow().isoformat()})
+    envelope["lifecycle"].append({"state": "approved", "ts": datetime.now(timezone.utc).isoformat()})
+    envelope["lifecycle"].append({"state": "running", "ts": datetime.now(timezone.utc).isoformat()})
 
     envelope["status"] = "completed"
     envelope["result"] = {
@@ -141,5 +141,5 @@ def execute_simulated_action(request: RemoteActionRequest) -> dict[str, Any]:
         "capability": capability,
         "target": target,
     }
-    envelope["lifecycle"].append({"state": "completed", "ts": datetime.utcnow().isoformat()})
+    envelope["lifecycle"].append({"state": "completed", "ts": datetime.now(timezone.utc).isoformat()})
     return envelope

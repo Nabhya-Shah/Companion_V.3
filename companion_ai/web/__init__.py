@@ -15,7 +15,7 @@ import logging
 import threading
 import webbrowser
 
-from flask import Flask
+from flask import Flask, request
 
 from companion_ai.core import config as core_config
 from companion_ai.services import jobs as job_manager_module
@@ -88,8 +88,17 @@ def create_app() -> Flask:
     # ------------------------------------------------------------------
     # Security before_request hook
     # ------------------------------------------------------------------
-    from companion_ai.web.state import enforce_api_security
+    from companion_ai.web.state import enforce_api_security, get_request_trace_id
     app.before_request(enforce_api_security)
+
+    @app.after_request
+    def _attach_trace_header(response):
+        try:
+            if request.path.startswith('/api/'):
+                response.headers['X-Trace-ID'] = get_request_trace_id()
+        except Exception:
+            pass
+        return response
 
     # ------------------------------------------------------------------
     # Register blueprints

@@ -13,6 +13,7 @@ All data is ephemeral (cleared on server restart).
 
 import json
 import logging
+import re
 import threading
 import time
 from datetime import datetime
@@ -147,6 +148,7 @@ def harness_send():
     Response: {user, ai, metadata, tokens, activity_snapshot}
     """
     data = request.json or {}
+    trace_id = state.get_request_trace_id(data)
     user_message = data.get('message', '').strip()
     if not user_message:
         return jsonify({'error': 'Empty message'}), 400
@@ -161,6 +163,7 @@ def harness_send():
             user_message,
             active_history,
             memory_user_id=mem0_user_id,
+            trace_id=trace_id,
         )
 
         if not ai_response or not ai_response.strip():
@@ -196,12 +199,13 @@ def harness_send():
             'tokens': token_usage,
             'memory_saved': memory_saved,
             'history_length': len(active_history),
+            'trace_id': trace_id,
             'activity_snapshot': recent,
         })
     except Exception as e:
         log_activity("error", "harness_send", {"error": str(e)})
         logger.error(f"Test harness send error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': str(e), 'trace_id': trace_id}), 500
 
 
 @test_bp.route('/log', methods=['GET'])

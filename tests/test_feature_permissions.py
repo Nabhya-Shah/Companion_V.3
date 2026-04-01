@@ -64,6 +64,7 @@ def test_permissions_endpoint_get_and_post(monkeypatch):
     import companion_ai.web.state as web_state
 
     captured = {}
+    monkeypatch.setattr(web_state.core_config, "API_AUTH_TOKEN", "secret")
 
     monkeypatch.setattr(
         web_state,
@@ -89,13 +90,14 @@ def test_permissions_endpoint_get_and_post(monkeypatch):
     monkeypatch.setattr(web_state, "set_workspace_permissions", fake_set_workspace_permissions)
 
     client = app.test_client()
-    get_res = client.get("/api/permissions?workspace_id=alpha")
+    get_res = client.get("/api/permissions?workspace_id=alpha", headers={"X-API-TOKEN": "secret"})
     assert get_res.status_code == 200
     assert get_res.get_json()["permissions"]["tools_execute"] is True
 
     post_res = client.post(
         "/api/permissions",
         json={"workspace_id": "alpha", "permissions": {"tools_execute": False}},
+        headers={"X-API-TOKEN": "secret"},
     )
     assert post_res.status_code == 200
     assert captured["workspace_id"] == "alpha"

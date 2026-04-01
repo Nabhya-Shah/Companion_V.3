@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -242,7 +242,7 @@ def build_reflection_snapshot() -> dict[str, Any] | None:
         "next_steps": next_steps[:5],
         "open_questions": open_questions[:5],
         "metadata": {
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "source": "reflection",
             "facts": len(facts),
             "pending_facts": len(pending),
@@ -253,7 +253,7 @@ def build_reflection_snapshot() -> dict[str, Any] | None:
 
 def generate_continuity_if_due(*, force: bool = False) -> dict[str, Any] | None:
     """Generate at most one continuity snapshot per UTC day unless forced."""
-    today = datetime.utcnow().date().isoformat()
+    today = datetime.now(timezone.utc).date().isoformat()
     last_day = _meta_get("last_continuity_day")
     if not force and last_day == today:
         return None

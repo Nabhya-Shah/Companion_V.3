@@ -219,6 +219,7 @@ def remember(
     source: str = "conversation",
     evidence: str | None = None,
     user_id: str | None = None,
+    request_id: str | None = None,
     skip_mem0: bool = False,
     skip_sqlite: bool = False,
 ) -> dict[str, Any]:
@@ -252,6 +253,7 @@ def remember(
                 messages=messages,
                 user_id=effective_user_id,
                 metadata={"source": source},
+                request_id=request_id,
             )
             result["mem0"] = mem0_out
             logger.info(f"knowledge.remember -> Mem0 OK: {fact[:60]}")

@@ -72,13 +72,14 @@ relevant memories from the provided list. Return the indices of relevant memorie
         """
         operation = task.get("operation")
         user_id = task.get("user_id")
+        trace_id = task.get("trace_id")
         
         if operation == "search":
             return await self._search(task.get("query", ""), user_id=user_id)
         elif operation == "extract":
             return await self._extract(task.get("text", ""))
         elif operation == "save":
-            return await self._save(task.get("fact", ""), user_id=user_id)
+            return await self._save(task.get("fact", ""), user_id=user_id, trace_id=trace_id)
         elif operation == "delete":
             return await self._delete(task.get("query", ""))
         else:
@@ -146,7 +147,7 @@ relevant memories from the provided list. Return the indices of relevant memorie
             logger.error(f"Fact extraction failed: {e}")
             return LoopResult.failure(str(e))
     
-    async def _save(self, fact: str, user_id: str | None = None) -> LoopResult:
+    async def _save(self, fact: str, user_id: str | None = None, trace_id: str | None = None) -> LoopResult:
         """Save a fact via unified knowledge.remember().
 
         Also writes to brain folder for human-readable backup.
@@ -167,7 +168,13 @@ relevant memories from the provided list. Return the indices of relevant memorie
             from companion_ai.brain_manager import get_brain
             from datetime import datetime
 
-            result = remember(fact, source="loop_memory", user_id=user_id)
+            memory_request_id = f"{trace_id}:loop_save" if trace_id else None
+            result = remember(
+                fact,
+                source="loop_memory",
+                user_id=user_id,
+                request_id=memory_request_id,
+            )
 
             # Also append to brain folder for human-readable log
             brain = get_brain()

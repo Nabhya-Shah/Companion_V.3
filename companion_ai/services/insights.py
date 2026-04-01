@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -264,14 +264,14 @@ def build_digest_text() -> tuple[str, str, dict[str, Any]] | None:
         "facts": len(facts),
         "pending_facts": len(pending),
         "enabled_schedules": len(enabled),
-        "generated_at": datetime.now().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
     }
     return title, body, metadata
 
 
 def generate_daily_insight_if_due(now: datetime | None = None, force: bool = False) -> dict[str, Any] | None:
     """Generate at most one digest per UTC day unless force=True."""
-    now = now or datetime.utcnow()
+    now = now or datetime.now(timezone.utc)
     today = now.date().isoformat()
     last_day = _meta_get("last_daily_digest_day")
     if not force and last_day == today:

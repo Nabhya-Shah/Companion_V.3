@@ -14,6 +14,14 @@ from companion_ai.tools import (
 from companion_ai.core import config as core_config
 import companion_ai.tools as tools_module
 
+
+@pytest.fixture(autouse=True)
+def _isolate_tool_policy_defaults(monkeypatch):
+    """Avoid environment-coupled policy behavior from workspace files during tests."""
+    monkeypatch.setattr(core_config, 'PLUGIN_POLICY_PATH', '')
+    monkeypatch.setattr(core_config, 'PLUGIN_ALLOWLIST', '')
+    monkeypatch.setattr(core_config, 'TOOL_ALLOWLIST', '')
+
 def test_list_tools_contains_core():
     """Test that core tools are registered."""
     tools = list_tools()

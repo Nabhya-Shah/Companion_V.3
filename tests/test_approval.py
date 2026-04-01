@@ -140,6 +140,7 @@ def test_get_pending_approvals_empty():
 
 def test_run_tool_blocks_until_approved(monkeypatch):
     _reset_approval_state()
+    monkeypatch.setattr(registry, '_get_workspace_plugin_allowlist', lambda: None)
     registry.mark_tool_requires_approval('get_current_time')
 
     result_holder = {'value': None}
@@ -168,6 +169,7 @@ def test_run_tool_blocks_until_approved(monkeypatch):
 
 def test_run_tool_denied_returns_message(monkeypatch):
     _reset_approval_state()
+    monkeypatch.setattr(registry, '_get_workspace_plugin_allowlist', lambda: None)
     registry.mark_tool_requires_approval('get_current_time')
 
     result_holder = {'value': None}
@@ -186,6 +188,67 @@ def test_run_tool_denied_returns_message(monkeypatch):
 
     req_id = registry.get_pending_approvals()[0]['id']
     registry.resolve_approval(req_id, approved=False)
+
+    t.join(timeout=5)
+    assert 'denied' in (result_holder['value'] or '').lower()
+    _reset_approval_state()
+
+
+def test_browser_goto_run_tool_blocks_until_approved(monkeypatch):
+    _reset_approval_state()
+    monkeypatch.setattr(registry, '_get_workspace_plugin_allowlist', lambda: None)
+    monkeypatch.setitem(registry._TOOLS, 'browser_goto', lambda arg: f'navigated:{arg}')
+    registry.mark_tool_requires_approval('browser_goto')
+
+    result_holder = {'value': None}
+
+    def background():
+        result_holder['value'] = registry.run_tool('browser_goto', 'https://example.com')
+
+    t = threading.Thread(target=background, daemon=True)
+    t.start()
+
+    for _ in range(50):
+        pending = registry.get_pending_approvals()
+        if pending:
+            break
+        time.sleep(0.05)
+
+    pending = registry.get_pending_approvals()
+    assert len(pending) == 1
+    assert pending[0]['tool'] == 'browser_goto'
+    assert pending[0]['status'] == 'pending'
+
+    registry.resolve_approval(pending[0]['id'], approved=True)
+
+    t.join(timeout=5)
+    assert result_holder['value'] == 'navigated:https://example.com'
+    _reset_approval_state()
+
+
+def test_browser_goto_run_tool_denied(monkeypatch):
+    _reset_approval_state()
+    monkeypatch.setattr(registry, '_get_workspace_plugin_allowlist', lambda: None)
+    monkeypatch.setitem(registry._TOOLS, 'browser_goto', lambda arg: f'navigated:{arg}')
+    registry.mark_tool_requires_approval('browser_goto')
+
+    result_holder = {'value': None}
+
+    def background():
+        result_holder['value'] = registry.run_tool('browser_goto', 'https://example.com')
+
+    t = threading.Thread(target=background, daemon=True)
+    t.start()
+
+    for _ in range(50):
+        pending = registry.get_pending_approvals()
+        if pending:
+            break
+        time.sleep(0.05)
+
+    pending = registry.get_pending_approvals()
+    assert len(pending) == 1
+    registry.resolve_approval(pending[0]['id'], approved=False)
 
     t.join(timeout=5)
     assert 'denied' in (result_holder['value'] or '').lower()
@@ -226,44 +289,50 @@ def test_approvals_list_endpoint(monkeypatch):
 
 def test_approvals_resolve_endpoint_not_found(monkeypatch):
     _reset_approval_state()
+    import web_companion
+    monkeypatch.setattr(web_companion.core_config, 'API_AUTH_TOKEN', 'secret')
     from companion_ai.web import create_app
     app = create_app()
     client = app.test_client()
 
-    resp = client.post('/api/approvals/fake_id', json={'decision': 'approve'})
+    resp = client.post('/api/approvals/fake_id', json={'decision': 'approve'}, headers={'X-API-TOKEN': 'secret'})
     assert resp.status_code == 404
     _reset_approval_state()
 
 
 def test_approvals_resolve_endpoint_bad_decision(monkeypatch):
     _reset_approval_state()
+    import web_companion
+    monkeypatch.setattr(web_companion.core_config, 'API_AUTH_TOKEN', 'secret')
     from companion_ai.web import create_app
     app = create_app()
     client = app.test_client()
 
-    resp = client.post('/api/approvals/fake_id', json={'decision': 'maybe'})
+    resp = client.post('/api/approvals/fake_id', json={'decision': 'maybe'}, headers={'X-API-TOKEN': 'secret'})
     assert resp.status_code == 400
     _reset_approval_state()
 
 
 def test_approval_config_endpoint(monkeypatch):
     _reset_approval_state()
+    import web_companion
+    monkeypatch.setattr(web_companion.core_config, 'API_AUTH_TOKEN', 'secret')
     from companion_ai.web import create_app
     app = create_app()
     client = app.test_client()
 
     # GET empty
-    resp = client.get('/api/approvals/config')
+    resp = client.get('/api/approvals/config', headers={'X-API-TOKEN': 'secret'})
     assert resp.status_code == 200
     assert resp.get_json()['requires_approval'] == []
 
     # POST add
-    resp = client.post('/api/approvals/config', json={'tools': ['browser_goto'], 'action': 'add'})
+    resp = client.post('/api/approvals/config', json={'tools': ['browser_goto'], 'action': 'add'}, headers={'X-API-TOKEN': 'secret'})
     assert resp.status_code == 200
     assert 'browser_goto' in resp.get_json()['requires_approval']
 
     # POST remove
-    resp = client.post('/api/approvals/config', json={'tools': ['browser_goto'], 'action': 'remove'})
+    resp = client.post('/api/approvals/config', json={'tools': ['browser_goto'], 'action': 'remove'}, headers={'X-API-TOKEN': 'secret'})
     assert resp.status_code == 200
     assert resp.get_json()['requires_approval'] == []
     _reset_approval_state()

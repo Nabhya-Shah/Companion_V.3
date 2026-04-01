@@ -15,7 +15,7 @@ import logging
 import threading
 from typing import Dict, List, Tuple
 
-from flask import request, jsonify, has_request_context
+from flask import request, jsonify, has_request_context, g
 
 from companion_ai.conversation_manager import ConversationSession
 from companion_ai.core import config as core_config
@@ -54,6 +54,13 @@ _STRICT_TOKEN_PATH_PREFIXES = (
     "/api/brain/reindex",
     "/api/brain/auto-write",
     "/api/tokens/reset",
+)
+
+_STRICT_TOKEN_WRITE_PATH_PREFIXES = (
+    "/api/permissions",
+    "/api/plugins/policy",
+    "/api/approvals/",
+    "/api/remote-actions/approve",
 )
 
 _KNOWN_FEATURE_FLAGS = {
@@ -106,6 +113,16 @@ def enforce_api_security():
             return jsonify({"error": "Unauthorized"}), 401
         return None
 
+    # Sensitive policy mutations require explicit token configuration by default.
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and any(
+        request.path.startswith(prefix) for prefix in _STRICT_TOKEN_WRITE_PATH_PREFIXES
+    ):
+        if not core_config.API_AUTH_TOKEN:
+            return jsonify({"error": "Forbidden: configure API_AUTH_TOKEN for sensitive write endpoints"}), 403
+        if not core_config.require_auth(token):
+            return jsonify({"error": "Unauthorized"}), 401
+        return None
+
     if core_config.API_AUTH_TOKEN:
         if not core_config.require_auth(token):
             return jsonify({"error": "Unauthorized"}), 401
@@ -130,6 +147,39 @@ def _sanitize_scope_value(value: str | None, default: str) -> str:
         return default
     cleaned = "".join(ch for ch in str(value) if ch.isalnum() or ch in ("-", "_"))
     return cleaned[:64] if cleaned else default
+
+
+def _sanitize_trace_id(value: str | None) -> str:
+    if not value:
+        return ""
+    cleaned = "".join(ch for ch in str(value) if ch.isalnum() or ch in ("-", "_", "."))
+    return cleaned[:96]
+
+
+def _resolve_trace_id(payload: dict | None = None) -> str:
+    trace = None
+    if has_request_context():
+        trace = (
+            request.headers.get("X-Trace-ID")
+            or request.headers.get("X-Request-ID")
+            or request.args.get("trace_id")
+        )
+    if not trace and isinstance(payload, dict):
+        trace = payload.get("trace_id") or payload.get("request_id")
+    return _sanitize_trace_id(trace)
+
+
+def get_request_trace_id(payload: dict | None = None) -> str:
+    """Resolve or generate a request trace id and cache it in Flask request context."""
+    if has_request_context():
+        existing = getattr(g, "trace_id", "")
+        if existing:
+            return existing
+        resolved = _resolve_trace_id(payload) or f"req_{uuid.uuid4().hex[:12]}"
+        g.trace_id = resolved
+        return resolved
+
+    return _resolve_trace_id(payload) or f"req_{uuid.uuid4().hex[:12]}"
 
 
 def _resolve_session_key(payload: dict | None = None) -> str:

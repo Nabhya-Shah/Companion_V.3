@@ -4,6 +4,41 @@ from __future__ import annotations
 from companion_ai.tools.registry import tool
 
 
+def _format_browser_error(action: str, err: Exception) -> str:
+    text = str(err)
+    lower = text.lower()
+
+    if isinstance(err, ModuleNotFoundError) or "no module named 'playwright'" in lower:
+        return (
+            f"Browser {action} error: Playwright is not installed. "
+            "Install with './.venv/bin/python -m pip install playwright' and "
+            "'./.venv/bin/playwright install chromium'."
+        )
+
+    if "could not launch chrome" in lower or "chrome/chromium not found" in lower:
+        return (
+            f"Browser {action} error: Chrome/Chromium runtime is unavailable. "
+            "Install a browser or set CHROME_PATH to a valid executable."
+        )
+
+    return f"Browser {action} error: {text}"
+
+
+def _normalize_browser_result(action: str, result: str) -> str:
+    """Convert known browser runtime failure strings into actionable hints."""
+    if not isinstance(result, str):
+        return result
+    lower = result.lower()
+
+    if "no module named 'playwright'" in lower:
+        return _format_browser_error(action, ModuleNotFoundError("No module named 'playwright'"))
+
+    if "could not launch chrome" in lower or "chrome/chromium not found" in lower:
+        return _format_browser_error(action, RuntimeError("Could not launch Chrome"))
+
+    return result
+
+
 @tool('browser_goto', schema={
     "type": "function",
     "function": {
@@ -25,9 +60,9 @@ def tool_browser_goto(url: str) -> str:
     """Navigate browser to URL."""
     try:
         from companion_ai.agents.browser import sync_goto
-        return sync_goto(url)
+        return _normalize_browser_result("navigate", sync_goto(url))
     except Exception as e:
-        return f"Browser error: {str(e)}"
+        return _format_browser_error("navigate", e)
 
 
 @tool('browser_click', schema={
@@ -55,9 +90,9 @@ def tool_browser_click(selector: str = "", text: str = None) -> str:
     """Click element by selector or text."""
     try:
         from companion_ai.agents.browser import sync_click
-        return sync_click(selector, text)
+        return _normalize_browser_result("click", sync_click(selector, text))
     except Exception as e:
-        return f"Browser click error: {str(e)}"
+        return _format_browser_error("click", e)
 
 
 @tool('browser_type', schema={
@@ -85,9 +120,9 @@ def tool_browser_type(selector: str, text: str) -> str:
     """Type into input field."""
     try:
         from companion_ai.agents.browser import sync_type
-        return sync_type(selector, text)
+        return _normalize_browser_result("type", sync_type(selector, text))
     except Exception as e:
-        return f"Browser type error: {str(e)}"
+        return _format_browser_error("type", e)
 
 
 @tool('browser_read', schema={
@@ -111,9 +146,9 @@ def tool_browser_read(selector: str = None) -> str:
     """Read text from page/element."""
     try:
         from companion_ai.agents.browser import sync_get_text
-        return sync_get_text(selector)
+        return _normalize_browser_result("read", sync_get_text(selector))
     except Exception as e:
-        return f"Browser read error: {str(e)}"
+        return _format_browser_error("read", e)
 
 
 @tool('browser_press', schema={
@@ -137,6 +172,6 @@ def tool_browser_press(key: str) -> str:
     """Press keyboard key in browser."""
     try:
         from companion_ai.agents.browser import sync_press_key
-        return sync_press_key(key)
+        return _normalize_browser_result("press", sync_press_key(key))
     except Exception as e:
-        return f"Browser press error: {str(e)}"
+        return _format_browser_error("press", e)

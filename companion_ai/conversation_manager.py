@@ -35,6 +35,12 @@ else:
 logger = logging.getLogger(__name__)
 
 
+def _mem0_request_id(trace_id: str | None, stage: str) -> str | None:
+    if not trace_id:
+        return None
+    return f"{trace_id}:{stage}"
+
+
 def _build_retrieval_stage_events(metadata: Dict) -> List[Dict]:
     """Build retrieval stage lifecycle events from orchestrator metadata."""
     if not isinstance(metadata, dict):
@@ -122,7 +128,7 @@ class ConversationSession:
             })
             logger.info(f"Updated memory context with keywords: {keywords}")
     
-    def process_message(self, user_message: str, full_conversation_history: List[Dict] = None, memory_user_id: str | None = None) -> str:
+    def process_message(self, user_message: str, full_conversation_history: List[Dict] = None, memory_user_id: str | None = None, trace_id: str | None = None) -> str:
         """
         New conversation flow:
         1. Update memory context with relevant information
@@ -150,7 +156,10 @@ class ConversationSession:
         
         # Step 3: Generate response with enhanced context
         effective_mem0_user_id = memory_user_id or core_config.MEM0_USER_ID
+        effective_trace_id = trace_id or self.memory_context.get('trace_id')
         self.memory_context['mem0_user_id'] = effective_mem0_user_id
+        if effective_trace_id:
+            self.memory_context['trace_id'] = effective_trace_id
         ai_response = generate_response(user_message, self.memory_context)
         
         # Step 4: Store conversation exchange for later processing
@@ -168,7 +177,14 @@ class ConversationSession:
                     {"role": "user", "content": user_message},
                     {"role": "assistant", "content": ai_response}
                 ]
-                mem0_result = mem0_add_memory(messages, user_id=effective_mem0_user_id)
+                if effective_trace_id:
+                    mem0_result = mem0_add_memory(
+                        messages,
+                        user_id=effective_mem0_user_id,
+                        request_id=_mem0_request_id(effective_trace_id, "chat_sync"),
+                    )
+                else:
+                    mem0_result = mem0_add_memory(messages, user_id=effective_mem0_user_id)
                 write_status = (mem0_result or {}).get('write_status', {}) if isinstance(mem0_result, dict) else {}
                 status = write_status.get('status')
                 memory_saved = status in {'accepted_committed', 'accepted_queued'}
@@ -180,7 +196,7 @@ class ConversationSession:
         
         return ai_response, memory_saved
     
-    def process_message_streaming(self, user_message: str, full_conversation_history: List[Dict] = None, memory_user_id: str | None = None):
+    def process_message_streaming(self, user_message: str, full_conversation_history: List[Dict] = None, memory_user_id: str | None = None, trace_id: str | None = None):
         """Streaming version of process_message.
         
         Yields text chunks as they arrive. Stores response after completion.
@@ -199,7 +215,10 @@ class ConversationSession:
             self.memory_context['recent_conversation'] = "\n".join(recent_turns)
         
         effective_mem0_user_id = memory_user_id or core_config.MEM0_USER_ID
+        effective_trace_id = trace_id or self.memory_context.get('trace_id')
         self.memory_context['mem0_user_id'] = effective_mem0_user_id
+        if effective_trace_id:
+            self.memory_context['trace_id'] = effective_trace_id
 
         # Step 3: Generate response - use orchestrator if enabled
         full_response = ""
@@ -209,7 +228,7 @@ class ConversationSession:
             # V6 Architecture: Use orchestrator for routing
             try:
                 import time as _time
-                from companion_ai.orchestrator import process_message as orchestrator_process
+                from companion_ai.orchestration import process_message as orchestrator_process
                 from companion_ai.llm_interface import reset_last_request_tokens
                 
                 # Reset token counter — orchestrator bypasses generate_response()
@@ -221,6 +240,8 @@ class ConversationSession:
                 
                 final_metadata = metadata or {}
                 final_metadata['orchestrator_ms'] = _orch_ms
+                if effective_trace_id:
+                    final_metadata['trace_id'] = effective_trace_id
                 
                 # Yield metadata first
                 yield {"type": "meta", "data": final_metadata}
@@ -238,6 +259,8 @@ class ConversationSession:
             except concurrent.futures.TimeoutError:
                 logger.error("Orchestrator timed out (120s), falling back to direct")
                 final_metadata = {"source": "direct_fallback", "error": "orchestrator_timeout"}
+                if effective_trace_id:
+                    final_metadata['trace_id'] = effective_trace_id
                 yield {"type": "meta", "data": final_metadata}
                 for chunk in generate_response_streaming(user_message, self.memory_context):
                     full_response += chunk
@@ -245,12 +268,16 @@ class ConversationSession:
             except Exception as e:
                 logger.error(f"Orchestrator failed, falling back: {e}")
                 final_metadata = {"source": "direct_fallback", "error": str(e)}
+                if effective_trace_id:
+                    final_metadata['trace_id'] = effective_trace_id
                 yield {"type": "meta", "data": final_metadata}
                 for chunk in generate_response_streaming(user_message, self.memory_context):
                     full_response += chunk
                     yield chunk
         else:
             final_metadata = {"source": "direct"}
+            if effective_trace_id:
+                final_metadata['trace_id'] = effective_trace_id
             yield {"type": "meta", "data": final_metadata}
             for chunk in generate_response_streaming(user_message, self.memory_context):
                 full_response += chunk
@@ -288,7 +315,14 @@ class ConversationSession:
                         {"role": "user", "content": user_message},
                         {"role": "assistant", "content": full_response}
                     ]
-                    mem0_result = mem0_add_memory(messages, user_id=effective_mem0_user_id)
+                    if effective_trace_id:
+                        mem0_result = mem0_add_memory(
+                            messages,
+                            user_id=effective_mem0_user_id,
+                            request_id=_mem0_request_id(effective_trace_id, "chat_async"),
+                        )
+                    else:
+                        mem0_result = mem0_add_memory(messages, user_id=effective_mem0_user_id)
                     write_status = (mem0_result or {}).get('write_status', {}) if isinstance(mem0_result, dict) else {}
                     logger.info(f"Mem0: Stored conversation exchange (async) status={write_status.get('status', 'unknown')}")
                 except Exception as e:

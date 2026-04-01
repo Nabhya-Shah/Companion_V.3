@@ -1,18 +1,14 @@
 # Architecture Index
 
-This file is now an index document.
+This file is now an index-only document.
 
-For the full, current architecture and runtime truth, see PLAN.md.
+Canonical architecture and feature truth lives in PLAN.md.
+Canonical future direction and architecture evolution decisions live in ROADMAP.md.
 
-## Current Architecture Summary
+Use this as the top-level architecture entry point, not as a duplicated spec.
 
-- Web-first Flask application with blueprint split under companion_ai/web.
-- Orchestrator-first routing in companion_ai/orchestrator.py.
-- Local specialist loops in companion_ai/local_loops for memory, tools, and vision.
-- Hybrid memory and retrieval in companion_ai/memory (Mem0 + SQLite + brain index).
-- Safety-gated tools and approvals in companion_ai/tools/registry.py.
+## Quick Links
 
-## Why This Is an Index
-
-This project had multiple overlapping architecture documents that drifted over time.
-PLAN.md is now the canonical merged source to keep implementation and docs aligned.
+1. Current architecture and feature inventory: PLAN.md
+2. Future architecture direction and delivery plan: ROADMAP.md
+3. Historical architecture/planning artifacts: docs/archive/

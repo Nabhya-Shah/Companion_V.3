@@ -76,6 +76,7 @@ def chat_streaming():
     """Streaming chat endpoint - sends response tokens as they arrive."""
     try:
         data = request.json or {}
+        trace_id = state.get_request_trace_id(data)
         session_key, profile_key, mem0_user_id, active_history, active_session = state._get_active_session_state(data)
         token = (request.headers.get('X-API-TOKEN') or data.get('token')
                  or request.cookies.get('api_token'))
@@ -102,6 +103,7 @@ def chat_streaming():
                     user_message,
                     active_history,
                     memory_user_id=mem0_user_id,
+                    trace_id=trace_id,
                 ):
                     # Flush any queued plan events before each chunk
                     while not _plan_event_queue.empty():
@@ -112,11 +114,20 @@ def chat_streaming():
                             break
 
                     if isinstance(chunk, dict) and chunk.get('type') == 'meta':
-                        yield f"data: {json.dumps({'meta': chunk['data']})}\n\n"
+                        meta_payload = chunk.get('data') if isinstance(chunk.get('data'), dict) else {}
+                        meta_payload = dict(meta_payload)
+                        meta_payload.setdefault('trace_id', trace_id)
+                        yield f"data: {json.dumps({'meta': meta_payload})}\n\n"
                     elif isinstance(chunk, dict) and chunk.get('type') == 'token_meta':
-                        yield f"data: {json.dumps({'token_meta': chunk['data']})}\n\n"
+                        token_meta = chunk.get('data') if isinstance(chunk.get('data'), dict) else {}
+                        token_meta = dict(token_meta)
+                        token_meta.setdefault('trace_id', trace_id)
+                        yield f"data: {json.dumps({'token_meta': token_meta})}\n\n"
                     elif isinstance(chunk, dict) and chunk.get('type') == 'retrieval_stage':
-                        yield f"data: {json.dumps({'retrieval_stage': chunk['data']})}\n\n"
+                        stage_data = chunk.get('data') if isinstance(chunk.get('data'), dict) else {}
+                        stage_data = dict(stage_data)
+                        stage_data.setdefault('trace_id', trace_id)
+                        yield f"data: {json.dumps({'retrieval_stage': stage_data})}\n\n"
                     else:
                         chunk = _EMOTION_TAG_RE.sub('', chunk)
                         full_response += chunk
@@ -145,7 +156,7 @@ def chat_streaming():
                     except Exception as tts_error:
                         logger.warning(f"TTS error: {tts_error}")
 
-                yield f"data: {json.dumps({'done': True, 'full_response': full_response, 'tokens': token_usage, 'memory_saved': memory_saved})}\n\n"
+                yield f"data: {json.dumps({'done': True, 'full_response': full_response, 'tokens': token_usage, 'memory_saved': memory_saved, 'trace_id': trace_id})}\n\n"
 
                 entry = {
                     'user': user_message,
@@ -162,7 +173,7 @@ def chat_streaming():
 
             except Exception as e:
                 logger.error(f"Streaming error: {e}")
-                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                yield f"data: {json.dumps({'error': str(e), 'trace_id': trace_id})}\n\n"
 
         return Response(generate(), mimetype='text/event-stream')
 
@@ -176,6 +187,7 @@ def debug_chat():
     """Debug endpoint for AI agent testing."""
     try:
         data = request.json or {}
+        trace_id = state.get_request_trace_id(data)
         session_key, profile_key, mem0_user_id, active_history, active_session = state._get_active_session_state(data)
         user_message = data.get('message', '').strip()
         persona = data.get('persona', 'Companion')
@@ -195,6 +207,7 @@ def debug_chat():
             user_message,
             active_history,
             memory_user_id=mem0_user_id,
+            trace_id=trace_id,
         )
 
         if not ai_response or not ai_response.strip():
@@ -234,7 +247,8 @@ def debug_chat():
             'ai': ai_response,
             'timestamp': entry['timestamp'],
             'history_length': len(active_history),
-            'tokens': token_usage
+            'tokens': token_usage,
+            'trace_id': trace_id,
         })
 
     except Exception as e:

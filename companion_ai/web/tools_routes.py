@@ -254,3 +254,20 @@ def remote_action_simulate():
         code = 403 if reason in {'disabled', 'allowlist_denied'} else 400
         return jsonify(envelope), code
     return jsonify(envelope), 500
+
+
+@tools_bp.route('/api/browser/diagnostics', methods=['GET'])
+def browser_diagnostics():
+    """Return browser runtime diagnostics without launching automation."""
+    token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
+    if not core_config.require_auth(token):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    try:
+        from companion_ai.agents.browser import get_runtime_diagnostics
+        diagnostics = get_runtime_diagnostics()
+        diagnostics['trace_id'] = state.get_request_trace_id()
+        return jsonify(diagnostics)
+    except Exception as e:
+        logger.error(f"Browser diagnostics error: {e}")
+        return jsonify({'error': str(e), 'trace_id': state.get_request_trace_id()}), 500

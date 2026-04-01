@@ -52,3 +52,33 @@ def test_brain_upload_allowed_on_localhost_without_api_token(monkeypatch, tmp_pa
     payload = res.get_json()
     assert payload['success'] is True
     assert payload['filename'] == 'note.txt'
+
+
+def test_sensitive_policy_writes_forbidden_without_api_token_config(monkeypatch):
+    monkeypatch.setattr(web_companion.core_config, "API_AUTH_TOKEN", None)
+
+    client = app.test_client()
+
+    permissions_res = client.post(
+        "/api/permissions",
+        json={"workspace_id": "alpha", "permissions": {"tools_execute": True}},
+    )
+    assert permissions_res.status_code == 403
+
+    plugin_res = client.post(
+        "/api/plugins/policy",
+        json={"enabled_plugins": ["core"]},
+    )
+    assert plugin_res.status_code == 403
+
+    approval_res = client.post(
+        "/api/approvals/does-not-matter",
+        json={"decision": "approve"},
+    )
+    assert approval_res.status_code == 403
+
+    remote_res = client.post(
+        "/api/remote-actions/approve",
+        json={"capability": "ping", "action": "read"},
+    )
+    assert remote_res.status_code == 403

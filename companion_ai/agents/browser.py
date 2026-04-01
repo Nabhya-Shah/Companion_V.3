@@ -367,6 +367,57 @@ async def press_key(key: str) -> str:
 _agent_loop = None
 _loop_thread = None
 
+
+def get_runtime_diagnostics() -> dict:
+    """Return browser runtime readiness diagnostics without launching a browser."""
+    playwright_available = False
+    playwright_error = None
+    try:
+        import playwright.async_api  # noqa: F401
+        playwright_available = True
+    except Exception as e:
+        playwright_error = str(e)
+
+    chrome_path = _find_chrome_executable()
+    profile_dir = os.path.join(os.path.expanduser("~"), ".companion_chrome")
+    profile_exists = os.path.isdir(profile_dir)
+    profile_writable = False
+    profile_error = None
+
+    try:
+        os.makedirs(profile_dir, exist_ok=True)
+        profile_exists = True
+        probe_path = os.path.join(profile_dir, ".write_probe")
+        with open(probe_path, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(probe_path)
+        profile_writable = True
+    except Exception as e:
+        profile_error = str(e)
+
+    loop_running = bool(_loop_thread and _loop_thread.is_alive() and _agent_loop is not None)
+
+    status = "ready" if (playwright_available and profile_writable) else "degraded"
+    reasons = []
+    if not playwright_available:
+        reasons.append("playwright_not_installed")
+    if not profile_writable:
+        reasons.append("profile_not_writable")
+
+    return {
+        "status": status,
+        "playwright_available": playwright_available,
+        "playwright_error": playwright_error,
+        "chrome_executable": chrome_path,
+        "chrome_found": bool(chrome_path),
+        "profile_dir": profile_dir,
+        "profile_exists": profile_exists,
+        "profile_writable": profile_writable,
+        "profile_error": profile_error,
+        "background_loop_running": loop_running,
+        "reasons": reasons,
+    }
+
 def _start_loop_thread():
     """Worker thread that runs the persistent event loop."""
     global _agent_loop

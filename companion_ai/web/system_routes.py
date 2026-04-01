@@ -22,6 +22,8 @@ from companion_ai.core import config as core_config
 from companion_ai.core import metrics
 from companion_ai.memory.sqlite_backend import get_memory_stats
 from companion_ai.memory import mem0_backend as mem0
+from companion_ai.memory import write_queue
+from companion_ai.orchestration import get_runtime_descriptor as get_orchestration_runtime_descriptor
 from companion_ai.services import jobs as job_manager_module
 from companion_ai.web import state
 
@@ -477,17 +479,73 @@ def get_loop_capabilities():
 # Health / Config / Models / Tokens
 # ==========================================================================
 
+def _readiness_snapshot() -> dict:
+    worker = getattr(job_manager_module, '_worker_thread', None)
+    worker_alive = bool(worker and worker.is_alive())
+
+    mem0_enabled = bool(core_config.USE_MEM0)
+    mem0_initialized = bool(getattr(mem0, '_memory_instance', None) is not None)
+
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    brain_root = os.path.join(project_root, 'BRAIN')
+    data_root = os.path.join(project_root, 'data')
+
+    queue_depth = 0
+    queue_oldest_created_at = None
+    queue_probe_failed = False
+    try:
+        queued_rows = write_queue.list_queued_writes(limit=5000)
+        queue_depth = len(queued_rows)
+        if queued_rows:
+            queue_oldest_created_at = queued_rows[-1].get('created_at')
+    except Exception:
+        queue_probe_failed = True
+
+    snapshot = {
+        'status': 'ready',
+        'api_auth_configured': bool(core_config.API_AUTH_TOKEN),
+        'jobs_worker_alive': worker_alive,
+        'mem0_enabled': mem0_enabled,
+        'mem0_initialized': mem0_initialized,
+        'brain_dir_exists': os.path.isdir(brain_root),
+        'data_dir_exists': os.path.isdir(data_root),
+        'memory_write_queue_depth': queue_depth,
+        'memory_write_queue_oldest_created_at': queue_oldest_created_at,
+        'orchestration': get_orchestration_runtime_descriptor(),
+    }
+
+    degraded_reasons = []
+    if not worker_alive:
+        degraded_reasons.append('jobs_worker_down')
+    if mem0_enabled and not mem0_initialized:
+        degraded_reasons.append('mem0_not_initialized')
+    if not snapshot['data_dir_exists']:
+        degraded_reasons.append('data_dir_missing')
+    if queue_probe_failed:
+        degraded_reasons.append('memory_write_queue_probe_failed')
+    elif queue_depth > 100:
+        degraded_reasons.append('memory_write_queue_backlog')
+
+    if degraded_reasons:
+        snapshot['status'] = 'degraded'
+        snapshot['reasons'] = degraded_reasons
+
+    return snapshot
+
 @system_bp.route('/api/health')
 def health():
     try:
         memstats = get_memory_stats()
         mstats = metrics.snapshot()
         caps = core_config.model_capability_summary() if getattr(core_config, 'ENABLE_CAPABILITY_ROUTER', False) else None
+        trace_id = state.get_request_trace_id()
         return jsonify({
             'memory': memstats,
             'metrics': mstats,
             'models': caps,
             'tools': (mstats or {}).get('tools') if isinstance(mstats, dict) else None,
+            'readiness': _readiness_snapshot(),
+            'trace_id': trace_id,
         })
     except Exception as e:
         logger.error(f"Health error: {e}")

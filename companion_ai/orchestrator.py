@@ -381,6 +381,7 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
             Tuple of (response_text, metadata)
         """
         context = context or {}
+        trace_id = str(context.get("trace_id") or "").strip()
         
         try:
             # Step 1: Get 120B decision
@@ -390,6 +391,8 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
             response, metadata = await self._execute_decision(decision, user_message, context)
 
             metadata = metadata or {}
+            if trace_id:
+                metadata.setdefault("trace_id", trace_id)
 
             # Step 3: Extract structured facts from the completed turn when safe.
             extraction_meta = await self._maybe_extract_turn_facts(
@@ -410,7 +413,10 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
             
         except Exception as e:
             logger.error(f"Orchestrator error: {e}")
-            return f"I encountered an error: {str(e)}", {"error": True}
+            fallback_meta = {"error": True}
+            if trace_id:
+                fallback_meta["trace_id"] = trace_id
+            return f"I encountered an error: {str(e)}", fallback_meta
     
     async def _get_decision(self, user_message: str, context: Dict) -> OrchestratorDecision:
         """Get routing decision from local model (or Groq fallback)."""
@@ -532,6 +538,9 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
         
         loop_name = decision.loop
         task = dict(decision.task or {})
+        trace_id = str(context.get("trace_id") or "").strip()
+        if trace_id:
+            task.setdefault("trace_id", trace_id)
         mem0_user_id = context.get("mem0_user_id")
         if mem0_user_id and loop_name == "memory":
             task.setdefault("user_id", mem0_user_id)
@@ -551,6 +560,8 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
             logger.info(f"DEBUG: Executing loop.execute({task})")
             loop_start = time.time()
             result = await loop.execute(task)
+            if trace_id and isinstance(result.metadata, dict):
+                result.metadata.setdefault("trace_id", trace_id)
             loop_duration_ms = int((time.time() - loop_start) * 1000)
 
             loop_provider = result.metadata.get("provider") if result and getattr(result, "metadata", None) else None
@@ -579,6 +590,8 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
                 "source": f"loop_{loop_name}",
                 "loop_result": result.to_dict()
             }
+            if trace_id:
+                metadata_payload["trace_id"] = trace_id
 
             if self._is_smart_home_action(loop_name, operation):
                 metadata_payload["action_feedback"] = self._build_smart_home_feedback(operation, result)
@@ -721,12 +734,16 @@ Do NOT mention "steps" or "plans" — just answer naturally."""
             )
 
         complete_plan(plan.id, summary=final_text)
-        return final_text, {
+        metadata = {
             "source": "plan",
             "plan_id": plan.id,
             "steps_completed": sum(1 for s in plan.steps if s.status == StepStatus.COMPLETED),
             "steps_total": len(plan.steps),
         }
+        trace_id = str(context.get("trace_id") or "").strip()
+        if trace_id:
+            metadata["trace_id"] = trace_id
+        return final_text, metadata
 
     async def _handle_background(self, decision: OrchestratorDecision) -> Tuple[str, Dict]:
         """Handle background task delegation."""
@@ -793,9 +810,13 @@ Do NOT mention "steps" or "plans" — just answer naturally."""
         context: Dict
     ) -> Tuple[str, Dict]:
         """Generate a direct response without loops (fallback)."""
+        trace_id = str(context.get("trace_id") or "").strip()
         client, model, is_local = self._get_client_and_model()
         if not client:
-            return "I'm having connection issues.", {"error": True}
+            metadata = {"error": True}
+            if trace_id:
+                metadata["trace_id"] = trace_id
+            return "I'm having connection issues.", metadata
         
         try:
             from companion_ai.core.context_builder import build_system_prompt_with_meta
@@ -817,11 +838,17 @@ Do NOT mention "steps" or "plans" — just answer naturally."""
             )
             
             source = "local_direct" if is_local else "groq_fallback"
-            return response.choices[0].message.content, {"source": source}
+            metadata = {"source": source}
+            if trace_id:
+                metadata["trace_id"] = trace_id
+            return response.choices[0].message.content, metadata
             
         except Exception as e:
             logger.error(f"Direct response failed: {e}")
-            return "Sorry, I'm having trouble responding right now.", {"error": True}
+            metadata = {"error": True}
+            if trace_id:
+                metadata["trace_id"] = trace_id
+            return "Sorry, I'm having trouble responding right now.", metadata
     
     async def _synthesize_response(
         self, 

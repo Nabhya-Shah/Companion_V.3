@@ -20,6 +20,16 @@ load_dotenv()
 # V6 Architecture toggle - Enable local loop orchestration
 # When True, uses the 120B orchestrator to decide if local loops should handle tasks
 USE_ORCHESTRATOR = os.getenv("USE_ORCHESTRATOR", "true").lower() == "true"
+
+# Pilot orchestration lane toggle (detachable by config)
+# - main: existing in-process orchestrator path
+# - hermes_pilot: pilot lane with parity-preserving fallback to main
+ORCHESTRATION_ENGINE = os.getenv("ORCHESTRATION_ENGINE", "main").strip().lower()
+ENABLE_HERMES_PILOT = os.getenv("ENABLE_HERMES_PILOT", "false").lower() == "true"
+HERMES_PILOT_STRICT = os.getenv("HERMES_PILOT_STRICT", "false").lower() == "true"
+HERMES_PILOT_ENDPOINT = os.getenv("HERMES_PILOT_ENDPOINT", "").strip()
+HERMES_PILOT_TIMEOUT_SECONDS = float(os.getenv("HERMES_PILOT_TIMEOUT_SECONDS", "20"))
+HERMES_PILOT_API_TOKEN = os.getenv("HERMES_PILOT_API_TOKEN", "").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_TOOL_API_KEY = os.getenv("GROQ_TOOL_API_KEY")  # Dedicated key for tool planner
 GROQ_VISION_API_KEY = os.getenv("GROQ_VISION_API_KEY", GROQ_API_KEY)  # Falls back to main key

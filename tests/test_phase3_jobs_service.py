@@ -1,4 +1,13 @@
 from companion_ai.services import jobs
+from companion_ai.core import config as core_config
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolate_tool_policy_defaults(monkeypatch):
+    monkeypatch.setattr(core_config, 'PLUGIN_POLICY_PATH', '')
+    monkeypatch.setattr(core_config, 'PLUGIN_ALLOWLIST', '')
+    monkeypatch.setattr(core_config, 'TOOL_ALLOWLIST', '')
 
 
 def test_schedule_add_and_list(tmp_path, monkeypatch):

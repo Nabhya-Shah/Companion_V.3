@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import datetime
+import json
+import os
+import uuid
 from typing import Dict
 
 from companion_ai.services.jobs import add_job
@@ -13,6 +16,49 @@ try:
     from companion_ai.memory.mem0_backend import search_memories
 except ImportError:
     search_memories = None
+
+
+COMPUTER_USE_AUDIT_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "data",
+    "computer_use_audit.jsonl",
+)
+
+
+def _audit_computer_use(
+    attempt_id: str,
+    action: str,
+    text: str,
+    status: str,
+    *,
+    reason: str = "",
+    result: str = "",
+    error: str = "",
+) -> None:
+    record = {
+        "attempt_id": attempt_id,
+        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "action": str(action or ""),
+        "text": str(text or ""),
+        "status": status,
+        "reason": reason,
+        "result_preview": (result or "")[:240],
+        "error": error,
+    }
+    try:
+        os.makedirs(os.path.dirname(COMPUTER_USE_AUDIT_PATH), exist_ok=True)
+        with open(COMPUTER_USE_AUDIT_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=True) + "\n")
+    except Exception:
+        # Never break tool execution due to audit logging failure.
+        pass
+
+
+def audit_computer_use_policy_rejection(action: str, text: str, reason: str, error: str) -> None:
+    """Record a requested+rejected pair when policy blocks execution pre-dispatch."""
+    attempt_id = uuid.uuid4().hex[:12]
+    _audit_computer_use(attempt_id, action, text, "requested")
+    _audit_computer_use(attempt_id, action, text, "rejected", reason=reason, error=error)
 
 
 # ---------------------------------------------------------------------------
@@ -184,35 +230,65 @@ def tool_look_at_screen(prompt: str = "What is on the screen?") -> str:
 }, risk_tier='high', requires_approval=True, category='computer_control')
 def tool_use_computer(action: str, text: str = "") -> str:
     """Execute computer control actions."""
+    attempt_id = uuid.uuid4().hex[:12]
+    _audit_computer_use(attempt_id, action, text, "requested")
+
     if not core_config.ENABLE_COMPUTER_USE:
-        return "Computer Use is disabled in configuration."
+        message = "Computer Use is disabled by policy (ENABLE_COMPUTER_USE=false)."
+        _audit_computer_use(
+            attempt_id,
+            action,
+            text,
+            "rejected",
+            reason="feature_disabled",
+            error=message,
+        )
+        return message
+
+    valid_actions = {"click", "type", "press", "launch", "scroll_up", "scroll_down"}
+    if action not in valid_actions:
+        message = f"Unknown action: {action}"
+        _audit_computer_use(attempt_id, action, text, "rejected", reason="unknown_action", error=message)
+        return message
 
     try:
         from companion_ai.computer_agent import computer_agent
+    except Exception as e:
+        message = "Computer Use runtime unavailable (computer_agent module not loaded)."
+        _audit_computer_use(attempt_id, action, text, "rejected", reason="runtime_unavailable", error=str(e))
+        return message
 
+    try:
         computer_agent.mark_action()
 
         if action == "click":
             if not text:
-                return "Error: 'text' (element description) is required for click action."
-            return computer_agent.click_element(text)
+                message = "Error: 'text' (element description) is required for click action."
+                _audit_computer_use(attempt_id, action, text, "rejected", reason="invalid_input", error=message)
+                return message
+            result = computer_agent.click_element(text)
         elif action == "type":
             if not text:
-                return "Error: 'text' (content to type) is required for type action."
-            return computer_agent.type_text(text, enter=True)
+                message = "Error: 'text' (content to type) is required for type action."
+                _audit_computer_use(attempt_id, action, text, "rejected", reason="invalid_input", error=message)
+                return message
+            result = computer_agent.type_text(text, enter=True)
         elif action == "press":
-            return computer_agent.press_key(text)
+            result = computer_agent.press_key(text)
         elif action == "launch":
-            return computer_agent.launch_app(text)
+            result = computer_agent.launch_app(text)
         elif action == "scroll_up":
-            return computer_agent.scroll("up")
+            result = computer_agent.scroll("up")
         elif action == "scroll_down":
-            return computer_agent.scroll("down")
-        else:
-            return f"Unknown action: {action}"
+            result = computer_agent.scroll("down")
+
+        _audit_computer_use(attempt_id, action, text, "completed", result=result)
+        return result
 
     except Exception as e:
-        return f"Computer Use Error: {e}"
+        message = f"Computer Use Error: {e}"
+        _audit_computer_use(attempt_id, action, text, "error", reason="exception", error=str(e))
+        return message
 
 
 @tool('remote_action_simulator', schema={

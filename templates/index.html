@@ -323,6 +323,16 @@
               <div class="memory-empty">No pending facts</div>
             </div>
           </div>
+          <div class="memory-section">
+            <div class="section-header-row">
+              <h4>Contradiction &amp; Dedup Review</h4>
+              <button id="refreshMemoryReviewBtn" class="small-btn" type="button">Refresh</button>
+            </div>
+            <div id="memoryReviewSummary" class="memory-subtext">No review signals yet</div>
+            <div id="memoryReviewList" class="fact-cards">
+              <div class="memory-empty">No contradictions or duplicate candidates detected</div>
+            </div>
+          </div>
           <button id="refreshMemoryBtn" class="refresh-btn">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -445,6 +455,34 @@
                 <span class="stat-value" id="metricToolCalls">0</span>
                 <span class="stat-label">Tool Calls</span>
               </div>
+            </div>
+          </div>
+          <div class="memory-section">
+            <div class="section-header-row">
+              <h4>Memory Write Queue</h4>
+              <span class="fact-hint">Bounded replay controls</span>
+            </div>
+            <div class="queue-summary" id="queueSummary">
+              <span class="queue-chip">Queued <strong id="queueDepthValue">0</strong></span>
+              <span class="queue-chip">Last replay <strong id="queueReplayAtValue">never</strong></span>
+              <span class="queue-chip">Cooldown <strong id="queueCooldownValue">0s</strong></span>
+            </div>
+            <div id="queueItemsList" class="queue-items-list">
+              <div class="memory-empty">Queue is empty</div>
+            </div>
+            <div class="stats-btn-row queue-btn-row">
+              <button id="refreshQueueBtn" class="refresh-btn">&#x21bb; Refresh Queue</button>
+              <button id="queueReplayBtn" class="refresh-btn">Replay &le; 50</button>
+            </div>
+          </div>
+          <div class="memory-section">
+            <div class="section-header-row">
+              <h4>Storage Migration Readiness</h4>
+              <button id="refreshMigrationReadinessBtn" class="small-btn" type="button">Refresh</button>
+            </div>
+            <div id="migrationReadinessSummary" class="memory-subtext">Readiness check not loaded yet</div>
+            <div id="migrationReadinessActions" class="queue-items-list">
+              <div class="memory-empty">No migration guidance loaded</div>
             </div>
           </div>
           <div class="memory-section">

@@ -431,6 +431,25 @@ def _blocked_tool_message(name: str) -> str:
     return decision.get('message') or f"Tool '{name}' blocked by safety allowlist policy"
 
 
+def _audit_use_computer_pre_dispatch_rejection(arguments: Any, reason: str, message: str) -> None:
+    """Best-effort audit for use_computer rejections before tool dispatch."""
+    try:
+        from companion_ai.tools import system_tools as _system_tools
+
+        action = ''
+        text = ''
+        if isinstance(arguments, dict):
+            action = str(arguments.get('action') or '')
+            text = str(arguments.get('text') or '')
+        else:
+            text = str(arguments or '')
+
+        _system_tools.audit_computer_use_policy_rejection(action, text, reason, message)
+    except Exception:
+        # Audit hooks must never break tool policy enforcement.
+        pass
+
+
 def _approval_timeout_seconds() -> float:
     """Return approval wait timeout, with a shorter default during pytest runs."""
     raw = os.getenv('TOOL_APPROVAL_TIMEOUT_SECONDS', '300')
@@ -551,10 +570,18 @@ def run_tool(name: str, arg: str) -> str:
     if not fn:
         return f'Unknown tool: {name}'
     if not _is_tool_allowed(name):
-        return _blocked_tool_message(name)
+        message = _blocked_tool_message(name)
+        if name == 'use_computer':
+            decision = evaluate_tool_policy(name)
+            reason = str(decision.get('reason') or 'policy_denied')
+            _audit_use_computer_pre_dispatch_rejection(arg, reason, message)
+        return message
     if name in _APPROVAL_REQUIRED_TOOLS:
         if not _wait_for_approval(name, str(arg)[:200]):
-            return f"Tool '{name}' was denied or timed out waiting for approval."
+            message = f"Tool '{name}' was denied or timed out waiting for approval."
+            if name == 'use_computer':
+                _audit_use_computer_pre_dispatch_rejection(arg, 'approval_denied', message)
+            return message
     return fn(arg)
 
 
@@ -579,7 +606,12 @@ def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
     if not tool_fn:
         return f'Unknown function: {function_name}'
     if not _is_tool_allowed(function_name):
-        return _blocked_tool_message(function_name)
+        message = _blocked_tool_message(function_name)
+        if function_name == 'use_computer':
+            decision = evaluate_tool_policy(function_name)
+            reason = str(decision.get('reason') or 'policy_denied')
+            _audit_use_computer_pre_dispatch_rejection(arguments, reason, message)
+        return message
     if function_name in _APPROVAL_REQUIRED_TOOLS:
         approval_token = ''
         if isinstance(arguments, dict):
@@ -590,7 +622,10 @@ def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
         else:
             summary = json.dumps(arguments, default=str)[:200]
             if not _wait_for_approval(function_name, summary):
-                return f"Tool '{function_name}' was denied or timed out waiting for approval."
+                message = f"Tool '{function_name}' was denied or timed out waiting for approval."
+                if function_name == 'use_computer':
+                    _audit_use_computer_pre_dispatch_rejection(arguments, 'approval_denied', message)
+                return message
 
     # Handle different function signatures
     if function_name == 'get_current_time':

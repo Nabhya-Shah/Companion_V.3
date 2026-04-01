@@ -5,6 +5,7 @@ import { bus, state, authHeaders, setApiToken, escapeHtml, escapeRegex, formatTi
 
 // ---- State ----
 let allMemoryData = { facts: [], insights: [] };
+const provenanceCache = new Map();
 
 async function loadProactiveInsights() {
   const listEl = document.getElementById('proactiveInsightsList');
@@ -104,6 +105,7 @@ export async function loadMemory(retry = false) {
     const summaries = data.summaries || [];
 
     allMemoryData = { facts: detailed, insights };
+    provenanceCache.clear();
 
     document.getElementById('memFactCount').textContent = detailed.length;
     document.getElementById('memInsightCount').textContent = insights.length;
@@ -113,6 +115,7 @@ export async function loadMemory(retry = false) {
     const query = searchInput?.value?.toLowerCase() || '';
     renderMemoryCards(query);
     await loadPendingFacts();
+    await loadMemoryReview();
     await loadProactiveInsights();
   } catch (e) {
     console.error('Failed to load memory:', e);
@@ -203,6 +206,121 @@ async function bulkPendingFacts(action) {
   } catch (e) { showToast('Bulk action failed', 'error'); }
 }
 
+function renderMemoryReviewSummary(summary) {
+  const summaryEl = document.getElementById('memoryReviewSummary');
+  if (!summaryEl) return;
+
+  const total = Number(summary?.total_review_items || 0);
+  const conflicts = Number(summary?.conflict_count || 0);
+  const pending = Number(summary?.pending_count || 0);
+  const dedup = Number(summary?.dedup_candidate_count || 0);
+  const lowConf = Number(summary?.low_confidence_count || 0);
+  summaryEl.textContent = `${total} items • ${conflicts} conflicts • ${pending} pending • ${dedup} dedup candidates • ${lowConf} low confidence`;
+}
+
+function renderMemoryReviewCards(items) {
+  const list = document.getElementById('memoryReviewList');
+  if (!list) return;
+
+  if (!Array.isArray(items) || items.length === 0) {
+    list.innerHTML = '<div class="memory-empty">No contradictions or duplicate candidates detected</div>';
+    return;
+  }
+
+  list.innerHTML = items.map((item) => {
+    const key = escapeHtml(String(item.key || ''));
+    const value = escapeHtml(String(item.value || ''));
+    const state = escapeHtml(String(item.contradiction_state || 'none'));
+    const stateClass = state === 'conflict' ? 'conflict' : state === 'pending' ? 'pending' : state === 'resolved' ? 'resolved' : 'none';
+    const confidence = Math.round(Number(item.confidence || 0) * 100);
+    const confidenceLabel = escapeHtml(String(item.confidence_label || 'medium'));
+    const reaffirmations = Number(item.reaffirmations || 0);
+    const source = escapeHtml(String(item.source || 'mem0'));
+    const dedupCount = Number(item.dedup_candidate_count || 0);
+    const topDuplicate = Array.isArray(item.dedup_candidates) && item.dedup_candidates.length > 0 ? item.dedup_candidates[0] : null;
+    const duplicateHint = topDuplicate
+      ? `Potential duplicate: ${escapeHtml(String(topDuplicate.key || 'unknown'))} (${Math.round(Number(topDuplicate.similarity || 0) * 100)}% similar)`
+      : '';
+
+    return `
+      <div class="memory-card memory-review-card" data-review-key="${key}">
+        <div class="memory-card-header">
+          <span class="memory-category fact">review</span>
+          <span class="memory-review-state ${stateClass}">${state}</span>
+        </div>
+        <div class="memory-text">${value}</div>
+        <div class="memory-meta" style="flex-wrap:wrap; gap:8px;">
+          <span>source: ${source}</span>
+          <span>confidence: ${confidence}% (${confidenceLabel})</span>
+          <span>reaffirmations: ${reaffirmations}</span>
+          <span>dedup candidates: ${dedupCount}</span>
+        </div>
+        ${duplicateHint ? `<div class="memory-subtext">${duplicateHint}</div>` : ''}
+        <div class="memory-meta memory-review-actions" style="justify-content:flex-end; gap:6px; flex-wrap:wrap;">
+          <button class="small-btn" data-review-action="reaffirm">Reaffirm</button>
+          <button class="small-btn" data-review-action="set_state" data-review-state="pending">Set Pending</button>
+          <button class="small-btn" data-review-action="set_state" data-review-state="conflict">Set Conflict</button>
+          <button class="small-btn" data-review-action="set_state" data-review-state="resolved">Resolve</button>
+          ${topDuplicate ? `<button class="small-btn" data-review-action="mark_duplicate" data-duplicate-of="${escapeHtml(String(topDuplicate.key || ''))}">Mark Duplicate</button>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function loadMemoryReview(retry = false) {
+  const list = document.getElementById('memoryReviewList');
+  if (!list) return;
+  list.innerHTML = skeletonCards(2);
+
+  try {
+    const res = await fetch('/api/memory/review?limit=20', { headers: authHeaders() });
+    if (res.status === 401 && !retry) {
+      const tok = prompt('API token required:');
+      if (tok) {
+        setApiToken(tok);
+        return loadMemoryReview(true);
+      }
+      return;
+    }
+
+    const payload = await res.json();
+    if (!res.ok) {
+      throw new Error(payload?.error || `HTTP ${res.status}`);
+    }
+
+    renderMemoryReviewSummary(payload.summary || {});
+    renderMemoryReviewCards(payload.items || []);
+  } catch (e) {
+    console.error('Failed to load memory review queue:', e);
+    renderMemoryReviewSummary({ total_review_items: 0, conflict_count: 0, pending_count: 0, dedup_candidate_count: 0, low_confidence_count: 0 });
+    list.innerHTML = '<div class="memory-empty">Failed to load memory review queue</div>';
+  }
+}
+
+async function applyMemoryReviewAction(key, action, extras = {}) {
+  try {
+    const res = await fetch(`/api/memory/review/${encodeURIComponent(key)}`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ action, ...extras }),
+    });
+    const payload = await res.json();
+
+    if (!res.ok) {
+      showToast(payload?.error || 'Memory review update failed', 'error');
+      return;
+    }
+
+    const nextState = payload?.updated?.contradiction_state || action;
+    showToast(`Memory review updated (${nextState})`, 'success');
+    await loadMemory();
+  } catch (e) {
+    console.error('Memory review update failed:', e);
+    showToast('Memory review update failed', 'error');
+  }
+}
+
 function renderMemoryCards(query = '') {
   const profileDiv = document.getElementById('profileList');
   const insightDiv = document.getElementById('insightList');
@@ -227,6 +345,9 @@ function renderMemoryCards(query = '') {
       const category = detectCategory(row.value);
       const confPercent = Math.round((row.confidence || 0.7) * 100);
       const timeAgo = formatTimeAgo(row.created_at || row.updated_at);
+      const source = escapeHtml(String(row.source || 'mem0'));
+      const confidenceLabel = escapeHtml(String(row.confidence_label || 'medium'));
+      const contradictionState = escapeHtml(String(row.contradiction_state || 'none'));
 
       let displayText = escapeHtml(row.value);
       if (query) {
@@ -246,10 +367,24 @@ function renderMemoryCards(query = '') {
             <div class="confidence-bar"><div class="confidence-fill" style="width: ${confPercent}%"></div></div>
           </div>
         </div>
+        <div class="memory-meta" style="gap:8px; flex-wrap:wrap;">
+          <span>source: ${source}</span>
+          <span>quality: ${confidenceLabel}</span>
+          <span>state: ${contradictionState}</span>
+          <button type="button" class="small-btn memory-provenance-btn" aria-label="Show memory provenance">Why this memory?</button>
+        </div>
+        <div class="memory-subtext memory-provenance-detail" style="display:none;"></div>
       `;
 
+      const provenanceBtn = card.querySelector('.memory-provenance-btn');
+      provenanceBtn?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        await toggleProvenanceDetail(card, row.key);
+      });
+
       card.addEventListener('click', (e) => {
-        if (e.target.closest('.memory-edit-container')) return;
+        if (e.target.closest('.memory-edit-container') || e.target.closest('.memory-provenance-btn') || e.target.closest('.memory-provenance-detail')) return;
         toggleEditMode(card, row.key, row.value);
       });
 
@@ -297,6 +432,64 @@ function renderMemoryCards(query = '') {
 
   if (searchCount) {
     searchCount.textContent = query ? `${matchCount} found` : '';
+  }
+}
+
+function renderProvenanceHtml(payload) {
+  const prov = payload?.provenance || {};
+  const metadata = (prov.metadata && typeof prov.metadata === 'object') ? prov.metadata : {};
+  const metadataRows = Object.entries(metadata)
+    .slice(0, 8)
+    .map(([k, v]) => `<div>${escapeHtml(String(k))}: ${escapeHtml(String(v))}</div>`)
+    .join('');
+
+  const base = [
+    `source: ${escapeHtml(String(prov.source || 'unknown'))}`,
+    `quality: ${escapeHtml(String(prov.confidence_label || 'medium'))} (${Math.round(Number(prov.confidence || 0) * 100)}%)`,
+    `state: ${escapeHtml(String(prov.contradiction_state || 'none'))}`,
+    `reaffirmations: ${escapeHtml(String(prov.reaffirmations ?? 0))}`,
+  ];
+
+  if (prov.updated_at) base.push(`updated: ${escapeHtml(String(prov.updated_at))}`);
+  if (prov.last_validated_ts) base.push(`validated: ${escapeHtml(String(prov.last_validated_ts))}`);
+
+  return `
+    <div><strong>Provenance</strong></div>
+    <div>${base.join(' · ')}</div>
+    ${metadataRows ? `<div style="margin-top:4px;"><strong>Metadata:</strong></div><div>${metadataRows}</div>` : ''}
+  `;
+}
+
+async function toggleProvenanceDetail(card, key) {
+  const detail = card.querySelector('.memory-provenance-detail');
+  if (!detail) return;
+
+  const isOpen = detail.style.display !== 'none';
+  if (isOpen) {
+    detail.style.display = 'none';
+    return;
+  }
+
+  detail.style.display = 'block';
+  detail.innerHTML = 'Loading provenance...';
+
+  try {
+    let payload = provenanceCache.get(key);
+    if (!payload) {
+      const res = await fetch(`/api/memory/provenance/${encodeURIComponent(key)}`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) {
+        detail.innerHTML = `Provenance unavailable: ${escapeHtml(String(data.error || 'not found'))}`;
+        return;
+      }
+      payload = data;
+      provenanceCache.set(key, payload);
+    }
+
+    detail.innerHTML = renderProvenanceHtml(payload);
+  } catch (e) {
+    console.error('Failed to load memory provenance:', e);
+    detail.innerHTML = 'Failed to load provenance details';
   }
 }
 
@@ -566,9 +759,32 @@ export function initMemory() {
     renderMemoryCards(e.target.value.toLowerCase());
   });
   document.getElementById('refreshMemoryBtn')?.addEventListener('click', loadMemory);
+  document.getElementById('refreshMemoryReviewBtn')?.addEventListener('click', () => loadMemoryReview());
   document.getElementById('approveAllPendingBtn')?.addEventListener('click', () => bulkPendingFacts('approve'));
   document.getElementById('rejectAllPendingBtn')?.addEventListener('click', () => bulkPendingFacts('reject'));
   document.getElementById('refreshProactiveInsightsBtn')?.addEventListener('click', loadProactiveInsights);
+
+  document.getElementById('memoryReviewList')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-review-action]');
+    if (!btn) return;
+
+    const card = btn.closest('[data-review-key]');
+    const key = card?.dataset?.reviewKey;
+    if (!key) return;
+
+    const action = btn.dataset.reviewAction;
+    if (action === 'set_state') {
+      applyMemoryReviewAction(key, action, { state: btn.dataset.reviewState || 'none' });
+      return;
+    }
+    if (action === 'mark_duplicate') {
+      const duplicateOf = btn.dataset.duplicateOf || '';
+      applyMemoryReviewAction(key, action, { duplicate_of: duplicateOf });
+      return;
+    }
+
+    applyMemoryReviewAction(key, action);
+  });
 
   // Live insight events update badge/list without requiring a full memory reload.
   bus.on('insight:new', () => { loadProactiveInsights(); });

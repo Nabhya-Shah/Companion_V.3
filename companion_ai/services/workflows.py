@@ -5,7 +5,7 @@ import asyncio
 import sqlite3
 import threading
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
@@ -187,7 +187,7 @@ class WorkflowManager:
         with self._policy_lock:
             row = self._skill_policy.setdefault('skills', {}).setdefault(workflow_id, {})
             row['enabled'] = bool(enabled)
-            row['updated_at'] = datetime.utcnow().isoformat()
+            row['updated_at'] = datetime.now(timezone.utc).isoformat()
             self._save_skill_policy()
 
         wf = self._workflows[workflow_id]
@@ -211,7 +211,7 @@ class WorkflowManager:
         with self._policy_lock:
             row = self._skill_policy.setdefault('categories', {}).setdefault(cleaned, {})
             row['enabled'] = bool(enabled)
-            row['updated_at'] = datetime.utcnow().isoformat()
+            row['updated_at'] = datetime.now(timezone.utc).isoformat()
             self._save_skill_policy()
         return {'category': cleaned, 'enabled': bool(enabled)}
 
@@ -221,7 +221,7 @@ class WorkflowManager:
 
         ttl = max(int(ttl_seconds or SKILL_APPROVAL_TTL_SECONDS), 5)
         token = uuid.uuid4().hex
-        expires_at = datetime.utcnow() + timedelta(seconds=ttl)
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl)
         with self._approval_lock:
             self._skill_approval_tokens[token] = {
                 'workflow_id': workflow_id,
@@ -233,7 +233,7 @@ class WorkflowManager:
     def consume_skill_approval_token(self, workflow_id: str, token: str | None) -> bool:
         if not token:
             return False
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         with self._approval_lock:
             row = self._skill_approval_tokens.get(token)
             if not row:
@@ -458,7 +458,7 @@ class WorkflowManager:
                 (summary or '')[:500],
                 json.dumps({'event': event, **(metadata or {})}),
                 (error or '')[:500] if error else None,
-                datetime.utcnow().isoformat(),
+                datetime.now(timezone.utc).isoformat(),
             ),
         )
         conn.commit()
@@ -480,7 +480,7 @@ class WorkflowManager:
         metadata = {
             'result_count': len(results or []),
             'chat_targets': sum(1 for r in (results or []) if r.get('output_target') == 'chat'),
-            'recorded_at': datetime.utcnow().isoformat(),
+            'recorded_at': datetime.now(timezone.utc).isoformat(),
         }
 
         self._append_audit(

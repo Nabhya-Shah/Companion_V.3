@@ -1,196 +1,201 @@
-# Companion V3 Unified Technical Reference
+# Companion V3 Unified Reference
 
-Status: Canonical documentation source
-Last updated: 2026-03-25
-Primary platform: Linux (Pop!_OS / Ubuntu-class distros)
+Status: Canonical current-state document
+Last updated: 2026-03-31
+Primary platform: Linux (Pop!_OS / Ubuntu-class)
 
-## 1. Purpose and Scope
+## 1. Documentation Model
 
-This file is the single source of truth for Companion V3 architecture, operations, validation status, and roadmap direction.
+Companion documentation is now centralized into two canonical files:
 
-It supersedes overlapping details that previously lived in multiple docs. Other docs should link here instead of duplicating technical state.
+1. PLAN.md (this file): current implementation truth, feature inventory, architecture, operations, validation, and known gaps.
+2. ROADMAP.md: future delivery plan, milestone sequencing, and NEW.md strategy integration.
 
-## 2. What Companion V3 Is
+All other documentation/planning markdown files should be treated as index pointers or historical archives.
 
-Companion V3 is a web-first personal assistant platform with:
+## 2. Product Purpose
 
-- A cloud orchestrator that decides how each message is handled.
-- Local specialist loops for memory, tools, and vision tasks.
-- Hybrid persistent memory and retrieval (Mem0 + SQLite + brain document index).
-- Policy-gated tool execution and optional human approval flows.
-- Session/profile/workspace scoped state.
-- Optional smart home integration.
+Companion V3 is a web-first personal assistant platform built to be dependable for daily use.
 
-Design rule: orchestrator controls routing, loops execute, storage is managed through unified memory pathways.
+Core product goals:
 
-## 3. Runtime Architecture (Validated)
+1. Orchestrator-led request routing.
+2. Trustworthy long-horizon memory with provenance.
+3. Safe tool execution with policy gating and approvals.
+4. Session/profile/workspace isolation.
+5. Practical workflows, scheduling, and continuity support.
 
-### 3.1 Entry and Serving
+## 3. Current Feature Inventory
 
-- Web entrypoint: run_companion.py
-- Web compatibility shim: web_companion.py
-- App factory and blueprints: companion_ai/web/__init__.py
+Legend:
 
-Primary runtime path:
+- Live: implemented and available in current app.
+- Beta/Partial: available but still being hardened.
+- Planned: roadmap item not yet shipped.
 
-1. User sends message to /api/chat/send (SSE).
-2. Session state is resolved in companion_ai/web/state.py.
-3. ConversationSession process_message_streaming is called.
-4. If USE_ORCHESTRATOR=true (default), companion_ai/orchestrator.py routes to:
-   - direct answer
-   - delegated loop
-   - plan execution
-   - background path
-   - memory search
-5. Response is streamed to UI with metadata and retrieval stage events where available.
-6. Memory save is queued/asynchronous where appropriate.
+| Capability Area | Status | What Exists Today | Key Files |
+|---|---|---|---|
+| Web chat + SSE streaming | Live | Streaming responses, history stream, stop control, diagnostics | companion_ai/web/chat_routes.py, static/chat.js |
+| Orchestrator routing | Live | answer, delegate, plan, background, memory_search actions | companion_ai/orchestrator.py |
+| Specialist loops | Live | memory loop, tool loop, vision loop | companion_ai/local_loops/ |
+| Hybrid memory | Live | Mem0 + SQLite + brain index via unified recall/remember entry points | companion_ai/memory/knowledge.py |
+| Memory quality pipeline | Live | confidence labels, pending review, dedup/provenance tracking | companion_ai/memory/sqlite_backend.py, companion_ai/memory/ai_processor.py |
+| Retrieval observability | Live | retrieval stage traces and SSE stage events | companion_ai/memory/knowledge.py, companion_ai/conversation_manager.py |
+| Tool governance and approvals | Live | allowlists, sandbox mode, risk tiers, approval queue | companion_ai/tools/registry.py |
+| Session/profile/workspace scoping | Live | scoped IDs, permission gating by workspace | companion_ai/web/state.py |
+| Files/brain knowledge workflows | Live | uploads, extraction, summaries, search, indexing | companion_ai/web/files_routes.py, companion_ai/brain_index.py |
+| Jobs/schedules/workflows | Live | schedule CRUD, run-now, task plans, workflow execution | companion_ai/services/jobs.py, companion_ai/services/task_planner.py |
+| Persona/insights/continuity | Live | adaptive persona, proactive insights, continuity snapshots | companion_ai/services/persona.py, companion_ai/services/insights.py, companion_ai/services/continuity.py |
+| Smart home (Loxone) | Beta/Partial | health + core light control paths | companion_ai/web/loxone_routes.py, companion_ai/integrations/loxone.py |
+| Browser/computer-use | Beta/Partial | core pathways exist; hardening and strict safety rollout in roadmap | companion_ai/tools/browser_tools.py, companion_ai/local_loops/tool_loop.py |
+| Multi-user throughput hardening | Planned | dedicated concurrency/load hardening not complete | ROADMAP.md |
 
-### 3.2 Core Modules
+## 4. Runtime Architecture (Current)
 
-- Orchestrator: companion_ai/orchestrator.py
-- Session manager: companion_ai/conversation_manager.py
-- LLM router/providers: companion_ai/llm/
-- Tool registry/policy: companion_ai/tools/registry.py
-- Local loops: companion_ai/local_loops/
-- Memory stack: companion_ai/memory/
-- Web APIs: companion_ai/web/
-- Services (jobs/workflows/persona/insights/token budget): companion_ai/services/
+### 4.1 Entrypoints
 
-## 4. Memory and Knowledge System
+1. run_companion.py: unified launcher.
+2. web_companion.py: compatibility shim for tests/imports.
+3. companion_ai/web/__init__.py: Flask app factory, blueprint registration, worker startup.
 
-Companion currently uses a hybrid memory model:
+### 4.2 Request Lifecycle (Chat)
 
-- Mem0 backend for vector-style memory writes and semantic retrieval.
-- SQLite for profile facts, pending review facts, summaries, insights, and quality/provenance ledger.
-- Brain document index for uploaded/brain files and chunk search.
-- Unified entry points in companion_ai/memory/knowledge.py:
-  - remember
-  - recall
-  - recall_with_trace
+1. Client sends message to /api/chat/send.
+2. Security and scope are resolved in companion_ai/web/state.py.
+3. ConversationSession.process_message_streaming builds context and delegates to orchestrator when enabled.
+4. Orchestrator decides action (answer/delegate/plan/background/memory_search).
+5. Loop/tool/memory outputs are merged and streamed back over SSE.
+6. Token metadata, retrieval stage events, and memory-save status are attached to stream payloads.
 
-Quality controls implemented:
+### 4.3 Design Rule
 
-- Confidence labels and thresholds.
-- Pending-review workflow for low confidence facts.
-- Dedup and contradiction metadata.
-- Retrieval stage tracing and score explainability fields.
+Orchestrator decides, loops execute, memory layer stores/retrieves, and web layer streams + enforces policy.
 
-## 5. Tools and Safety Model
+## 5. Memory and Knowledge Model (Current)
 
-Tool execution is centralized through companion_ai/tools/registry.py with:
+Companion uses a hybrid approach:
 
-- Plugin allowlists.
-- Tool allowlists.
-- Restricted sandbox mode with blocked tool set.
-- Per-tool risk metadata.
-- Human approval queue and resolve endpoints.
+1. Mem0: semantic/vector memory backend.
+2. SQLite: profile facts, summaries, insights, pending review facts, quality/provenance ledger.
+3. Brain index: document chunk indexing/search.
+4. Unified API: companion_ai/memory/knowledge.py (remember, recall, recall_with_trace).
 
-Remote action tooling is simulator-first and policy-gated.
+Quality controls currently in place:
 
-## 6. Linux Migration Status
+1. Confidence scoring + labels.
+2. Pending-review queue for low-confidence extractions.
+3. Dedup and contradiction metadata support.
+4. Retrieval stage trace generation for explainability.
 
-As of this update, the repository is Linux-ready for core development workflows.
+## 6. Safety and Governance Model (Current)
 
-Completed migration work:
+Tool execution is policy-first:
 
-- VS Code tasks now support Linux-native venv paths with Windows overrides.
-- Browser-control helper in tool loop is now cross-platform and no longer Windows-only.
-- Browser agent executable detection now supports Linux/macOS/Windows candidate paths.
-- Brain index filename extraction is now OS-agnostic (basename).
-- Windows-specific wording removed from local inference error messaging.
-- Brain manager path example text made OS-neutral.
+1. Tool allowlist and plugin allowlist controls.
+2. Risk-tier metadata (low, medium, high).
+3. Approval-required flow for high-risk tools.
+4. Restricted sandbox mode with blocked tool list.
+5. Workspace feature permissions (tools_execute, memory_write, workflows_run, files_upload, retrieval_connectors).
 
-Known remaining portability caveats:
+## 7. Web and API Surface (Current)
 
-- scripts/setup_python311.ps1 remains Windows-only by design.
-- Some external tooling assumptions (Playwright browser binaries, optional local LLM servers) remain environment-dependent.
+Primary route groups:
 
-## 7. Validation Status (Executed on Linux)
+1. Chat/streaming: companion_ai/web/chat_routes.py
+2. Memory/review: companion_ai/web/memory_routes.py
+3. Files/brain: companion_ai/web/files_routes.py
+4. Tools/policies/approvals: companion_ai/web/tools_routes.py
+5. System/jobs/diagnostics: companion_ai/web/system_routes.py
+6. Media/vision: companion_ai/web/media_routes.py
+7. Smart home: companion_ai/web/loxone_routes.py
+8. Workflows: companion_ai/web/workflow_routes.py
 
-Automated verification completed in this workspace:
+Frontend modules:
 
-- Targeted core tests: orchestrator, workflows, memory quality, jobs service, retrieval stage events.
-- Full test suite run.
+1. static/app.js bootstraps modules.
+2. static/chat.js handles stream and rendering.
+3. static/memory.js handles memory and insights UI.
+4. static/tasks.js handles tasks/schedules/workflows UI.
+5. static/settings.js and static/smarthome.js cover settings and smart home controls.
 
-Current result:
+## 8. Operations Runbook
 
-- 287 passed
-- 1 skipped
-- 0 failed
+### 8.1 Setup
 
-Observed warnings:
-
-- Deprecation warnings for datetime.utcnow usage in several modules.
-- These are non-blocking but should be modernized to timezone-aware datetime APIs.
-
-## 8. Operations Runbook (Linux)
-
-### 8.1 Environment
-
-- Python: 3.11 or 3.12 recommended.
-- Create venv:
-  - python3 -m venv .venv
-  - ./.venv/bin/python -m pip install --upgrade pip
-  - ./.venv/bin/python -m pip install -r requirements.txt
+1. python3 -m venv .venv
+2. source .venv/bin/activate
+3. python -m pip install --upgrade pip
+4. python -m pip install -r requirements.txt
 
 ### 8.2 Run
 
-- Web app:
-  - ./.venv/bin/python run_companion.py
-
-- CLI chat:
-  - ./.venv/bin/python chat_cli.py
+1. Web app: python run_companion.py
+2. CLI chat: ./.venv/bin/python chat_cli.py
 
 ### 8.3 Tests
 
-- Full suite:
-  - ./.venv/bin/python -m pytest -q
+1. Full suite: ./.venv/bin/python -m pytest -q
+2. Targeted example: ./.venv/bin/python -m pytest tests/test_orchestrator.py tests/test_workflows.py -q
+3. Watchdog runner: ./.venv/bin/python tools/pytest_watchdog.py --idle-timeout 0 --max-duration 600 -- -q
 
-- Example targeted suite:
-  - ./.venv/bin/python -m pytest tests/test_orchestrator.py tests/test_workflows.py -q
+### 8.4 Daily-use Release Checklist
 
-## 9. API Surface (High-Level)
+1. Web app starts and /api/health returns 200.
+2. Auth policy validated for protected endpoints.
+3. Memory reads/writes remain scoped and consistent.
+4. Tool allowlist behavior checked (allowed + blocked paths).
+5. Focus regression tests pass before release.
+6. Smoke script passes: ./.venv/bin/python scripts/smoke_daily_use.py
 
-Main blueprints and route groups:
+## 9. Validation Snapshot
 
-- Chat and streaming: companion_ai/web/chat_routes.py
-- Memory and fact review: companion_ai/web/memory_routes.py
-- Files and brain uploads/search: companion_ai/web/files_routes.py
-- Tools, policies, approvals, context: companion_ai/web/tools_routes.py
-- System, jobs, schedules, continuity, diagnostics: companion_ai/web/system_routes.py
-- Media and vision: companion_ai/web/media_routes.py
-- Smart home: companion_ai/web/loxone_routes.py
-- Workflow execution endpoints: companion_ai/web/workflow_routes.py
+Last documented full-suite baseline (from prior recorded run):
 
-## 10. Frontend Surface (High-Level)
+1. 287 passed
+2. 1 skipped
+3. 0 failed
 
-Modules in static:
+Important: treat this as a historical baseline. Re-run tests after significant changes.
 
-- app.js bootstraps all panels.
-- chat.js handles message stream, pipeline rendering, retrieval stage display.
-- tasks.js handles tasks/schedules/workflows approvals UI.
-- memory.js handles facts, pending review, insights.
-- settings.js handles models/metrics/tokens/budget UI.
-- smarthome.js handles room control interactions.
+## 10. Known Gaps and Active Risks
 
-## 11. Roadmap Direction
+Highest-impact current gaps:
 
-Priority remains practical and safe agentic capability growth on top of stable core behavior:
+1. Concurrency/load validation needs deeper coverage.
+2. Live provider contract checks (non-mocked) should be expanded.
+3. Browser/computer-use path needs stricter hardening and observability.
+4. Operability improvements needed for throughput and diagnostics at scale.
+5. timezone-aware datetime cleanup remains open in multiple modules.
 
-1. Strengthen browser-session workflows and observability.
-2. Incrementally improve computer-use pathways with strict safety controls.
-3. Keep memory quality and provenance explainability robust.
-4. Reduce technical debt warnings (timezone-aware datetime, stale docs prevention).
+These are tracked in ROADMAP.md.
 
-## 12. Documentation Policy
+## 11. Documentation Governance
 
-To prevent drift:
+Rules:
 
-- PLAN.md is canonical for architecture and operational truth.
-- README.md is onboarding-oriented and links here.
-- ARCHITECTURE.md and ROADMAP.md are index documents that point to relevant PLAN sections.
-- Artifact docs under docs/archive remain historical and should not be treated as current architecture state.
+1. Update PLAN.md for any shipped behavior/architecture change.
+2. Update ROADMAP.md for any plan/scope/prioritization change.
+3. Keep index/pointer docs lightweight and non-duplicative.
+4. Move superseded long-form planning docs into docs/archive.
 
-## 13. Historical Notes
+## 12. Canonical and Archive Links
 
-This repository previously carried planning content aligned to an external Hermes/OpenWebUI-first stack in PLAN.md. That content is now archived by replacement in favor of repository-actual implementation truth.
+Canonical:
+
+1. PLAN.md (current-state truth)
+2. ROADMAP.md (future plan and milestones)
+
+Indexes:
+
+1. README.md (onboarding + canonical links)
+2. ARCHITECTURE.md (architecture pointer)
+3. IMPROVEMENTS_ROADMAP.md (roadmap pointer)
+4. docs/README.md (docs folder index)
+
+Archives:
+
+1. docs/archive/ROADMAP_ARTIFACT.md
+2. docs/archive/FEATURE_TRACKER_ARTIFACT.md
+3. docs/archive/PLAN_B_BLUEPRINT_ARCHIVE.md
+4. docs/archive/IMPLEMENTATION_SPEC_REPO_INSIGHTS_ARCHIVE.md
+5. docs/archive/RELEASE_DAILY_USE_CHECKLIST_ARCHIVE.md

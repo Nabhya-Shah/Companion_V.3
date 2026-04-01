@@ -1,7 +1,7 @@
 // ============================================
 // Companion AI — Settings, Theme, Models, Metrics, Token Stats, Budget
 // ============================================
-import { bus, state, authHeaders, setApiToken, skeletonLines, skeletonCards } from './utils.js';
+import { bus, state, authHeaders, setApiToken, skeletonLines, skeletonCards, escapeHtml, formatTimeAgo } from './utils.js';
 
 // ---- Theme ----
 export function applyTheme(themeName) {
@@ -142,6 +142,206 @@ export async function loadMetrics(retry = false) {
   }
 }
 
+// ---- Memory Queue Diagnostics ----
+function renderQueueItems(items) {
+  const queueList = document.getElementById('queueItemsList');
+  if (!queueList) return;
+
+  if (!Array.isArray(items) || items.length === 0) {
+    queueList.innerHTML = '<div class="memory-empty">Queue is empty</div>';
+    return;
+  }
+
+  queueList.innerHTML = items.map((item) => {
+    const requestId = escapeHtml(String(item.request_id || ''));
+    const operation = escapeHtml(String(item.operation || 'unknown'));
+    const userScope = escapeHtml(String(item.user_scope || 'default'));
+    const preview = escapeHtml(String(item.payload_preview || '{}'));
+    const createdAt = item.created_at || '';
+    const createdLabel = createdAt ? formatTimeAgo(createdAt) : 'unknown';
+
+    return `
+      <div class="queue-item-row">
+        <div class="queue-item-top">
+          <span class="queue-op">${operation}</span>
+          <span class="queue-time">${createdLabel}</span>
+        </div>
+        <div class="queue-item-meta">scope: ${userScope} • id: ${requestId}</div>
+        <pre class="queue-item-preview">${preview}</pre>
+      </div>
+    `;
+  }).join('');
+}
+
+function updateQueueControlsFromPayload(payload) {
+  const depthEl = document.getElementById('queueDepthValue');
+  const replayAtEl = document.getElementById('queueReplayAtValue');
+  const cooldownEl = document.getElementById('queueCooldownValue');
+  const replayBtn = document.getElementById('queueReplayBtn');
+
+  const queuedCount = Number(payload?.queued_count || 0);
+  if (depthEl) depthEl.textContent = String(queuedCount);
+
+  const replayAt = payload?.replay_state?.last_replay_at;
+  if (replayAtEl) replayAtEl.textContent = replayAt ? formatTimeAgo(replayAt) : 'never';
+
+  const cooldownSeconds = Number(payload?.replay_state?.cooldown_seconds || 0);
+  if (cooldownEl) cooldownEl.textContent = `${Math.max(0, Math.round(cooldownSeconds))}s`;
+
+  if (replayBtn) {
+    replayBtn.disabled = queuedCount <= 0;
+    replayBtn.title = queuedCount <= 0 ? 'Queue is empty' : 'Replay up to 50 queued memory writes';
+  }
+}
+
+export async function loadQueueDiagnostics(retry = false) {
+  const queueList = document.getElementById('queueItemsList');
+  if (!queueList) return;
+  queueList.innerHTML = skeletonLines(3);
+
+  try {
+    const r = await fetch('/api/memory/write-queue?limit=12', { headers: authHeaders() });
+    if (r.status === 401 && !retry) {
+      const tok = prompt('API token required:');
+      if (tok) {
+        setApiToken(tok);
+        return loadQueueDiagnostics(true);
+      }
+      return;
+    }
+
+    const payload = await r.json();
+    if (!r.ok) {
+      throw new Error(payload?.error || `HTTP ${r.status}`);
+    }
+
+    updateQueueControlsFromPayload(payload);
+    renderQueueItems(payload.items || []);
+  } catch (e) {
+    console.error('Failed to load queue diagnostics:', e);
+    queueList.innerHTML = '<div class="memory-empty">Queue diagnostics unavailable</div>';
+  }
+}
+
+function renderMigrationReadiness(payload) {
+  const summaryEl = document.getElementById('migrationReadinessSummary');
+  const guidanceEl = document.getElementById('migrationReadinessActions');
+  if (!summaryEl || !guidanceEl) return;
+
+  const readiness = String(payload?.level || 'healthy').toLowerCase();
+  const metrics = payload?.metrics || {};
+  const queueDepth = Number(metrics.queue_depth || 0);
+  const totalWrites = Number(metrics.write_log_rows || 0);
+  const failedWrites = Number(metrics.write_failed_count || 0);
+  const failurePct = Math.round(Number(metrics.failure_rate || 0) * 100);
+  const queuedRate = Math.round(Number(metrics.queued_rate || 0) * 100);
+  const committed = Number(metrics.write_committed_count || 0);
+  const threshold = payload?.thresholds || {};
+
+  summaryEl.innerHTML = `
+    <span class="migration-level ${escapeHtml(readiness)}">${escapeHtml(readiness.replace('_', ' '))}</span>
+    <span>queue depth: ${queueDepth}</span>
+    <span>writes: ${failedWrites}/${totalWrites} failed (${failurePct}%)</span>
+    <span>queued ratio: ${queuedRate}%</span>
+    <span>committed: ${committed}</span>
+    <span>migration threshold: ${Number(threshold.queue_backlog_critical || 500)}</span>
+  `;
+
+  const reasons = Array.isArray(payload?.reasons) ? payload.reasons : [];
+  const recommendations = Array.isArray(payload?.recommendations) ? payload.recommendations : [];
+  const items = [...reasons, ...recommendations];
+
+  if (items.length === 0) {
+    guidanceEl.innerHTML = '<div class="memory-empty">System is operating within healthy bounds.</div>';
+    return;
+  }
+
+  guidanceEl.innerHTML = items
+    .map((line) => `<div class="queue-item-row migration-item">${escapeHtml(String(line || ''))}</div>`)
+    .join('');
+}
+
+export async function loadMigrationReadiness(retry = false) {
+  const summaryEl = document.getElementById('migrationReadinessSummary');
+  const guidanceEl = document.getElementById('migrationReadinessActions');
+  if (!summaryEl || !guidanceEl) return;
+
+  summaryEl.textContent = 'Loading migration readiness...';
+  guidanceEl.innerHTML = '<div class="memory-empty">Assessing queue pressure and write reliability...</div>';
+
+  try {
+    const r = await fetch('/api/memory/migration-readiness', { headers: authHeaders() });
+    if (r.status === 401 && !retry) {
+      const tok = prompt('API token required:');
+      if (tok) {
+        setApiToken(tok);
+        return loadMigrationReadiness(true);
+      }
+      return;
+    }
+
+    const payload = await r.json();
+    if (!r.ok) {
+      throw new Error(payload?.error || `HTTP ${r.status}`);
+    }
+
+    renderMigrationReadiness(payload);
+  } catch (e) {
+    console.error('Failed to load migration readiness:', e);
+    summaryEl.textContent = 'Migration readiness unavailable';
+    guidanceEl.innerHTML = '<div class="memory-empty">Could not load migration guidance.</div>';
+  }
+}
+
+async function replayQueueWrites(retry = false) {
+  const replayBtn = document.getElementById('queueReplayBtn');
+  const originalLabel = replayBtn?.textContent || 'Replay <= 50';
+  if (replayBtn) {
+    replayBtn.disabled = true;
+    replayBtn.textContent = 'Replaying...';
+  }
+
+  try {
+    const r = await fetch('/api/memory/write-queue/replay', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ max_items: 50 }),
+    });
+
+    if (r.status === 401 && !retry) {
+      const tok = prompt('API token required:');
+      if (tok) {
+        setApiToken(tok);
+        return replayQueueWrites(true);
+      }
+      return;
+    }
+
+    const payload = await r.json();
+    if (!r.ok) {
+      if (window.showToast) {
+        showToast(payload?.error || 'Queue replay failed', r.status === 429 || r.status === 409 ? 'warning' : 'error');
+      }
+      return;
+    }
+
+    const replayed = Number(payload?.replay?.replayed || 0);
+    const remaining = Number(payload?.replay?.remaining || 0);
+    if (window.showToast) {
+      const type = replayed > 0 ? 'success' : 'info';
+      showToast(`Replayed ${replayed} queued writes (${remaining} remaining)`, type);
+    }
+  } catch (e) {
+    console.error('Queue replay failed:', e);
+    if (window.showToast) {
+      showToast('Queue replay failed', 'error');
+    }
+  } finally {
+    if (replayBtn) replayBtn.textContent = originalLabel;
+    await loadQueueDiagnostics(true);
+  }
+}
+
 // ---- Token Stats ----
 export async function loadTokenStats(retry = false) {
   const byModelDiv = document.getElementById('tokenByModel');
@@ -231,6 +431,9 @@ export async function loadTokenBudget() {
 export function initSettings() {
   document.getElementById('refreshMetricsBtn')?.addEventListener('click', loadMetrics);
   document.getElementById('refreshTokensBtn')?.addEventListener('click', loadTokenStats);
+  document.getElementById('refreshQueueBtn')?.addEventListener('click', () => loadQueueDiagnostics());
+  document.getElementById('refreshMigrationReadinessBtn')?.addEventListener('click', () => loadMigrationReadiness());
+  document.getElementById('queueReplayBtn')?.addEventListener('click', () => replayQueueWrites());
   document.getElementById('resetTokensBtn')?.addEventListener('click', async () => {
     try {
       await fetch('/api/tokens/reset', { method: 'POST', headers: authHeaders() });
