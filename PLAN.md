@@ -157,6 +157,21 @@ Last documented full-suite baseline (from prior recorded run):
 
 Important: treat this as a historical baseline. Re-run tests after significant changes.
 
+Recent live validation artifacts (2026-04-08):
+
+1. OFF lane real UI pre-restart: `data/benchmarks/webchat_off_real_pre_2026-04-08.json`
+2. OFF lane real UI post-restart: `data/benchmarks/webchat_off_real_post_2026-04-08.json`
+3. ON lane real UI pre-restart: `data/benchmarks/webchat_on_real_pre_2026-04-08.json`
+4. ON lane real UI post-restart: `data/benchmarks/webchat_on_real_post_2026-04-08.json`
+5. Aggregated comparison: `data/benchmarks/webchat_off_on_real_compare_2026-04-08.json`
+
+Observed outcomes from this run:
+
+1. Both OFF and ON lanes achieved 100% request success in tested UI flows.
+2. No `429` / “too many requests” responses were observed.
+3. No “trouble connecting to my brain” fallback responses were observed after key wiring.
+4. Strict post-restart recall hit rate favored OFF in this specific run.
+
 ## 10. Known Gaps and Active Risks
 
 Highest-impact current gaps:
