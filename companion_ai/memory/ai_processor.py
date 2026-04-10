@@ -77,7 +77,10 @@ def generate_memory_response(prompt: str, temperature: float = 0.3, purpose: str
             if not local_llm.is_available():
                 logger.warning("Memory AI local backend unavailable; falling back to Groq memory route")
             else:
-                return local_llm.generate(prompt=prompt, model=model).strip()
+                try:
+                    return local_llm.generate(prompt=prompt, model=model).strip()
+                except Exception as local_err:
+                    logger.warning(f"Memory AI local generation failed; falling back to Groq memory route: {local_err}")
 
         client = groq_memory_client
         if not client:

@@ -82,3 +82,51 @@ def test_model_roles_mapping():
     assert config.MODEL_ROLES['memory_processing'] == config.MEMORY_PROCESSING_MODEL
     assert config.MODEL_ROLES['embeddings'] == config.EMBEDDING_MODEL
     assert config.MODEL_ROLES['compound'] == "DISABLED"  # V5: Compound removed
+
+
+def test_local_model_runtime_config_contract():
+    cfg = config.get_local_model_runtime_config()
+
+    assert cfg['runtime'] in {'vllm', 'ollama', 'hybrid'}
+    assert cfg['profile'] in {'gaming', 'balanced', 'quality'}
+    assert isinstance(cfg['allow_cloud_fallback'], bool)
+    assert isinstance(cfg['min_vram_gb'], int)
+    assert 'preferred_models' in cfg
+    assert 'local_heavy' in cfg['preferred_models']
+    assert 'embedding' in cfg['preferred_models']
+
+
+def test_effective_memory_provider_auto_uses_profile(monkeypatch):
+    monkeypatch.setattr(config, 'MEMORY_PROCESSING_PROVIDER', 'auto')
+
+    monkeypatch.setattr(config, 'LOCAL_MODEL_PROFILE', 'quality')
+    assert config.get_effective_memory_processing_provider() == 'local'
+
+    monkeypatch.setattr(config, 'LOCAL_MODEL_PROFILE', 'gaming')
+    assert config.get_effective_memory_processing_provider() == 'groq'
+
+
+def test_local_runtime_overrides_apply_and_clear(monkeypatch):
+    monkeypatch.setattr(config, '_RUNTIME_LOCAL_MODEL_PROFILE_OVERRIDE', None)
+    monkeypatch.setattr(config, '_RUNTIME_LOCAL_MODEL_RUNTIME_OVERRIDE', None)
+
+    cfg = config.set_local_model_runtime_overrides(profile='quality', runtime='ollama')
+    assert cfg['profile'] == 'quality'
+    assert cfg['runtime'] == 'ollama'
+    assert cfg['profile_override_active'] is True
+    assert cfg['runtime_override_active'] is True
+
+    cfg_cleared = config.clear_local_model_runtime_overrides()
+    assert cfg_cleared['profile_override_active'] is False
+    assert cfg_cleared['runtime_override_active'] is False
+
+
+def test_profile_aware_local_heavy_model(monkeypatch):
+    monkeypatch.setattr(config, 'LOCAL_HEAVY_MODEL_GAMING', 'qwen-gaming')
+    monkeypatch.setattr(config, 'LOCAL_HEAVY_MODEL_BALANCED', 'qwen-balanced')
+    monkeypatch.setattr(config, 'LOCAL_HEAVY_MODEL_QUALITY', 'qwen-quality')
+    monkeypatch.setattr(config, '_RUNTIME_LOCAL_MODEL_PROFILE_OVERRIDE', 'quality')
+
+    model, is_local = config.get_tool_model('use_computer')
+    assert is_local is True
+    assert model == 'qwen-quality'

@@ -293,6 +293,259 @@ export async function loadMigrationReadiness(retry = false) {
   }
 }
 
+// ---- Local Runtime Controls ----
+function renderLocalRuntime(payload) {
+  const localModels = payload?.local_models || {};
+  const readiness = payload?.readiness || {};
+
+  const summaryEl = document.getElementById('localRuntimeSummary');
+  const chipsEl = document.getElementById('localRuntimeChips');
+  const runtimeSelect = document.getElementById('localRuntimeSelect');
+  const profileSelect = document.getElementById('localProfileSelect');
+  const modelsEl = document.getElementById('localRuntimeModels');
+  const commandsEl = document.getElementById('localRuntimeCommands');
+
+  if (summaryEl) {
+    const available = readiness?.selected_runtime_available ? 'available' : 'unavailable';
+    const fallback = readiness?.cloud_fallback_enabled ? 'enabled' : 'disabled';
+    summaryEl.textContent = `runtime ${available} • cloud fallback ${fallback}`;
+  }
+
+  if (chipsEl) {
+    const chips = [
+      `runtime ${escapeHtml(String(localModels.runtime || 'hybrid'))}`,
+      `profile ${escapeHtml(String(localModels.profile || 'balanced'))}`,
+      `chat ${escapeHtml(String(localModels.chat_provider || 'cloud_primary'))}`,
+      `memory ${escapeHtml(String(localModels.memory_provider_effective || 'groq'))}`,
+      `vllm ${readiness?.vllm_available ? 'up' : 'down'}`,
+      `ollama ${readiness?.ollama_available ? 'up' : 'down'}`,
+    ];
+    chipsEl.innerHTML = chips.map((c) => `<span class="queue-chip">${c}</span>`).join('');
+  }
+
+  if (runtimeSelect && Array.isArray(localModels.runtime_choices)) {
+    runtimeSelect.innerHTML = localModels.runtime_choices
+      .map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`)
+      .join('');
+    runtimeSelect.value = localModels.runtime || 'hybrid';
+  }
+
+  if (profileSelect && Array.isArray(localModels.profile_choices)) {
+    profileSelect.innerHTML = localModels.profile_choices
+      .map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`)
+      .join('');
+    profileSelect.value = localModels.profile || 'balanced';
+  }
+
+  if (modelsEl) {
+    const pretty = JSON.stringify(localModels.preferred_models || {}, null, 2);
+    modelsEl.textContent = pretty || 'No model map loaded.';
+  }
+
+  if (commandsEl) {
+    const commands = [];
+    if (!readiness?.vllm_available) {
+      commands.push('python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen2.5-3B-Instruct --host 0.0.0.0 --port 8000');
+    }
+    if (!readiness?.ollama_available) {
+      commands.push('ollama serve');
+    }
+    commands.push('./.venv/bin/python scripts/local_model_doctor.py --json');
+    commandsEl.textContent = commands.join('\n');
+  }
+}
+
+export async function loadLocalRuntimePanel(retry = false) {
+  try {
+    const r = await fetch('/api/local-model/runtime', { headers: authHeaders() });
+    if (r.status === 401 && !retry) {
+      const tok = prompt('API token required:');
+      if (tok) {
+        setApiToken(tok);
+        return loadLocalRuntimePanel(true);
+      }
+      return;
+    }
+
+    const payload = await r.json();
+    if (!r.ok) {
+      throw new Error(payload?.error || `HTTP ${r.status}`);
+    }
+    renderLocalRuntime(payload);
+  } catch (e) {
+    console.error('Failed to load local runtime panel:', e);
+    const summaryEl = document.getElementById('localRuntimeSummary');
+    if (summaryEl) summaryEl.textContent = 'Local runtime diagnostics unavailable';
+  }
+}
+
+async function saveLocalRuntimePanel(retry = false) {
+  const runtime = document.getElementById('localRuntimeSelect')?.value || 'hybrid';
+  const profile = document.getElementById('localProfileSelect')?.value || 'balanced';
+  try {
+    const r = await fetch('/api/local-model/runtime', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ runtime, profile }),
+    });
+    if (r.status === 401 && !retry) {
+      const tok = prompt('API token required:');
+      if (tok) {
+        setApiToken(tok);
+        return saveLocalRuntimePanel(true);
+      }
+      return;
+    }
+
+    const payload = await r.json();
+    if (!r.ok) {
+      throw new Error(payload?.error || `HTTP ${r.status}`);
+    }
+
+    if (window.showToast) showToast('Local runtime/profile updated', 'success');
+    renderLocalRuntime(payload);
+  } catch (e) {
+    console.error('Failed to save local runtime profile:', e);
+    if (window.showToast) showToast('Failed to update local runtime/profile', 'error');
+  }
+}
+
+async function clearLocalRuntimePanelOverrides(retry = false) {
+  try {
+    const r = await fetch('/api/local-model/runtime', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ clear_overrides: true }),
+    });
+    if (r.status === 401 && !retry) {
+      const tok = prompt('API token required:');
+      if (tok) {
+        setApiToken(tok);
+        return clearLocalRuntimePanelOverrides(true);
+      }
+      return;
+    }
+
+    const payload = await r.json();
+    if (!r.ok) {
+      throw new Error(payload?.error || `HTTP ${r.status}`);
+    }
+
+    if (window.showToast) showToast('Local runtime overrides cleared', 'info');
+    renderLocalRuntime(payload);
+  } catch (e) {
+    console.error('Failed to clear local runtime overrides:', e);
+    if (window.showToast) showToast('Failed to clear local runtime overrides', 'error');
+  }
+}
+
+// ---- Computer-use Activity ----
+async function loadComputerUseArtifact(attemptId, retry = false) {
+  const previewEl = document.getElementById('computerUseArtifactPreview');
+  if (previewEl) previewEl.textContent = `Loading artifact ${attemptId}...`;
+  try {
+    const r = await fetch(`/api/computer-use/artifacts/${encodeURIComponent(attemptId)}`, { headers: authHeaders() });
+    if (r.status === 401 && !retry) {
+      const tok = prompt('API token required:');
+      if (tok) {
+        setApiToken(tok);
+        return loadComputerUseArtifact(attemptId, true);
+      }
+      return;
+    }
+    const payload = await r.json();
+    if (!r.ok) {
+      throw new Error(payload?.error || `HTTP ${r.status}`);
+    }
+    if (previewEl) previewEl.textContent = JSON.stringify(payload, null, 2);
+  } catch (e) {
+    console.error('Failed to load computer-use artifact:', e);
+    if (previewEl) previewEl.textContent = `Artifact load failed: ${e.message || e}`;
+  }
+}
+
+function renderComputerUseActivity(activityPayload, configPayload) {
+  const listEl = document.getElementById('computerUseActivityList');
+  const summaryEl = document.getElementById('computerUsePolicySummary');
+  if (!listEl || !summaryEl) return;
+
+  const defaults = configPayload?.local_models?.computer_use_defaults || {};
+  summaryEl.textContent = [
+    `mode ${defaults.policy_mode || 'approve_only'}`,
+    `allowlist ${defaults.allowlist_strategy || 'action_first'}`,
+    `replay ${defaults.replay_access || 'operator_only'}`,
+    `retention ${defaults.artifact_retention_days ?? '7'}d`,
+    `two-step ${defaults.require_two_step_high_risk ? 'on' : 'off'}`,
+  ].join(' • ');
+
+  const items = Array.isArray(activityPayload?.items) ? activityPayload.items : [];
+  if (!items.length) {
+    listEl.innerHTML = '<div class="memory-empty">No computer-use activity yet</div>';
+    return;
+  }
+
+  listEl.innerHTML = items.map((item) => {
+    const status = String(item?.status || 'unknown');
+    const action = escapeHtml(String(item?.action || ''));
+    const text = escapeHtml(String(item?.text || ''));
+    const attemptId = escapeHtml(String(item?.attempt_id || ''));
+    const reason = escapeHtml(String(item?.reason || ''));
+    const err = escapeHtml(String(item?.error || ''));
+    const tsLabel = formatTimeAgo(String(item?.ts || ''));
+    const statusClass = status.toLowerCase();
+
+    return `
+      <div class="queue-item-row">
+        <div class="queue-item-top">
+          <span class="queue-op">${action || 'unknown action'}</span>
+          <span class="activity-status-badge ${statusClass}">${escapeHtml(status)}</span>
+        </div>
+        <div class="queue-item-meta">${attemptId} • ${escapeHtml(tsLabel || '')}</div>
+        <pre class="queue-item-preview">text=${text || '""'}\nreason=${reason || '-'}\nerror=${err || '-'}</pre>
+        <div class="activity-item-actions">
+          <button class="activity-view-btn" data-attempt-id="${attemptId}">View Artifact</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  listEl.querySelectorAll('.activity-view-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const attemptId = btn.getAttribute('data-attempt-id') || '';
+      if (attemptId) loadComputerUseArtifact(attemptId);
+    });
+  });
+}
+
+export async function loadComputerUseActivity(retry = false) {
+  try {
+    const [activityResp, configResp] = await Promise.all([
+      fetch('/api/computer-use/activity?limit=30', { headers: authHeaders() }),
+      fetch('/api/config', { headers: authHeaders() }),
+    ]);
+
+    if ((activityResp.status === 401 || configResp.status === 401) && !retry) {
+      const tok = prompt('API token required:');
+      if (tok) {
+        setApiToken(tok);
+        return loadComputerUseActivity(true);
+      }
+      return;
+    }
+
+    const activityPayload = await activityResp.json();
+    const configPayload = await configResp.json();
+    if (!activityResp.ok) {
+      throw new Error(activityPayload?.error || `HTTP ${activityResp.status}`);
+    }
+    renderComputerUseActivity(activityPayload, configPayload || {});
+  } catch (e) {
+    console.error('Failed to load computer-use activity:', e);
+    const listEl = document.getElementById('computerUseActivityList');
+    if (listEl) listEl.innerHTML = '<div class="memory-empty">Computer-use activity unavailable</div>';
+  }
+}
+
 async function replayQueueWrites(retry = false) {
   const replayBtn = document.getElementById('queueReplayBtn');
   const originalLabel = replayBtn?.textContent || 'Replay <= 50';
@@ -434,6 +687,10 @@ export function initSettings() {
   document.getElementById('refreshQueueBtn')?.addEventListener('click', () => loadQueueDiagnostics());
   document.getElementById('refreshMigrationReadinessBtn')?.addEventListener('click', () => loadMigrationReadiness());
   document.getElementById('queueReplayBtn')?.addEventListener('click', () => replayQueueWrites());
+  document.getElementById('refreshLocalRuntimeBtn')?.addEventListener('click', () => loadLocalRuntimePanel());
+  document.getElementById('saveLocalRuntimeBtn')?.addEventListener('click', () => saveLocalRuntimePanel());
+  document.getElementById('clearLocalRuntimeBtn')?.addEventListener('click', () => clearLocalRuntimePanelOverrides());
+  document.getElementById('refreshComputerUseBtn')?.addEventListener('click', () => loadComputerUseActivity());
   document.getElementById('resetTokensBtn')?.addEventListener('click', async () => {
     try {
       await fetch('/api/tokens/reset', { method: 'POST', headers: authHeaders() });

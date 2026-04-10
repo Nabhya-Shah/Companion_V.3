@@ -195,12 +195,98 @@ MEMORY_FAST_MODEL = os.getenv("MEMORY_FAST_MODEL", "meta-llama/llama-4-scout-17b
 # Local models for heavy operations (saves Groq tokens!)
 # NOTE: Now using vLLM backend instead of Ollama - use HuggingFace format
 LOCAL_HEAVY_MODEL = os.getenv("LOCAL_HEAVY_MODEL", "Qwen/Qwen2.5-3B-Instruct")  # vLLM model
-LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "llava:13b")  # Vision analysis (still Ollama for now)
+LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "llava:7b")  # Vision analysis (Ollama default)
 MEMORY_LOCAL_MODEL = os.getenv("MEMORY_LOCAL_MODEL", LOCAL_HEAVY_MODEL)
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
-MEMORY_PROCESSING_PROVIDER = os.getenv("MEMORY_PROCESSING_PROVIDER", "groq").strip().lower()
+MEMORY_PROCESSING_PROVIDER = os.getenv("MEMORY_PROCESSING_PROVIDER", "auto").strip().lower()
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "ollama").strip().lower()
 MEMORY_EXTRACT_PREFER_FAST = os.getenv("MEMORY_EXTRACT_PREFER_FAST", "true").lower() == "true"
+
+# Local runtime and profile controls (Bit 1: profile visibility + safe defaults)
+_LOCAL_RUNTIME_CHOICES = {"vllm", "ollama", "hybrid"}
+_LOCAL_PROFILE_CHOICES = {"gaming", "balanced", "quality"}
+LOCAL_MODEL_RUNTIME = os.getenv("LOCAL_MODEL_RUNTIME", "hybrid").strip().lower()
+if LOCAL_MODEL_RUNTIME not in _LOCAL_RUNTIME_CHOICES:
+    LOCAL_MODEL_RUNTIME = "hybrid"
+
+LOCAL_MODEL_PROFILE = os.getenv("LOCAL_MODEL_PROFILE", "balanced").strip().lower()
+if LOCAL_MODEL_PROFILE not in _LOCAL_PROFILE_CHOICES:
+    LOCAL_MODEL_PROFILE = "balanced"
+
+try:
+    LOCAL_MODEL_MIN_VRAM_GB = int(os.getenv("LOCAL_MODEL_MIN_VRAM_GB", "16"))
+except (TypeError, ValueError):
+    LOCAL_MODEL_MIN_VRAM_GB = 16
+
+LOCAL_MODEL_ALLOW_CLOUD_FALLBACK = os.getenv("LOCAL_MODEL_ALLOW_CLOUD_FALLBACK", "true").lower() == "true"
+LOCAL_MODEL_AUTO_DOWNLOAD = os.getenv("LOCAL_MODEL_AUTO_DOWNLOAD", "false").lower() == "true"
+LOCAL_CHAT_PROVIDER = os.getenv("LOCAL_CHAT_PROVIDER", "cloud_primary").strip().lower()
+if LOCAL_CHAT_PROVIDER not in {"cloud_primary", "local_primary"}:
+    LOCAL_CHAT_PROVIDER = "cloud_primary"
+
+LOCAL_HEAVY_MODEL_GAMING = os.getenv("LOCAL_HEAVY_MODEL_GAMING", "qwen2.5:3b")
+LOCAL_HEAVY_MODEL_BALANCED = os.getenv("LOCAL_HEAVY_MODEL_BALANCED", "qwen2.5:7b")
+LOCAL_HEAVY_MODEL_QUALITY = os.getenv("LOCAL_HEAVY_MODEL_QUALITY", "qwen2.5:14b")
+
+MEMORY_LOCAL_MODEL_GAMING = os.getenv("MEMORY_LOCAL_MODEL_GAMING", "qwen2.5:3b")
+MEMORY_LOCAL_MODEL_BALANCED = os.getenv("MEMORY_LOCAL_MODEL_BALANCED", "qwen2.5:7b")
+MEMORY_LOCAL_MODEL_QUALITY = os.getenv("MEMORY_LOCAL_MODEL_QUALITY", "qwen2.5:14b")
+
+# Runtime-only overrides allow profile/runtime switching without process restart.
+_RUNTIME_LOCAL_MODEL_PROFILE_OVERRIDE: str | None = None
+_RUNTIME_LOCAL_MODEL_RUNTIME_OVERRIDE: str | None = None
+
+# Computer-use default policy configuration (operator preferences).
+COMPUTER_USE_POLICY_MODE = os.getenv("COMPUTER_USE_POLICY_MODE", "approve_only").strip().lower()
+if COMPUTER_USE_POLICY_MODE not in {"approve_only", "preview_required"}:
+    COMPUTER_USE_POLICY_MODE = "approve_only"
+COMPUTER_USE_ALLOWLIST_STRATEGY = os.getenv("COMPUTER_USE_ALLOWLIST_STRATEGY", "action_first").strip().lower()
+if COMPUTER_USE_ALLOWLIST_STRATEGY not in {"action_first", "domain_first"}:
+    COMPUTER_USE_ALLOWLIST_STRATEGY = "action_first"
+COMPUTER_USE_REPLAY_ACCESS = os.getenv("COMPUTER_USE_REPLAY_ACCESS", "operator_only").strip().lower()
+if COMPUTER_USE_REPLAY_ACCESS not in {"operator_only", "all_authenticated"}:
+    COMPUTER_USE_REPLAY_ACCESS = "operator_only"
+try:
+    COMPUTER_USE_ARTIFACT_RETENTION_DAYS = int(os.getenv("COMPUTER_USE_ARTIFACT_RETENTION_DAYS", "7"))
+except (TypeError, ValueError):
+    COMPUTER_USE_ARTIFACT_RETENTION_DAYS = 7
+COMPUTER_USE_REQUIRE_TWO_STEP_HIGH_RISK = os.getenv("COMPUTER_USE_REQUIRE_TWO_STEP_HIGH_RISK", "true").lower() == "true"
+COMPUTER_USE_TWO_STEP_ACTIONS = os.getenv("COMPUTER_USE_TWO_STEP_ACTIONS", "launch")
+try:
+    COMPUTER_USE_SECOND_CONFIRM_TTL_SECONDS = int(os.getenv("COMPUTER_USE_SECOND_CONFIRM_TTL_SECONDS", "180"))
+except (TypeError, ValueError):
+    COMPUTER_USE_SECOND_CONFIRM_TTL_SECONDS = 180
+
+
+def get_computer_use_two_step_actions() -> set[str]:
+    """Return normalized action set requiring second-step confirmation."""
+    raw = (COMPUTER_USE_TWO_STEP_ACTIONS or "").strip()
+    if not raw:
+        return {"launch"}
+    if raw == "*":
+        return {"click", "type", "press", "launch", "scroll_up", "scroll_down"}
+    valid = {"click", "type", "press", "launch", "scroll_up", "scroll_down"}
+    picked = {item.strip().lower() for item in raw.split(',') if item.strip()}
+    selected = picked & valid
+    return selected or {"launch"}
+
+LOCAL_PROFILE_PRESETS = {
+    "gaming": {
+        "description": "Keep GPU headroom for other intensive tasks.",
+        "memory_provider_when_auto": "groq",
+        "prefer_fast_extract": True,
+    },
+    "balanced": {
+        "description": "Balanced local/cloud usage for day-to-day workflows.",
+        "memory_provider_when_auto": "groq",
+        "prefer_fast_extract": True,
+    },
+    "quality": {
+        "description": "Favor local quality for memory-heavy workloads when available.",
+        "memory_provider_when_auto": "local",
+        "prefer_fast_extract": False,
+    },
+}
 
 # Tool categorization - determines routing
 LIGHT_TOOLS = {
@@ -241,7 +327,7 @@ def get_tool_model(tool_name: str = None) -> tuple[str, bool]:
         - is_local=False means use Groq client
     """
     if tool_name and tool_name in HEAVY_TOOLS:
-        return LOCAL_HEAVY_MODEL, True
+        return get_effective_local_heavy_model(), True
     return TOOLS_MODEL, False  # Light tools use Groq
 
 
@@ -338,10 +424,10 @@ def get_memory_processing_model(task: str = 'memory_processing', prefer_fast: bo
     Returns:
         tuple: (model_name, is_local, provider)
     """
-    provider = MEMORY_PROCESSING_PROVIDER if MEMORY_PROCESSING_PROVIDER in {'groq', 'local', 'auto'} else 'groq'
+    provider = get_effective_memory_processing_provider()
     if provider == 'local':
-        return MEMORY_LOCAL_MODEL, True, 'local'
-    if prefer_fast and MEMORY_EXTRACT_PREFER_FAST:
+        return get_effective_memory_local_model(), True, 'local'
+    if prefer_fast and is_memory_fast_preferred():
         return MEMORY_FAST_MODEL, False, 'groq'
     return MEMORY_PROCESSING_MODEL, False, 'groq'
 
@@ -350,6 +436,154 @@ def get_embedding_model() -> tuple[str, str]:
     """Return the configured embedding model and provider."""
     provider = EMBEDDING_PROVIDER or 'ollama'
     return EMBEDDING_MODEL, provider
+
+
+def get_effective_memory_processing_provider() -> str:
+    """Resolve memory-processing provider with profile-aware handling for auto mode."""
+    provider = MEMORY_PROCESSING_PROVIDER if MEMORY_PROCESSING_PROVIDER in {'groq', 'local', 'auto'} else 'groq'
+    if provider != 'auto':
+        return provider
+    preset = LOCAL_PROFILE_PRESETS.get(get_effective_local_model_profile(), LOCAL_PROFILE_PRESETS['balanced'])
+    return preset.get('memory_provider_when_auto', 'groq')
+
+
+def get_effective_local_model_profile() -> str:
+    """Return active local profile, including runtime override if set."""
+    if _RUNTIME_LOCAL_MODEL_PROFILE_OVERRIDE in _LOCAL_PROFILE_CHOICES:
+        return _RUNTIME_LOCAL_MODEL_PROFILE_OVERRIDE
+    return LOCAL_MODEL_PROFILE
+
+
+def get_effective_local_model_runtime() -> str:
+    """Return active local runtime mode, including runtime override if set."""
+    if _RUNTIME_LOCAL_MODEL_RUNTIME_OVERRIDE in _LOCAL_RUNTIME_CHOICES:
+        return _RUNTIME_LOCAL_MODEL_RUNTIME_OVERRIDE
+    return LOCAL_MODEL_RUNTIME
+
+
+def get_effective_local_heavy_model() -> str:
+    """Return local heavy model based on active profile."""
+    runtime = get_effective_local_model_runtime()
+    if runtime == 'vllm':
+        return LOCAL_HEAVY_MODEL
+
+    profile = get_effective_local_model_profile()
+    if profile == 'gaming':
+        return LOCAL_HEAVY_MODEL_GAMING
+    if profile == 'quality':
+        return LOCAL_HEAVY_MODEL_QUALITY
+    return LOCAL_HEAVY_MODEL_BALANCED
+
+
+def get_effective_memory_local_model() -> str:
+    """Return local memory model based on active profile."""
+    runtime = get_effective_local_model_runtime()
+    if runtime == 'vllm':
+        return MEMORY_LOCAL_MODEL
+
+    profile = get_effective_local_model_profile()
+    if profile == 'gaming':
+        return MEMORY_LOCAL_MODEL_GAMING
+    if profile == 'quality':
+        return MEMORY_LOCAL_MODEL_QUALITY
+    return MEMORY_LOCAL_MODEL_BALANCED
+
+
+def is_memory_fast_preferred() -> bool:
+    """Profile-aware fast-extract preference guard."""
+    if not MEMORY_EXTRACT_PREFER_FAST:
+        return False
+    preset = LOCAL_PROFILE_PRESETS.get(get_effective_local_model_profile(), LOCAL_PROFILE_PRESETS['balanced'])
+    return bool(preset.get('prefer_fast_extract', True))
+
+
+def set_local_model_runtime_overrides(profile: str | None = None, runtime: str | None = None) -> dict:
+    """Apply runtime-only local model profile/runtime overrides.
+
+    Empty-string values clear their respective override.
+    """
+    global _RUNTIME_LOCAL_MODEL_PROFILE_OVERRIDE
+    global _RUNTIME_LOCAL_MODEL_RUNTIME_OVERRIDE
+
+    if profile is not None:
+        normalized = str(profile).strip().lower()
+        if not normalized:
+            _RUNTIME_LOCAL_MODEL_PROFILE_OVERRIDE = None
+        elif normalized in _LOCAL_PROFILE_CHOICES:
+            _RUNTIME_LOCAL_MODEL_PROFILE_OVERRIDE = normalized
+        else:
+            raise ValueError(f"Invalid local profile '{profile}'. Allowed: {sorted(_LOCAL_PROFILE_CHOICES)}")
+
+    if runtime is not None:
+        normalized_runtime = str(runtime).strip().lower()
+        if not normalized_runtime:
+            _RUNTIME_LOCAL_MODEL_RUNTIME_OVERRIDE = None
+        elif normalized_runtime in _LOCAL_RUNTIME_CHOICES:
+            _RUNTIME_LOCAL_MODEL_RUNTIME_OVERRIDE = normalized_runtime
+        else:
+            raise ValueError(f"Invalid local runtime '{runtime}'. Allowed: {sorted(_LOCAL_RUNTIME_CHOICES)}")
+
+    return get_local_model_runtime_config()
+
+
+def clear_local_model_runtime_overrides() -> dict:
+    """Clear runtime local model overrides."""
+    return set_local_model_runtime_overrides(profile="", runtime="")
+
+
+def get_local_model_runtime_config() -> dict:
+    """Return local-model runtime/profile configuration for APIs and diagnostics."""
+    profile = get_effective_local_model_profile()
+    runtime = get_effective_local_model_runtime()
+    preset = LOCAL_PROFILE_PRESETS.get(profile, LOCAL_PROFILE_PRESETS['balanced'])
+    return {
+        'runtime': runtime,
+        'profile': profile,
+        'runtime_configured': LOCAL_MODEL_RUNTIME,
+        'profile_configured': LOCAL_MODEL_PROFILE,
+        'runtime_override_active': bool(_RUNTIME_LOCAL_MODEL_RUNTIME_OVERRIDE),
+        'profile_override_active': bool(_RUNTIME_LOCAL_MODEL_PROFILE_OVERRIDE),
+        'profile_description': preset.get('description'),
+        'profile_choices': sorted(_LOCAL_PROFILE_CHOICES),
+        'runtime_choices': sorted(_LOCAL_RUNTIME_CHOICES),
+        'min_vram_gb': int(LOCAL_MODEL_MIN_VRAM_GB),
+        'allow_cloud_fallback': bool(LOCAL_MODEL_ALLOW_CLOUD_FALLBACK),
+        'auto_download': bool(LOCAL_MODEL_AUTO_DOWNLOAD),
+        'chat_provider': LOCAL_CHAT_PROVIDER,
+        'memory_provider_effective': get_effective_memory_processing_provider(),
+        'memory_provider_configured': MEMORY_PROCESSING_PROVIDER,
+        'preferred_models': {
+            'local_heavy': get_effective_local_heavy_model(),
+            'local_vision': LOCAL_VISION_MODEL,
+            'memory_local': get_effective_memory_local_model(),
+            'memory_cloud': MEMORY_PROCESSING_MODEL,
+            'memory_fast': MEMORY_FAST_MODEL,
+            'embedding': EMBEDDING_MODEL,
+        },
+        'profile_model_overrides': {
+            'gaming': {
+                'local_heavy': LOCAL_HEAVY_MODEL_GAMING,
+                'memory_local': MEMORY_LOCAL_MODEL_GAMING,
+            },
+            'balanced': {
+                'local_heavy': LOCAL_HEAVY_MODEL_BALANCED,
+                'memory_local': MEMORY_LOCAL_MODEL_BALANCED,
+            },
+            'quality': {
+                'local_heavy': LOCAL_HEAVY_MODEL_QUALITY,
+                'memory_local': MEMORY_LOCAL_MODEL_QUALITY,
+            },
+        },
+        'computer_use_defaults': {
+            'policy_mode': COMPUTER_USE_POLICY_MODE,
+            'allowlist_strategy': COMPUTER_USE_ALLOWLIST_STRATEGY,
+            'artifact_retention_days': COMPUTER_USE_ARTIFACT_RETENTION_DAYS,
+            'replay_access': COMPUTER_USE_REPLAY_ACCESS,
+            'require_two_step_high_risk': COMPUTER_USE_REQUIRE_TWO_STEP_HIGH_RISK,
+            'two_step_actions': sorted(get_computer_use_two_step_actions()),
+            'second_confirm_ttl_seconds': int(COMPUTER_USE_SECOND_CONFIRM_TTL_SECONDS),
+        },
+    }
 
 
 # ============================================================================
@@ -437,7 +671,7 @@ ENABLE_COMPOUND = False  # Disabled: V5+ uses native tool calling
 ENABLE_AUTO_TOOLS = True  # Auto-detect when tools are needed
 ENABLE_STRUCTURED_FACTS = True  # Use structured outputs for fact extraction
 ENABLE_GROQ_BUILTINS = True  # Allow 120B built-in tools (web/code/browse) alongside custom tools
-ENABLE_COMPUTER_USE = False  # Shelved: ComputerAgent unwired in Phase 5
+ENABLE_COMPUTER_USE = os.getenv("ENABLE_COMPUTER_USE", "false").lower() == "true"  # Disabled by default; enable explicitly
 
 # Model roles mapping (V4 architecture)
 MODEL_ROLES = {

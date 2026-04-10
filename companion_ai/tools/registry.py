@@ -655,7 +655,11 @@ def execute_function_call(function_name: str, arguments: Dict[str, Any]) -> str:
     elif function_name == 'look_at_screen':
         return tool_fn(arguments.get('prompt', 'What is on the screen?'))
     elif function_name == 'use_computer':
-        return tool_fn(action=arguments.get('action'), text=arguments.get('text'))
+        return tool_fn(
+            action=arguments.get('action'),
+            text=arguments.get('text'),
+            confirm_token=arguments.get('confirm_token', ''),
+        )
     elif function_name == 'remote_action_simulator':
         return tool_fn(
             capability=arguments.get('capability', ''),

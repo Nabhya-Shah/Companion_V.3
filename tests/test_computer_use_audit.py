@@ -1,4 +1,6 @@
 import json
+import os
+import re
 import sys
 import types
 import pytest
@@ -47,6 +49,8 @@ def test_computer_use_disabled_contract_and_audit(monkeypatch, tmp_path):
     assert rows[0]['status'] == 'requested'
     assert rows[1]['status'] == 'rejected'
     assert rows[1]['reason'] == 'feature_disabled'
+    assert rows[0].get('artifact_path')
+    assert os.path.exists(rows[0]['artifact_path'])
 
 
 def test_computer_use_invalid_action_audit(monkeypatch, tmp_path):
@@ -67,7 +71,8 @@ def test_computer_use_runtime_unavailable_audit(monkeypatch, tmp_path):
     audit_path = tmp_path / 'computer_use_audit.jsonl'
     monkeypatch.setattr(system_tools, 'COMPUTER_USE_AUDIT_PATH', str(audit_path))
     monkeypatch.setattr(core_config, 'ENABLE_COMPUTER_USE', True)
-    monkeypatch.delitem(sys.modules, 'companion_ai.computer_agent', raising=False)
+    # Force import failure even if companion_ai.computer_agent exists on disk.
+    monkeypatch.setitem(sys.modules, 'companion_ai.computer_agent', types.SimpleNamespace())
 
     msg = system_tools.tool_use_computer('press', 'Enter')
 
@@ -137,3 +142,37 @@ def test_use_computer_approval_granted_audit(monkeypatch, tmp_path):
     assert len(rows) == 2
     assert rows[0]['status'] == 'requested'
     assert rows[1]['status'] == 'completed'
+
+
+def test_use_computer_high_risk_two_step_confirmation(monkeypatch, tmp_path):
+    audit_path = tmp_path / 'computer_use_audit.jsonl'
+    monkeypatch.setattr(system_tools, 'COMPUTER_USE_AUDIT_PATH', str(audit_path))
+    monkeypatch.setattr(core_config, 'ENABLE_COMPUTER_USE', True)
+    monkeypatch.setattr(core_config, 'COMPUTER_USE_REQUIRE_TWO_STEP_HIGH_RISK', True)
+    monkeypatch.setattr(core_config, 'COMPUTER_USE_TWO_STEP_ACTIONS', 'launch')
+    monkeypatch.setattr(core_config, 'COMPUTER_USE_SECOND_CONFIRM_TTL_SECONDS', 180)
+    monkeypatch.setattr(system_tools, '_SECOND_STEP_CONFIRMATIONS', {})
+
+    fake_agent = types.SimpleNamespace(
+        mark_action=lambda: None,
+        click_element=lambda text: f"clicked:{text}",
+        type_text=lambda text, enter=True: f"typed:{text}:{enter}",
+        press_key=lambda key: f"pressed:{key}",
+        launch_app=lambda name: f"launched:{name}",
+        scroll=lambda direction: f"scrolled:{direction}",
+    )
+    monkeypatch.setitem(sys.modules, 'companion_ai.computer_agent', types.SimpleNamespace(computer_agent=fake_agent))
+
+    first = system_tools.tool_use_computer('launch', 'notepad')
+    assert "requires second confirmation" in first
+    token_match = re.search(r"confirm_token='([A-Za-z0-9_-]+)'", first)
+    assert token_match is not None
+
+    token = token_match.group(1)
+    second = system_tools.tool_use_computer('launch', 'notepad', confirm_token=token)
+    assert second == 'launched:notepad'
+
+    rows = _read_jsonl(audit_path)
+    assert len(rows) == 4
+    assert rows[1]['reason'] == 'second_step_required'
+    assert rows[-1]['status'] == 'completed'

@@ -41,3 +41,8 @@ def test_models_endpoint_structure():
     assert 'timeout_ms' in connectors
     assert 'max_results' in connectors
     assert 'local_primary' in connectors
+
+    assert 'local_runtime' in data
+    local_runtime = data['local_runtime']
+    assert local_runtime.get('runtime') in {'vllm', 'ollama', 'hybrid'}
+    assert local_runtime.get('profile') in {'gaming', 'balanced', 'quality'}

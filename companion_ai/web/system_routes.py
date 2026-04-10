@@ -24,6 +24,8 @@ from companion_ai.memory.sqlite_backend import get_memory_stats
 from companion_ai.memory import mem0_backend as mem0
 from companion_ai.memory import write_queue
 from companion_ai.orchestration import get_runtime_descriptor as get_orchestration_runtime_descriptor
+from companion_ai.local_llm import VLLMBackend, OllamaBackend
+from companion_ai.tools import system_tools as system_tools_module
 from companion_ai.services import jobs as job_manager_module
 from companion_ai.web import state
 
@@ -501,6 +503,8 @@ def _readiness_snapshot() -> dict:
     except Exception:
         queue_probe_failed = True
 
+    local_runtime = _local_runtime_snapshot()
+
     snapshot = {
         'status': 'ready',
         'api_auth_configured': bool(core_config.API_AUTH_TOKEN),
@@ -512,6 +516,7 @@ def _readiness_snapshot() -> dict:
         'memory_write_queue_depth': queue_depth,
         'memory_write_queue_oldest_created_at': queue_oldest_created_at,
         'orchestration': get_orchestration_runtime_descriptor(),
+        'local_runtime': local_runtime,
     }
 
     degraded_reasons = []
@@ -525,12 +530,81 @@ def _readiness_snapshot() -> dict:
         degraded_reasons.append('memory_write_queue_probe_failed')
     elif queue_depth > 100:
         degraded_reasons.append('memory_write_queue_backlog')
+    if (not local_runtime.get('selected_runtime_available', True)
+            and not local_runtime.get('cloud_fallback_enabled', True)):
+        degraded_reasons.append('local_runtime_unavailable_no_fallback')
 
     if degraded_reasons:
         snapshot['status'] = 'degraded'
         snapshot['reasons'] = degraded_reasons
 
     return snapshot
+
+
+def _local_runtime_snapshot() -> dict:
+    cfg = core_config.get_local_model_runtime_config()
+    runtime = (cfg.get('runtime') or 'hybrid').lower()
+
+    vllm_available = False
+    ollama_available = False
+    try:
+        vllm_available = bool(VLLMBackend().is_available())
+    except Exception:
+        vllm_available = False
+    try:
+        ollama_available = bool(OllamaBackend().is_available())
+    except Exception:
+        ollama_available = False
+
+    if runtime == 'vllm':
+        selected_available = vllm_available
+    elif runtime == 'ollama':
+        selected_available = ollama_available
+    else:
+        selected_available = vllm_available or ollama_available
+
+    available_backends = []
+    if vllm_available:
+        available_backends.append('vllm')
+    if ollama_available:
+        available_backends.append('ollama')
+
+    return {
+        'runtime': runtime,
+        'profile': cfg.get('profile'),
+        'chat_provider': cfg.get('chat_provider'),
+        'min_vram_gb': cfg.get('min_vram_gb'),
+        'cloud_fallback_enabled': bool(cfg.get('allow_cloud_fallback', True)),
+        'vllm_available': vllm_available,
+        'ollama_available': ollama_available,
+        'selected_runtime_available': selected_available,
+        'available_backends': available_backends,
+        'memory_provider_effective': cfg.get('memory_provider_effective'),
+        'memory_provider_configured': cfg.get('memory_provider_configured'),
+    }
+
+
+def _read_recent_jsonl(path: str, limit: int) -> list[dict]:
+    rows: list[dict] = []
+    if not path or not os.path.exists(path):
+        return rows
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(obj, dict):
+                    rows.append(obj)
+        if limit <= 0:
+            return rows
+        return rows[-limit:]
+    except Exception:
+        return []
 
 @system_bp.route('/api/health')
 def health():
@@ -614,6 +688,7 @@ def config_info():
         'auth_required': bool(core_config.API_AUTH_TOKEN),
         'tool_allowlist_enabled': bool(tool_allowlist),
         'tool_allowlist': tool_allowlist,
+        'local_models': core_config.get_local_model_runtime_config(),
         'retrieval_connectors': retrieval_connectors,
         'remote_actions': {
             'enabled': bool(core_config.REMOTE_ACTIONS_ENABLED),
@@ -623,6 +698,89 @@ def config_info():
             'capabilities': remote_action_caps,
         },
     })
+
+
+@system_bp.route('/api/local-model/runtime', methods=['GET', 'POST'])
+def local_model_runtime():
+    """Read or update runtime local model profile/runtime overrides."""
+    if request.method == 'GET':
+        return jsonify({
+            'local_models': core_config.get_local_model_runtime_config(),
+            'readiness': _local_runtime_snapshot(),
+        })
+
+    token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
+    if not core_config.require_auth(token):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    try:
+        if bool(data.get('clear_overrides')):
+            cfg = core_config.clear_local_model_runtime_overrides()
+        else:
+            profile = data.get('profile') if 'profile' in data else None
+            runtime = data.get('runtime') if 'runtime' in data else None
+            cfg = core_config.set_local_model_runtime_overrides(profile=profile, runtime=runtime)
+    except ValueError as ve:
+        return jsonify({'error': str(ve)}), 400
+    except Exception as e:
+        logger.error(f"Local model runtime update error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+    return jsonify({
+        'status': 'updated',
+        'local_models': cfg,
+        'readiness': _local_runtime_snapshot(),
+    })
+
+
+@system_bp.route('/api/computer-use/activity', methods=['GET'])
+def computer_use_activity():
+    """Return recent computer-use activity records with artifact references."""
+    token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
+    if not core_config.require_auth(token):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    limit_raw = request.args.get('limit', '30')
+    try:
+        limit = max(1, min(int(limit_raw), 200))
+    except Exception:
+        limit = 30
+
+    rows = _read_recent_jsonl(system_tools_module.COMPUTER_USE_AUDIT_PATH, limit)
+    rows.reverse()  # newest first
+    return jsonify({
+        'count': len(rows),
+        'limit': limit,
+        'retention_days': int(core_config.COMPUTER_USE_ARTIFACT_RETENTION_DAYS),
+        'items': rows,
+    })
+
+
+@system_bp.route('/api/computer-use/artifacts/<attempt_id>', methods=['GET'])
+def computer_use_artifact(attempt_id: str):
+    """Return artifact envelope for a computer-use attempt."""
+    token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
+    if not core_config.require_auth(token):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    safe_attempt_id = ''.join(ch for ch in str(attempt_id or '') if ch.isalnum() or ch in {'-', '_'})
+    if not safe_attempt_id:
+        return jsonify({'error': 'Invalid attempt id'}), 400
+
+    artifact_path = system_tools_module.get_computer_use_artifact_path(safe_attempt_id)
+    if not os.path.exists(artifact_path):
+        return jsonify({'error': 'Artifact not found'}), 404
+
+    try:
+        with open(artifact_path, 'r', encoding='utf-8') as f:
+            payload = json.load(f)
+        if not isinstance(payload, dict):
+            return jsonify({'error': 'Invalid artifact payload'}), 500
+        return jsonify(payload)
+    except Exception as e:
+        logger.error(f"Computer-use artifact read error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 @system_bp.route('/api/permissions', methods=['GET', 'POST'])
@@ -703,6 +861,7 @@ def models_info():
                 'mode': None,
                 'candidates': None,
             },
+            'local_runtime': core_config.get_local_model_runtime_config(),
             'connectors': connector_config,
             'remote_actions': {
                 'enabled': bool(core_config.REMOTE_ACTIONS_ENABLED),

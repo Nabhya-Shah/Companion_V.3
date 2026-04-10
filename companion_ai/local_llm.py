@@ -97,6 +97,77 @@ class VLLMClientWrapper:
                     return data
 
 
+class OllamaClientWrapper:
+    """A wrapper for Ollama that mimics OpenAI/Groq chat.completions.create interface."""
+
+    def __init__(self, base_url: str = "http://localhost:11434"):
+        self.base_url = base_url
+        self.chat = self.Chat(base_url)
+
+    class Chat:
+        def __init__(self, base_url):
+            self.completions = self.Completions(base_url)
+
+        class Completions:
+            def __init__(self, base_url):
+                self.base_url = base_url
+
+            def create(self, model: str, messages: List[Dict], tools=None, tool_choice=None, **kwargs):
+                """Create a completion using Ollama's /api/chat endpoint."""
+                payload = {
+                    "model": model,
+                    "messages": messages,
+                    "stream": False,
+                    "options": {
+                        "temperature": kwargs.get("temperature", 0.7),
+                        "num_predict": kwargs.get("max_tokens", 1024),
+                        "top_p": kwargs.get("top_p", 0.9),
+                    },
+                }
+
+                try:
+                    response = requests.post(
+                        f"{self.base_url}/api/chat",
+                        json=payload,
+                        timeout=120,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    text = ((data.get("message") or {}).get("content") or "").strip()
+
+                    # Adapt to OpenAI-compatible response structure expected by callers.
+                    wrapped = {
+                        "id": data.get("id", "ollama-chat"),
+                        "object": "chat.completion",
+                        "created": 0,
+                        "model": model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "message": {"role": "assistant", "content": text},
+                                "finish_reason": "stop",
+                            }
+                        ],
+                    }
+                    return self._dict_to_obj(wrapped)
+                except Exception as e:
+                    logger.error(f"Ollama client error: {e}")
+                    raise
+
+            def _dict_to_obj(self, data):
+                """Convert dictionary to object with attribute access."""
+                if isinstance(data, dict):
+                    class Obj:
+                        pass
+                    obj = Obj()
+                    for k, v in data.items():
+                        setattr(obj, k, self._dict_to_obj(v))
+                    return obj
+                if isinstance(data, list):
+                    return [self._dict_to_obj(i) for i in data]
+                return data
+
+
 class LocalLLMBackend(ABC):
     """Abstract base class for local LLM backends."""
     
@@ -299,25 +370,52 @@ class LocalLLM:
         self._init_backend()
     
     def _init_backend(self):
-        """Initialize the vLLM backend."""
-        vllm = VLLMBackend()
-        if vllm.is_available():
-            self.backend = vllm
-            model = vllm.get_current_model()
-            logger.info(f"LocalLLM: Using vLLM backend with model: {model}")
-            return
+        """Initialize local backend according to configured runtime."""
+        runtime = 'hybrid'
+        try:
+            from companion_ai.core import config as core_config
+
+            runtime = core_config.get_effective_local_model_runtime()
+        except Exception:
+            runtime = os.getenv("LOCAL_MODEL_RUNTIME", "hybrid").strip().lower()
+
+        if runtime == 'vllm':
+            candidates = [('vllm', VLLMBackend())]
+        elif runtime == 'ollama':
+            candidates = [('ollama', OllamaBackend())]
+        else:
+            # Hybrid defaults to Ollama-first for Linux-first practicality.
+            candidates = [('ollama', OllamaBackend()), ('vllm', VLLMBackend())]
+
+        for name, backend in candidates:
+            try:
+                if backend.is_available():
+                    self.backend = backend
+                    if isinstance(backend, VLLMBackend):
+                        model = backend.get_current_model()
+                        logger.info(f"LocalLLM: Using {name} backend with model: {model}")
+                    else:
+                        logger.info(f"LocalLLM: Using {name} backend")
+                    return
+            except Exception:
+                continue
+
+        logger.warning(f"LocalLLM: No local backend available for runtime={runtime}")
     
     def is_available(self) -> bool:
         """Check if vLLM backend is available."""
         return self.backend is not None and self.backend.is_available()
     
-    def get_client(self) -> VLLMClientWrapper:
+    def get_client(self) -> VLLMClientWrapper | OllamaClientWrapper:
         """Get an OpenAI-compatible client wrapper for tool calling compatibility.
         
         Returns:
             VLLMClientWrapper that mimics OpenAI/Groq client interface
         """
-        return VLLMClientWrapper()
+        if isinstance(self.backend, OllamaBackend):
+            return OllamaClientWrapper(base_url=self.backend.base_url)
+        base_url = self.backend.base_url if isinstance(self.backend, VLLMBackend) else "http://localhost:8000"
+        return VLLMClientWrapper(base_url=base_url)
     
     def generate(self, prompt: str, task: str = "text", model: str = None) -> str:
         """
@@ -479,5 +577,5 @@ class OllamaBackend(LocalLLMBackend):
             return []
 
 
-# Legacy compatibility
-OllamaClientWrapper = VLLMClientWrapper
+# Legacy compatibility alias retained for historical imports.
+LegacyOllamaClientWrapper = OllamaClientWrapper

@@ -8,6 +8,13 @@ def test_config_endpoint_includes_retrieval_connector_capabilities():
 
     data = res.get_json()
     assert 'retrieval_connectors' in data
+    assert 'local_models' in data
+
+    local_models = data['local_models']
+    assert 'runtime' in local_models
+    assert 'profile' in local_models
+    assert 'allow_cloud_fallback' in local_models
+    assert 'min_vram_gb' in local_models
 
     rc = data['retrieval_connectors']
     assert 'enabled' in rc

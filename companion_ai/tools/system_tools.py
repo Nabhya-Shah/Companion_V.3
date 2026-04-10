@@ -24,6 +24,105 @@ COMPUTER_USE_AUDIT_PATH = os.path.join(
     "computer_use_audit.jsonl",
 )
 
+_SECOND_STEP_CONFIRMATIONS: Dict[str, Dict[str, str]] = {}
+
+
+def _computer_use_artifact_dir() -> str:
+    return os.path.join(os.path.dirname(COMPUTER_USE_AUDIT_PATH), "computer_use_artifacts")
+
+
+def get_computer_use_artifact_path(attempt_id: str) -> str:
+    """Return artifact path for an attempt id."""
+    safe_attempt_id = "".join(ch for ch in str(attempt_id or "") if ch.isalnum() or ch in {"-", "_"})
+    return os.path.join(_computer_use_artifact_dir(), f"{safe_attempt_id}.json")
+
+
+def _append_computer_use_artifact_event(record: dict) -> None:
+    attempt_id = str(record.get("attempt_id") or "").strip()
+    if not attempt_id:
+        return
+
+    artifact_path = get_computer_use_artifact_path(attempt_id)
+    now_ts = str(record.get("ts") or datetime.datetime.now(datetime.timezone.utc).isoformat())
+
+    envelope = {
+        "attempt_id": attempt_id,
+        "created_at": now_ts,
+        "updated_at": now_ts,
+        "action": str(record.get("action") or ""),
+        "text": str(record.get("text") or ""),
+        "events": [],
+    }
+    try:
+        if os.path.exists(artifact_path):
+            with open(artifact_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    envelope.update(loaded)
+                    if not isinstance(envelope.get("events"), list):
+                        envelope["events"] = []
+        envelope["updated_at"] = now_ts
+        if not envelope.get("created_at"):
+            envelope["created_at"] = now_ts
+        envelope["action"] = str(record.get("action") or envelope.get("action") or "")
+        envelope["text"] = str(record.get("text") or envelope.get("text") or "")
+        envelope["events"].append({
+            "ts": now_ts,
+            "status": str(record.get("status") or ""),
+            "reason": str(record.get("reason") or ""),
+            "result_preview": str(record.get("result_preview") or ""),
+            "error": str(record.get("error") or ""),
+        })
+
+        os.makedirs(os.path.dirname(artifact_path), exist_ok=True)
+        with open(artifact_path, "w", encoding="utf-8") as f:
+            json.dump(envelope, f, ensure_ascii=True)
+    except Exception:
+        # Never break tool execution due to artifact logging failure.
+        pass
+
+
+def _prune_second_step_tokens() -> None:
+    now = datetime.datetime.now(datetime.timezone.utc)
+    expired: list[str] = []
+    for token, payload in _SECOND_STEP_CONFIRMATIONS.items():
+        expires_at = payload.get("expires_at")
+        try:
+            expiry = datetime.datetime.fromisoformat(str(expires_at)) if expires_at else None
+        except Exception:
+            expiry = None
+        if not expiry or expiry <= now:
+            expired.append(token)
+    for token in expired:
+        _SECOND_STEP_CONFIRMATIONS.pop(token, None)
+
+
+def _issue_second_step_token(action: str, text: str) -> str:
+    _prune_second_step_tokens()
+    token = uuid.uuid4().hex[:12]
+    expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+        seconds=max(30, int(core_config.COMPUTER_USE_SECOND_CONFIRM_TTL_SECONDS))
+    )
+    _SECOND_STEP_CONFIRMATIONS[token] = {
+        "action": str(action or ""),
+        "text": str(text or ""),
+        "expires_at": expires_at.isoformat(),
+    }
+    return token
+
+
+def _consume_second_step_token(token: str, action: str, text: str) -> tuple[bool, str]:
+    _prune_second_step_tokens()
+    item = _SECOND_STEP_CONFIRMATIONS.get(token)
+    if not item:
+        return False, "missing_or_expired_token"
+    if str(item.get("action") or "") != str(action or ""):
+        return False, "action_mismatch"
+    if str(item.get("text") or "") != str(text or ""):
+        return False, "text_mismatch"
+    _SECOND_STEP_CONFIRMATIONS.pop(token, None)
+    return True, "ok"
+
 
 def _audit_computer_use(
     attempt_id: str,
@@ -35,6 +134,7 @@ def _audit_computer_use(
     result: str = "",
     error: str = "",
 ) -> None:
+    artifact_path = get_computer_use_artifact_path(attempt_id)
     record = {
         "attempt_id": attempt_id,
         "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -44,11 +144,13 @@ def _audit_computer_use(
         "reason": reason,
         "result_preview": (result or "")[:240],
         "error": error,
+        "artifact_path": artifact_path,
     }
     try:
         os.makedirs(os.path.dirname(COMPUTER_USE_AUDIT_PATH), exist_ok=True)
         with open(COMPUTER_USE_AUDIT_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=True) + "\n")
+        _append_computer_use_artifact_event(record)
     except Exception:
         # Never break tool execution due to audit logging failure.
         pass
@@ -222,13 +324,17 @@ def tool_look_at_screen(prompt: str = "What is on the screen?") -> str:
                 "text": {
                     "type": "string",
                     "description": "If action='click', the description of the element (e.g., 'Submit Button', 'File Menu'). If action='type', the text to type."
+                },
+                "confirm_token": {
+                    "type": "string",
+                    "description": "Second-step confirmation token for high-risk actions. Required only when the tool returns a second-step confirmation prompt."
                 }
             },
             "required": ["action"]
         }
     }
 }, risk_tier='high', requires_approval=True, category='computer_control')
-def tool_use_computer(action: str, text: str = "") -> str:
+def tool_use_computer(action: str, text: str = "", confirm_token: str = "") -> str:
     """Execute computer control actions."""
     attempt_id = uuid.uuid4().hex[:12]
     _audit_computer_use(attempt_id, action, text, "requested")
@@ -250,6 +356,43 @@ def tool_use_computer(action: str, text: str = "") -> str:
         message = f"Unknown action: {action}"
         _audit_computer_use(attempt_id, action, text, "rejected", reason="unknown_action", error=message)
         return message
+
+    two_step_actions = core_config.get_computer_use_two_step_actions()
+    requires_second_step = bool(
+        core_config.COMPUTER_USE_REQUIRE_TWO_STEP_HIGH_RISK
+        and action in two_step_actions
+    )
+    if requires_second_step:
+        token = str(confirm_token or "").strip()
+        if not token:
+            issued = _issue_second_step_token(action, text)
+            ttl = int(core_config.COMPUTER_USE_SECOND_CONFIRM_TTL_SECONDS)
+            message = (
+                f"High-risk action '{action}' requires second confirmation. "
+                f"Repeat the same use_computer call with confirm_token='{issued}' within {ttl}s."
+            )
+            _audit_computer_use(
+                attempt_id,
+                action,
+                text,
+                "rejected",
+                reason="second_step_required",
+                error=message,
+            )
+            return message
+
+        ok, reason = _consume_second_step_token(token, action, text)
+        if not ok:
+            message = f"Second-step confirmation failed: {reason}."
+            _audit_computer_use(
+                attempt_id,
+                action,
+                text,
+                "rejected",
+                reason="second_step_invalid",
+                error=message,
+            )
+            return message
 
     try:
         from companion_ai.computer_agent import computer_agent

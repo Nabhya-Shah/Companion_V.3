@@ -431,6 +431,48 @@
             <h4>Feature Flags</h4>
             <div id="featureFlags" class="feature-flags"></div>
           </div>
+          <div class="memory-section">
+            <div class="section-header-row">
+              <h4>Local Runtime</h4>
+              <button id="refreshLocalRuntimeBtn" class="small-btn" type="button">Refresh</button>
+            </div>
+            <div id="localRuntimeSummary" class="memory-subtext">Loading local runtime status...</div>
+            <div class="queue-summary" id="localRuntimeChips"></div>
+            <div class="setting-group runtime-grid">
+              <label class="setting-label" for="localRuntimeSelect">Runtime</label>
+              <select id="localRuntimeSelect" class="schedule-input">
+                <option value="hybrid">hybrid</option>
+                <option value="vllm">vllm</option>
+                <option value="ollama">ollama</option>
+              </select>
+              <label class="setting-label" for="localProfileSelect">Profile</label>
+              <select id="localProfileSelect" class="schedule-input">
+                <option value="gaming">gaming</option>
+                <option value="balanced">balanced</option>
+                <option value="quality">quality</option>
+              </select>
+            </div>
+            <div class="stats-btn-row queue-btn-row">
+              <button id="saveLocalRuntimeBtn" class="refresh-btn" type="button">Apply Runtime/Profile</button>
+              <button id="clearLocalRuntimeBtn" class="refresh-btn" type="button">Clear Overrides</button>
+            </div>
+            <pre id="localRuntimeModels" class="queue-item-preview">No model map loaded</pre>
+            <pre id="localRuntimeCommands" class="queue-item-preview">Run scripts/local_model_doctor.py for setup hints.</pre>
+          </div>
+          <div class="memory-section">
+            <div class="section-header-row">
+              <h4>Computer-Use Activity</h4>
+              <button id="refreshComputerUseBtn" class="small-btn" type="button">Refresh</button>
+            </div>
+            <div id="computerUsePolicySummary" class="memory-subtext">Loading computer-use policy...</div>
+            <div id="computerUseActivityList" class="queue-items-list">
+              <div class="memory-empty">No computer-use activity yet</div>
+            </div>
+            <div class="memory-section" style="padding-top: 0;">
+              <h4>Selected Artifact</h4>
+              <pre id="computerUseArtifactPreview" class="queue-item-preview">Select an activity item to view artifact details.</pre>
+            </div>
+          </div>
           <div class="stats-card">
             <div class="stats-header">
               <span class="stats-icon">

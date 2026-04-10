@@ -1,7 +1,7 @@
 # Companion V3 Unified Roadmap
 
 Status: Canonical roadmap document
-Last updated: 2026-03-31
+Last updated: 2026-04-10
 Planning style: milestone and sprint tracks
 
 ## 1. Purpose
@@ -147,6 +147,18 @@ Acceptance gates:
 2. [ ] Run pilot for one Explore Later item (Hermes adapter or pgvector lane) with explicit go/no-go criteria.
 3. [ ] Re-score quality posture after core track completion.
 
+### Immediate Queue (April 2026)
+
+1. [ ] Ship local-model setup MVP (one-command bootstrap, profile presets, health contracts, and fallback visibility).
+2. [ ] Complete browser/computer-use beta hardening pass with stricter e2e diagnostics, action replay, and artifact triage data.
+3. [ ] Automate Hermes OFF->ON pilot go/no-go gate with explicit thresholds and machine-readable decision artifact.
+4. [ ] Harden mem0 readiness in local/dev environments with deterministic health contracts and fallback visibility.
+5. [ ] Improve strict post-restart memory recall hit rate with targeted regression prompts and tuning loops.
+6. [ ] Expand non-mocked provider contract canaries (chat, memory extraction, embeddings) with periodic probes.
+7. [ ] Extend throughput validation to sustained and burst profiles with alert thresholds and benchmark artifacts.
+8. [ ] Expand smart-home integration from core light controls to room/scene/routine-safe operations.
+9. [ ] Publish quality posture re-score after pilot and memory hardening slices complete.
+
 ## 6. Quality and Exit Metrics
 
 Roadmap progress is measured by:
@@ -176,6 +188,8 @@ Roadmap progress is measured by:
 
 ## 9. Changelog
 
+- 2026-04-10: Reweighted Immediate Queue priorities to emphasize tangible delivery of local-model setup and computer-use beta hardening ahead of pilot automation and broader reliability slices.
+- 2026-04-09: Refreshed roadmap priorities with a concrete Immediate Queue focused on Hermes pilot go/no-go automation, memory recall hardening, provider/throughput validation depth, browser safety hardening, smart-home expansion, and quality posture re-scoring.
 - 2026-03-31: Consolidated roadmap sources into unified ROADMAP.md and integrated NEW.md strategy into keep-now/explore-later/not-now tracks.
 - 2026-03-31: Track A slice delivered: API trace IDs now propagate through response headers, chat stream metadata, orchestrator delegation, and memory write request IDs; /api/health now includes readiness diagnostics (with targeted tests).
 - 2026-03-31: Track A slice delivered: sensitive policy/admin write endpoints now require explicit API_AUTH_TOKEN configuration by default (targeted tests + live endpoint probes passed).

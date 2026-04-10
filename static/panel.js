@@ -5,7 +5,16 @@ import { bus, state, authHeaders } from './utils.js';
 import { loadMemory } from './memory.js';
 import { loadBrainFiles, loadRecentUploads } from './memory.js';
 import { loadTasks, startTasksPolling, stopTasksPolling } from './tasks.js';
-import { loadTokenStats, loadModelsPanel, loadMetrics, loadSettings, loadQueueDiagnostics, loadMigrationReadiness } from './settings.js';
+import {
+  loadTokenStats,
+  loadModelsPanel,
+  loadMetrics,
+  loadSettings,
+  loadQueueDiagnostics,
+  loadMigrationReadiness,
+  loadLocalRuntimePanel,
+  loadComputerUseActivity,
+} from './settings.js';
 import { loadSmartHomeHealth, loadSmartHomeRooms, startSmartHomePolling, stopSmartHomePolling } from './smarthome.js';
 import { attachChipListeners, renderHistory } from './chat.js';
 
@@ -58,7 +67,15 @@ function onPanelTabSwitch(tabName) {
   if (tabName === 'tasks')     { loadTasks(); startTasksPolling(); }
   if (tabName === 'memory')    { loadMemory(); }
   if (tabName === 'knowledge') { loadBrainFiles(); loadRecentUploads(); }
-  if (tabName === 'stats')     { loadTokenStats(); loadModelsPanel(); loadMetrics(); loadQueueDiagnostics(); loadMigrationReadiness(); }
+  if (tabName === 'stats') {
+    loadTokenStats();
+    loadModelsPanel();
+    loadMetrics();
+    loadQueueDiagnostics();
+    loadMigrationReadiness();
+    loadLocalRuntimePanel();
+    loadComputerUseActivity();
+  }
   if (tabName === 'smarthome') { loadSmartHomeHealth(); loadSmartHomeRooms(); startSmartHomePolling(); }
 }
 
