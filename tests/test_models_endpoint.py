@@ -46,3 +46,5 @@ def test_models_endpoint_structure():
     local_runtime = data['local_runtime']
     assert local_runtime.get('runtime') in {'vllm', 'ollama', 'hybrid'}
     assert local_runtime.get('profile') in {'gaming', 'balanced', 'quality'}
+    assert local_runtime.get('chat_provider') in {'cloud_primary', 'local_primary'}
+    assert set(local_runtime.get('chat_provider_choices', [])) == {'cloud_primary', 'local_primary'}

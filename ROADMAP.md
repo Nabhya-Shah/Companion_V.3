@@ -1,7 +1,7 @@
 # Companion V3 Unified Roadmap
 
 Status: Canonical roadmap document
-Last updated: 2026-04-10
+Last updated: 2026-04-11
 Planning style: milestone and sprint tracks
 
 ## 1. Purpose
@@ -149,15 +149,37 @@ Acceptance gates:
 
 ### Immediate Queue (April 2026)
 
-1. [ ] Ship local-model setup MVP (one-command bootstrap, profile presets, health contracts, and fallback visibility).
-2. [ ] Complete browser/computer-use beta hardening pass with stricter e2e diagnostics, action replay, and artifact triage data.
-3. [ ] Automate Hermes OFF->ON pilot go/no-go gate with explicit thresholds and machine-readable decision artifact.
-4. [ ] Harden mem0 readiness in local/dev environments with deterministic health contracts and fallback visibility.
-5. [ ] Improve strict post-restart memory recall hit rate with targeted regression prompts and tuning loops.
-6. [ ] Expand non-mocked provider contract canaries (chat, memory extraction, embeddings) with periodic probes.
-7. [ ] Extend throughput validation to sustained and burst profiles with alert thresholds and benchmark artifacts.
-8. [ ] Expand smart-home integration from core light controls to room/scene/routine-safe operations.
-9. [ ] Publish quality posture re-score after pilot and memory hardening slices complete.
+1. [x] Ship runtime chat-provider control and truthful local/cloud fallback semantics (API + orchestrator + settings UI).
+2. [ ] Complete remaining local-model setup MVP slices (bootstrap ergonomics, deeper health contracts, and fallback observability hardening).
+3. [ ] Complete browser/computer-use beta hardening pass with stricter e2e diagnostics, action replay, and artifact triage data.
+4. [ ] Automate Hermes OFF->ON pilot go/no-go gate with explicit thresholds and machine-readable decision artifact.
+5. [ ] Harden mem0 readiness in local/dev environments with deterministic health contracts and fallback visibility.
+6. [ ] Improve strict post-restart memory recall hit rate with targeted regression prompts and tuning loops.
+7. [ ] Expand non-mocked provider contract canaries (chat, memory extraction, embeddings) with periodic probes.
+8. [ ] Extend throughput validation to sustained and burst profiles with alert thresholds and benchmark artifacts.
+9. [ ] Expand smart-home integration from core light controls to room/scene/routine-safe operations.
+10. [ ] Publish quality posture re-score after pilot and memory hardening slices complete.
+11. [ ] Add unified run timeline and replay artifacts across tool execution, approvals, and computer-use pathways.
+12. [ ] Implement resumable SSE stream cursor contracts for reconnect-safe multi-tab and multi-device continuity.
+13. [ ] Add skill/plugin trust contracts (declared capabilities, install gating metadata, and signed integrity manifest checks).
+14. [ ] Add per-workspace budget and policy envelopes for model usage and high-risk tool autonomy.
+
+### Competitive Learnings Applied (April 2026)
+
+External landscape review complete (OpenClaw plus major alternatives). Delivery policy remains hardening-first.
+
+Adopt now (high ROI, low architecture risk):
+
+1. Unified run replay and artifact timeline.
+2. Resumable stream reliability contracts.
+3. Skill/plugin trust envelope.
+4. Budget and policy guardrails.
+
+Defer until core hardening queue is complete:
+
+1. Full no-code workflow canvas as primary interface.
+2. Broad multi-channel expansion beyond current product scope.
+3. Full shell replacement with third-party UI stacks.
 
 ## 6. Quality and Exit Metrics
 
@@ -188,6 +210,13 @@ Roadmap progress is measured by:
 
 ## 9. Changelog
 
+- 2026-04-11: Completed external competitive landscape review (OpenClaw, Open WebUI, Dify, Langflow, AutoGPT, AnythingLLM, LibreChat, Open Interpreter, crewAI, Flowise, OpenHands SDK, SuperAGI) and mapped high-ROI, hardening-compatible imports into Immediate Queue (run replay timeline, resumable SSE cursor contracts, skill trust manifests, workspace budget/policy envelopes).
+- 2026-04-11: Browser/computer-use hardening slice delivered: added `/api/computer-use/diagnostics` with policy state, pending-approval counts, audit status/reason/action aggregates, artifact-missing triage, and recent-attempt snapshots (targeted endpoint tests passed).
+- 2026-04-11: Provider and throughput polish slice delivered: added `scripts/provider_contract_canary.py` for live chat/memory/embedding probes and upgraded `scripts/throughput_probe.py` with `single|sustained|burst` profiles plus threshold alert output for sustained/burst operability checks.
+- 2026-04-11: Memory readiness slice delivered: added authenticated `/api/memory/readiness` endpoint exposing deterministic Mem0 runtime/queue/write-health contract with actionable recommendations for local/dev hardening (new endpoint tests passed).
+- 2026-04-11: Polish slice delivered: chat route history/debug/SSE timestamps now emit timezone-aware UTC ISO-8601 values for better cross-system diagnostics consistency (targeted chat/session regression tests passed).
+- 2026-04-11: Local-runtime control slice delivered: runtime config and `/api/local-model/runtime` now support chat-provider overrides (`cloud_primary` / `local_primary`), orchestrator client selection now honors effective chat mode with explicit fallback semantics, and settings UI now surfaces configured vs effective chat-provider state.
+- 2026-04-11: Stability slice delivered: approval resolution UX now fails loudly and retries with token prompt on auth failures; default local `run-web` task env now includes explicit dev token + computer-use enablement to avoid approval 403 loops in local runs.
 - 2026-04-10: Reweighted Immediate Queue priorities to emphasize tangible delivery of local-model setup and computer-use beta hardening ahead of pilot automation and broader reliability slices.
 - 2026-04-09: Refreshed roadmap priorities with a concrete Immediate Queue focused on Hermes pilot go/no-go automation, memory recall hardening, provider/throughput validation depth, browser safety hardening, smart-home expansion, and quality posture re-scoring.
 - 2026-03-31: Consolidated roadmap sources into unified ROADMAP.md and integrated NEW.md strategy into keep-now/explore-later/not-now tracks.

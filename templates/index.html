@@ -451,9 +451,19 @@
                 <option value="balanced">balanced</option>
                 <option value="quality">quality</option>
               </select>
+              <label class="setting-label" for="localChatProviderSelect">Chat Provider</label>
+              <select id="localChatProviderSelect" class="schedule-input">
+                <option value="cloud_primary">cloud_primary</option>
+                <option value="local_primary">local_primary</option>
+              </select>
+              <label class="setting-label" for="localHeavyModelSelect">Local Heavy Model</label>
+              <select id="localHeavyModelSelect" class="schedule-input">
+                <option value="huihui_ai/qwen3.5-abliterated:27b">huihui_ai/qwen3.5-abliterated:27b</option>
+                <option value="huihui_ai/gemma-4-abliterated:31b">huihui_ai/gemma-4-abliterated:31b</option>
+              </select>
             </div>
             <div class="stats-btn-row queue-btn-row">
-              <button id="saveLocalRuntimeBtn" class="refresh-btn" type="button">Apply Runtime/Profile</button>
+              <button id="saveLocalRuntimeBtn" class="refresh-btn" type="button">Apply Runtime/Profile/Chat</button>
               <button id="clearLocalRuntimeBtn" class="refresh-btn" type="button">Clear Overrides</button>
             </div>
             <pre id="localRuntimeModels" class="queue-item-preview">No model map loaded</pre>

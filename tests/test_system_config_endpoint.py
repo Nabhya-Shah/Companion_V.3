@@ -14,7 +14,10 @@ def test_config_endpoint_includes_retrieval_connector_capabilities():
     assert 'runtime' in local_models
     assert 'profile' in local_models
     assert 'allow_cloud_fallback' in local_models
+    assert 'chat_provider' in local_models
+    assert 'chat_provider_choices' in local_models
     assert 'min_vram_gb' in local_models
+    assert 'local_heavy_model_choices' in local_models
 
     rc = data['retrieval_connectors']
     assert 'enabled' in rc

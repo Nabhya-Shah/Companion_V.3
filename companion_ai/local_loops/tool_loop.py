@@ -12,12 +12,88 @@ Uses a small local text model for tool selection and execution.
 """
 
 import logging
+import re
 from datetime import datetime
 from typing import Any, Dict, List
 from .base import Loop, LoopResult, LoopStatus
 from .registry import register_loop
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_action_text(value: str) -> str:
+    cleaned = (value or "").strip().strip('"\'')
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned.rstrip('.,;')
+
+
+def _recover_use_computer_args(action: str, text: str, user_request: str) -> tuple[str, str]:
+    action_value = str(action or "").strip()
+    text_value = str(text or "").strip()
+    if action_value:
+        return action_value, text_value
+
+    msg = (user_request or "").strip()
+    if not msg:
+        return "press", text_value or "Enter"
+
+    numbered_steps = [
+        m.group(1).strip()
+        for m in re.finditer(r'(?m)^\s*\d+[\)\].:-]?\s*(.+)$', msg)
+        if m.group(1).strip()
+    ]
+    if len(numbered_steps) >= 2:
+        msg = numbered_steps[0]
+
+    low = msg.lower()
+
+    if re.search(r'\bopen\s+(?:another|new)\s+terminal tab\b', low):
+        return "press", "ctrl+shift+t"
+
+    if re.search(r'\bclose\s+(?:the\s+)?(?:current|this)?\s*tab\b', low):
+        return "press", "ctrl+shift+w"
+
+    press_match = re.search(r'\bpress\s+([a-z0-9+\-]+)\b', low)
+    if press_match:
+        key = press_match.group(1)
+        return "press", "Enter" if key == "enter" else key
+
+    shortcut_match = re.search(r'\b((?:ctrl|alt|shift|cmd|win)(?:\+[a-z0-9]+)+)\b', low)
+    if shortcut_match:
+        return "press", shortcut_match.group(1)
+
+    type_match = re.search(
+        r'\btype(?:\s+exactly)?(?:\s+this)?(?:\s+text)?\s*:\s*([^\n\r]+)',
+        msg,
+        flags=re.IGNORECASE,
+    )
+    if type_match:
+        return "type", _normalize_action_text(type_match.group(1))
+
+    type_direct = re.search(r'\btype\s+([^\n\r]+)', msg, flags=re.IGNORECASE)
+    if type_direct:
+        return "type", _normalize_action_text(type_direct.group(1))
+
+    click_match = re.search(r'\bclick\s+([^\n\r]+)', msg, flags=re.IGNORECASE)
+    if click_match:
+        return "click", _normalize_action_text(click_match.group(1))
+
+    if 'scroll up' in low:
+        return "scroll_up", ""
+
+    if 'scroll down' in low:
+        return "scroll_down", ""
+
+    launch_match = re.search(r'\b(?:open|launch)\s+([^\n\r]+)', msg, flags=re.IGNORECASE)
+    if launch_match:
+        target = _normalize_action_text(launch_match.group(1))
+        if target and not re.search(r'\b(?:ctrl|alt|shift|cmd|win)\+', target.lower()):
+            return "launch", target[:120]
+
+    if any(k in low for k in ['use computer', 'control my computer', 'computer control']):
+        return "press", "Enter"
+
+    return "press", text_value or "Enter"
 
 
 @register_loop
@@ -104,7 +180,12 @@ and return the result. Be precise and concise."""
         elif operation == "browser_press":
             return await self._browser_tool("browser_press", {"key": task.get("key", "")})
         elif operation == "use_computer":
-            return await self._computer_use(task.get("action", ""), task.get("text", ""))
+            action, text = _recover_use_computer_args(
+                task.get("action", ""),
+                task.get("text", ""),
+                str(task.get("user_request") or ""),
+            )
+            return await self._computer_use(action, text)
         elif operation == "remote_action_simulator":
             return await self._remote_action_simulator(task)
         elif operation == "wikipedia":

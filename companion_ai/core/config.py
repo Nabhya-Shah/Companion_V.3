@@ -9,6 +9,7 @@ Simplified Configuration for Companion AI v0.3
 """
 
 import os
+import re
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -202,9 +203,22 @@ MEMORY_PROCESSING_PROVIDER = os.getenv("MEMORY_PROCESSING_PROVIDER", "auto").str
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "ollama").strip().lower()
 MEMORY_EXTRACT_PREFER_FAST = os.getenv("MEMORY_EXTRACT_PREFER_FAST", "true").lower() == "true"
 
+
+def _parse_model_list_env(raw: str) -> list[str]:
+    """Parse comma-delimited model names while preserving order and uniqueness."""
+    items = [part.strip() for part in str(raw or "").split(",")]
+    cleaned: list[str] = []
+    for item in items:
+        if not item:
+            continue
+        if item not in cleaned:
+            cleaned.append(item)
+    return cleaned
+
 # Local runtime and profile controls (Bit 1: profile visibility + safe defaults)
 _LOCAL_RUNTIME_CHOICES = {"vllm", "ollama", "hybrid"}
 _LOCAL_PROFILE_CHOICES = {"gaming", "balanced", "quality"}
+_LOCAL_CHAT_PROVIDER_CHOICES = {"cloud_primary", "local_primary"}
 LOCAL_MODEL_RUNTIME = os.getenv("LOCAL_MODEL_RUNTIME", "hybrid").strip().lower()
 if LOCAL_MODEL_RUNTIME not in _LOCAL_RUNTIME_CHOICES:
     LOCAL_MODEL_RUNTIME = "hybrid"
@@ -221,12 +235,18 @@ except (TypeError, ValueError):
 LOCAL_MODEL_ALLOW_CLOUD_FALLBACK = os.getenv("LOCAL_MODEL_ALLOW_CLOUD_FALLBACK", "true").lower() == "true"
 LOCAL_MODEL_AUTO_DOWNLOAD = os.getenv("LOCAL_MODEL_AUTO_DOWNLOAD", "false").lower() == "true"
 LOCAL_CHAT_PROVIDER = os.getenv("LOCAL_CHAT_PROVIDER", "cloud_primary").strip().lower()
-if LOCAL_CHAT_PROVIDER not in {"cloud_primary", "local_primary"}:
+if LOCAL_CHAT_PROVIDER not in _LOCAL_CHAT_PROVIDER_CHOICES:
     LOCAL_CHAT_PROVIDER = "cloud_primary"
 
 LOCAL_HEAVY_MODEL_GAMING = os.getenv("LOCAL_HEAVY_MODEL_GAMING", "qwen2.5:3b")
 LOCAL_HEAVY_MODEL_BALANCED = os.getenv("LOCAL_HEAVY_MODEL_BALANCED", "qwen2.5:7b")
 LOCAL_HEAVY_MODEL_QUALITY = os.getenv("LOCAL_HEAVY_MODEL_QUALITY", "qwen2.5:14b")
+LOCAL_HEAVY_MODEL_CANDIDATES = _parse_model_list_env(
+    os.getenv(
+        "LOCAL_HEAVY_MODEL_CANDIDATES",
+        "huihui_ai/qwen3.5-abliterated:27b,huihui_ai/gemma-4-abliterated:31b",
+    )
+)
 
 MEMORY_LOCAL_MODEL_GAMING = os.getenv("MEMORY_LOCAL_MODEL_GAMING", "qwen2.5:3b")
 MEMORY_LOCAL_MODEL_BALANCED = os.getenv("MEMORY_LOCAL_MODEL_BALANCED", "qwen2.5:7b")
@@ -235,6 +255,9 @@ MEMORY_LOCAL_MODEL_QUALITY = os.getenv("MEMORY_LOCAL_MODEL_QUALITY", "qwen2.5:14
 # Runtime-only overrides allow profile/runtime switching without process restart.
 _RUNTIME_LOCAL_MODEL_PROFILE_OVERRIDE: str | None = None
 _RUNTIME_LOCAL_MODEL_RUNTIME_OVERRIDE: str | None = None
+_RUNTIME_LOCAL_HEAVY_MODEL_OVERRIDE: str | None = None
+_RUNTIME_LOCAL_CHAT_PROVIDER_OVERRIDE: str | None = None
+_LOCAL_MODEL_TOKEN_RE = re.compile(r"^[A-Za-z0-9._:/-]{2,128}$")
 
 # Computer-use default policy configuration (operator preferences).
 COMPUTER_USE_POLICY_MODE = os.getenv("COMPUTER_USE_POLICY_MODE", "approve_only").strip().lower()
@@ -461,8 +484,18 @@ def get_effective_local_model_runtime() -> str:
     return LOCAL_MODEL_RUNTIME
 
 
+def get_effective_local_chat_provider() -> str:
+    """Return active chat provider, including runtime override if set."""
+    if _RUNTIME_LOCAL_CHAT_PROVIDER_OVERRIDE in _LOCAL_CHAT_PROVIDER_CHOICES:
+        return _RUNTIME_LOCAL_CHAT_PROVIDER_OVERRIDE
+    return LOCAL_CHAT_PROVIDER
+
+
 def get_effective_local_heavy_model() -> str:
     """Return local heavy model based on active profile."""
+    if _RUNTIME_LOCAL_HEAVY_MODEL_OVERRIDE:
+        return _RUNTIME_LOCAL_HEAVY_MODEL_OVERRIDE
+
     runtime = get_effective_local_model_runtime()
     if runtime == 'vllm':
         return LOCAL_HEAVY_MODEL
@@ -473,6 +506,25 @@ def get_effective_local_heavy_model() -> str:
     if profile == 'quality':
         return LOCAL_HEAVY_MODEL_QUALITY
     return LOCAL_HEAVY_MODEL_BALANCED
+
+
+def get_local_heavy_model_choices() -> list[str]:
+    """Return unique local heavy model choices for UI and runtime overrides."""
+    ordered = [
+        LOCAL_HEAVY_MODEL_GAMING,
+        LOCAL_HEAVY_MODEL_BALANCED,
+        LOCAL_HEAVY_MODEL_QUALITY,
+        LOCAL_HEAVY_MODEL,
+        *LOCAL_HEAVY_MODEL_CANDIDATES,
+    ]
+    choices: list[str] = []
+    for model in ordered:
+        token = str(model or "").strip()
+        if not token:
+            continue
+        if token not in choices:
+            choices.append(token)
+    return choices
 
 
 def get_effective_memory_local_model() -> str:
@@ -497,13 +549,20 @@ def is_memory_fast_preferred() -> bool:
     return bool(preset.get('prefer_fast_extract', True))
 
 
-def set_local_model_runtime_overrides(profile: str | None = None, runtime: str | None = None) -> dict:
+def set_local_model_runtime_overrides(
+    profile: str | None = None,
+    runtime: str | None = None,
+    local_heavy_model: str | None = None,
+    chat_provider: str | None = None,
+) -> dict:
     """Apply runtime-only local model profile/runtime overrides.
 
     Empty-string values clear their respective override.
     """
     global _RUNTIME_LOCAL_MODEL_PROFILE_OVERRIDE
     global _RUNTIME_LOCAL_MODEL_RUNTIME_OVERRIDE
+    global _RUNTIME_LOCAL_HEAVY_MODEL_OVERRIDE
+    global _RUNTIME_LOCAL_CHAT_PROVIDER_OVERRIDE
 
     if profile is not None:
         normalized = str(profile).strip().lower()
@@ -523,12 +582,34 @@ def set_local_model_runtime_overrides(profile: str | None = None, runtime: str |
         else:
             raise ValueError(f"Invalid local runtime '{runtime}'. Allowed: {sorted(_LOCAL_RUNTIME_CHOICES)}")
 
+    if local_heavy_model is not None:
+        normalized_model = str(local_heavy_model).strip()
+        if not normalized_model:
+            _RUNTIME_LOCAL_HEAVY_MODEL_OVERRIDE = None
+        elif _LOCAL_MODEL_TOKEN_RE.fullmatch(normalized_model):
+            _RUNTIME_LOCAL_HEAVY_MODEL_OVERRIDE = normalized_model
+        else:
+            raise ValueError(
+                "Invalid local heavy model token. Use letters, numbers, '.', '_', '-', ':', or '/' only."
+            )
+
+    if chat_provider is not None:
+        normalized_chat_provider = str(chat_provider).strip().lower()
+        if not normalized_chat_provider:
+            _RUNTIME_LOCAL_CHAT_PROVIDER_OVERRIDE = None
+        elif normalized_chat_provider in _LOCAL_CHAT_PROVIDER_CHOICES:
+            _RUNTIME_LOCAL_CHAT_PROVIDER_OVERRIDE = normalized_chat_provider
+        else:
+            raise ValueError(
+                f"Invalid chat provider '{chat_provider}'. Allowed: {sorted(_LOCAL_CHAT_PROVIDER_CHOICES)}"
+            )
+
     return get_local_model_runtime_config()
 
 
 def clear_local_model_runtime_overrides() -> dict:
     """Clear runtime local model overrides."""
-    return set_local_model_runtime_overrides(profile="", runtime="")
+    return set_local_model_runtime_overrides(profile="", runtime="", local_heavy_model="", chat_provider="")
 
 
 def get_local_model_runtime_config() -> dict:
@@ -543,13 +624,18 @@ def get_local_model_runtime_config() -> dict:
         'profile_configured': LOCAL_MODEL_PROFILE,
         'runtime_override_active': bool(_RUNTIME_LOCAL_MODEL_RUNTIME_OVERRIDE),
         'profile_override_active': bool(_RUNTIME_LOCAL_MODEL_PROFILE_OVERRIDE),
+        'local_heavy_model_override_active': bool(_RUNTIME_LOCAL_HEAVY_MODEL_OVERRIDE),
+        'chat_provider_override_active': bool(_RUNTIME_LOCAL_CHAT_PROVIDER_OVERRIDE),
         'profile_description': preset.get('description'),
         'profile_choices': sorted(_LOCAL_PROFILE_CHOICES),
         'runtime_choices': sorted(_LOCAL_RUNTIME_CHOICES),
+        'chat_provider_choices': sorted(_LOCAL_CHAT_PROVIDER_CHOICES),
+        'local_heavy_model_choices': get_local_heavy_model_choices(),
         'min_vram_gb': int(LOCAL_MODEL_MIN_VRAM_GB),
         'allow_cloud_fallback': bool(LOCAL_MODEL_ALLOW_CLOUD_FALLBACK),
         'auto_download': bool(LOCAL_MODEL_AUTO_DOWNLOAD),
-        'chat_provider': LOCAL_CHAT_PROVIDER,
+        'chat_provider': get_effective_local_chat_provider(),
+        'chat_provider_configured': LOCAL_CHAT_PROVIDER,
         'memory_provider_effective': get_effective_memory_processing_provider(),
         'memory_provider_configured': MEMORY_PROCESSING_PROVIDER,
         'preferred_models': {

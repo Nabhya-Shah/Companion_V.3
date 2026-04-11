@@ -216,6 +216,111 @@ def _load_throughput_baseline() -> dict:
         return {}
 
 
+def _memory_readiness_snapshot() -> dict:
+    """Return deterministic memory readiness diagnostics for local/dev operators."""
+    mem0_enabled = bool(core_config.USE_MEM0)
+    mem0_initialized = bool(getattr(mem0, '_memory_instance', None) is not None)
+
+    runtime_descriptor = {}
+    runtime_probe_failed = False
+    try:
+        runtime_descriptor = mem0.get_runtime_descriptor()
+    except Exception:
+        runtime_probe_failed = True
+        runtime_descriptor = {}
+
+    queue_depth = 0
+    queue_oldest_created_at = None
+    queue_probe_failed = False
+    try:
+        queue_rows = write_queue.list_queued_writes(limit=5000)
+        queue_depth = len(queue_rows)
+        if queue_rows:
+            queue_oldest_created_at = queue_rows[-1].get('created_at')
+    except Exception:
+        queue_probe_failed = True
+
+    write_probe_failed = False
+    write_rows = []
+    try:
+        write_rows = list_memory_write_status(limit=500)
+    except Exception:
+        write_probe_failed = True
+
+    write_total = len(write_rows)
+    write_committed = sum(1 for row in write_rows if row.get('status') == 'accepted_committed')
+    write_queued = sum(1 for row in write_rows if row.get('status') == 'accepted_queued')
+    write_failed = sum(1 for row in write_rows if row.get('status') in {'failed', 'rejected'})
+
+    queued_rate = (write_queued / write_total) if write_total else 0.0
+    failure_rate = (write_failed / write_total) if write_total else 0.0
+
+    baseline = _load_throughput_baseline()
+    baseline_results = baseline.get('results') if isinstance(baseline.get('results'), dict) else {}
+    baseline_latency = baseline_results.get('latency_ms') if isinstance(baseline_results.get('latency_ms'), dict) else {}
+
+    reasons: list[str] = []
+    if mem0_enabled and not mem0_initialized:
+        reasons.append('mem0_not_initialized')
+    if runtime_probe_failed:
+        reasons.append('mem0_runtime_probe_failed')
+    if queue_probe_failed:
+        reasons.append('memory_write_queue_probe_failed')
+    elif queue_depth >= 100:
+        reasons.append('memory_write_queue_backlog')
+
+    if write_probe_failed:
+        reasons.append('memory_write_status_probe_failed')
+    elif failure_rate >= 0.10:
+        reasons.append('memory_write_failure_rate_high')
+
+    if not write_probe_failed and queued_rate >= 0.25:
+        reasons.append('memory_write_queued_ratio_high')
+
+    recommendations: list[str] = []
+    if not reasons:
+        recommendations.append('Memory subsystem is healthy. Continue periodic migration-readiness and throughput checks.')
+    else:
+        if 'mem0_not_initialized' in reasons:
+            recommendations.append('Initialize Mem0 backend and verify runtime descriptor model/provider alignment.')
+        if 'memory_write_queue_backlog' in reasons:
+            recommendations.append('Run bounded queue replay and monitor /api/memory/write-queue for sustained backlog.')
+        if 'memory_write_failure_rate_high' in reasons or 'memory_write_queued_ratio_high' in reasons:
+            recommendations.append('Investigate write reliability and consider dual-write migration planning if pressure persists.')
+        if 'memory_write_queue_probe_failed' in reasons or 'memory_write_status_probe_failed' in reasons:
+            recommendations.append('Fix memory diagnostics probe path before relying on readiness score for operations decisions.')
+
+    return {
+        'status': 'degraded' if reasons else 'ready',
+        'reasons': reasons,
+        'mem0': {
+            'enabled': mem0_enabled,
+            'initialized': mem0_initialized,
+            'runtime': runtime_descriptor,
+            'runtime_probe_failed': runtime_probe_failed,
+        },
+        'write_queue': {
+            'depth': queue_depth,
+            'oldest_created_at': queue_oldest_created_at,
+            'probe_failed': queue_probe_failed,
+        },
+        'write_status': {
+            'rows': write_total,
+            'committed': write_committed,
+            'queued': write_queued,
+            'failed': write_failed,
+            'queued_rate': round(queued_rate, 4),
+            'failure_rate': round(failure_rate, 4),
+            'probe_failed': write_probe_failed,
+        },
+        'baseline': {
+            'throughput_probe_p95_ms': float(baseline_latency.get('p95_ms') or 0.0),
+            'throughput_probe_rps': float(baseline_results.get('throughput_rps') or 0.0),
+        },
+        'recommendations': recommendations,
+    }
+
+
 @memory_bp.route('/api/memory')
 def get_memory():
     try:
@@ -410,6 +515,22 @@ def memory_write_queue_status():
         })
     except Exception as e:
         logger.error(f"Memory write queue status error: {e}")
+        return jsonify({'error': str(e), 'trace_id': state.get_request_trace_id()}), 500
+
+
+@memory_bp.route('/api/memory/readiness', methods=['GET'])
+def memory_readiness_status():
+    """Return deterministic memory readiness contract for local/dev health checks."""
+    try:
+        token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
+        if not core_config.require_auth(token):
+            return jsonify({'error': 'Unauthorized'}), 401
+
+        snapshot = _memory_readiness_snapshot()
+        snapshot['trace_id'] = state.get_request_trace_id()
+        return jsonify(snapshot)
+    except Exception as e:
+        logger.error(f"Memory readiness error: {e}")
         return jsonify({'error': str(e), 'trace_id': state.get_request_trace_id()}), 500
 
 

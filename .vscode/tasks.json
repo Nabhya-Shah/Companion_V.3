@@ -50,9 +50,9 @@
 		{
 			"label": "run-web",
 			"type": "shell",
-			"command": "${workspaceFolder}/.venv/bin/python run_companion.py --web",
+			"command": "API_AUTH_TOKEN=${API_AUTH_TOKEN:-dev-ui-token} ENABLE_COMPUTER_USE=${ENABLE_COMPUTER_USE:-true} ${workspaceFolder}/.venv/bin/python run_companion.py --web",
 			"windows": {
-				"command": "& '${workspaceFolder}\\.venv\\Scripts\\python.exe' run_companion.py --web"
+				"command": "$env:API_AUTH_TOKEN = if ($env:API_AUTH_TOKEN) { $env:API_AUTH_TOKEN } else { 'dev-ui-token' }; $env:ENABLE_COMPUTER_USE = if ($env:ENABLE_COMPUTER_USE) { $env:ENABLE_COMPUTER_USE } else { 'true' }; & '${workspaceFolder}\\.venv\\Scripts\\python.exe' run_companion.py --web"
 			},
 			"group": { "kind": "none" },
 			"isBackground": true,

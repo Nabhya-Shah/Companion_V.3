@@ -208,6 +208,33 @@ class TestOrchestratorPrompt:
         assert task["action"] == "press"
         assert task["text"] == "Enter"
 
+    def test_derive_use_computer_task_type_colon(self):
+        task = self.orch._derive_use_computer_task("Type: echo COMPANION_UI_TEST_ONE")
+        assert task is not None
+        assert task["operation"] == "use_computer"
+        assert task["action"] == "type"
+        assert task["text"] == "echo COMPANION_UI_TEST_ONE"
+
+    def test_derive_use_computer_task_prefers_first_numbered_step(self):
+        task = self.orch._derive_use_computer_task(
+            """Use computer control and execute this exact sequence now:
+1) Launch gnome-terminal
+2) Type: echo COMPANION_UI_TEST_ONE
+3) Press Enter
+"""
+        )
+        assert task is not None
+        assert task["operation"] == "use_computer"
+        assert task["action"] == "launch"
+        assert task["text"] == "gnome-terminal"
+
+    def test_derive_use_computer_task_terminal_tab_shortcut(self):
+        task = self.orch._derive_use_computer_task("Open another terminal tab with Ctrl+Shift+T")
+        assert task is not None
+        assert task["operation"] == "use_computer"
+        assert task["action"] == "press"
+        assert task["text"] == "ctrl+shift+t"
+
     def test_derive_memory_search_task_personal_recall(self):
         task = self.orch._derive_memory_search_task("What do you remember about me and where I live?")
         assert task is not None
@@ -253,6 +280,34 @@ def test_orchestrator_remote_action_failure_surfaces_lifecycle_feedback(monkeypa
     assert metadata["action_feedback"]["trace_id"] == "ra_test"
 
 
+def test_orchestrator_tools_delegation_includes_user_request(monkeypatch):
+    orch = Orchestrator()
+    captured_task = {}
+
+    class FakeLoop:
+        async def execute(self, task):
+            captured_task.update(task)
+            return LoopResult.success(
+                data={"result": "ok"},
+                operation="use_computer",
+            )
+
+    monkeypatch.setattr("companion_ai.orchestrator.get_loop", lambda _name: FakeLoop())
+    monkeypatch.setattr(orch, "_synthesize_response", AsyncMock(return_value="done"))
+
+    decision = OrchestratorDecision(
+        action=OrchestratorAction.DELEGATE,
+        loop="tools",
+        task={"operation": "use_computer"},
+    )
+
+    response, metadata = asyncio.run(orch._handle_delegation(decision, "launch gnome-terminal", {}))
+
+    assert response == "done"
+    assert metadata["source"] == "loop_tools"
+    assert captured_task["user_request"] == "launch gnome-terminal"
+
+
 # ---------------------------------------------------------------------------
 # 4. Orchestrator client fallback
 # ---------------------------------------------------------------------------
@@ -281,6 +336,74 @@ class TestOrchestratorFallback:
         with patch.object(orch, '_get_client_and_model', return_value=(None, None, False)):
             response, meta = asyncio.run(orch.process("hello", {}))
             assert "trouble connecting" in response
+
+
+class TestOrchestratorClientSelection:
+    def test_get_client_and_model_prefers_local_when_local_primary(self, monkeypatch):
+        orch = Orchestrator()
+        local_client = object()
+
+        class FakeLocalLLM:
+            def is_available(self):
+                return True
+
+            def get_client(self):
+                return local_client
+
+        monkeypatch.setattr('companion_ai.local_llm.LocalLLM', FakeLocalLLM)
+        monkeypatch.setattr('companion_ai.core.config.get_effective_local_chat_provider', lambda: 'local_primary')
+        monkeypatch.setattr('companion_ai.core.config.get_effective_local_heavy_model', lambda: 'huihui_ai/qwen3.5-abliterated:27b')
+        monkeypatch.setattr('companion_ai.core.config.LOCAL_MODEL_ALLOW_CLOUD_FALLBACK', True)
+        monkeypatch.setattr(orch, '_get_groq_client', lambda: MagicMock(name='groq_client'))
+
+        client, model, is_local = orch._get_client_and_model()
+
+        assert client is local_client
+        assert model == 'huihui_ai/qwen3.5-abliterated:27b'
+        assert is_local is True
+
+    def test_get_client_and_model_blocks_cloud_when_local_primary_and_fallback_disabled(self, monkeypatch):
+        orch = Orchestrator()
+
+        class FakeLocalLLM:
+            def is_available(self):
+                return False
+
+            def get_client(self):
+                return object()
+
+        monkeypatch.setattr('companion_ai.local_llm.LocalLLM', FakeLocalLLM)
+        monkeypatch.setattr('companion_ai.core.config.get_effective_local_chat_provider', lambda: 'local_primary')
+        monkeypatch.setattr('companion_ai.core.config.LOCAL_MODEL_ALLOW_CLOUD_FALLBACK', False)
+        monkeypatch.setattr(orch, '_get_groq_client', lambda: MagicMock(name='groq_client'))
+
+        client, model, is_local = orch._get_client_and_model()
+
+        assert client is None
+        assert model is None
+        assert is_local is False
+
+    def test_get_client_and_model_falls_back_to_local_when_cloud_primary_unavailable(self, monkeypatch):
+        orch = Orchestrator()
+        local_client = object()
+
+        class FakeLocalLLM:
+            def is_available(self):
+                return True
+
+            def get_client(self):
+                return local_client
+
+        monkeypatch.setattr('companion_ai.local_llm.LocalLLM', FakeLocalLLM)
+        monkeypatch.setattr('companion_ai.core.config.get_effective_local_chat_provider', lambda: 'cloud_primary')
+        monkeypatch.setattr('companion_ai.core.config.get_effective_local_heavy_model', lambda: 'huihui_ai/qwen3.5-abliterated:27b')
+        monkeypatch.setattr(orch, '_get_groq_client', lambda: None)
+
+        client, model, is_local = orch._get_client_and_model()
+
+        assert client is local_client
+        assert model == 'huihui_ai/qwen3.5-abliterated:27b'
+        assert is_local is True
 
 
 # ---------------------------------------------------------------------------
@@ -578,6 +701,21 @@ class TestToolLoopExecution:
         result = asyncio.run(loop.execute({"operation": "use_computer", "action": "press", "text": "Enter"}))
         assert result.status.value == "success"
         assert "ok:use_computer:press:Enter" in result.data.get("result", "")
+
+    def test_use_computer_operation_backfills_missing_action(self, monkeypatch):
+        loop = get_loop("tools")
+
+        monkeypatch.setattr(
+            'companion_ai.tools.execute_function_call',
+            lambda name, arguments: f"ok:{name}:{arguments.get('action')}:{arguments.get('text')}"
+        )
+
+        result = asyncio.run(loop.execute({
+            "operation": "use_computer",
+            "user_request": "Use computer control now: press Ctrl+Shift+T once to open another terminal tab.",
+        }))
+        assert result.status.value == "success"
+        assert "ok:use_computer:press:ctrl+shift+t" in result.data.get("result", "")
 
 
 # ---------------------------------------------------------------------------

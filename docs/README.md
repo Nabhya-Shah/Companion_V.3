@@ -10,8 +10,12 @@ This docs directory now primarily contains supporting notes and historical artif
 ## Folder Structure
 
 1. archive/: historical snapshots and superseded long-form planning docs.
-2. notes/: lightweight notes/index pointers.
+2. notes/: lightweight notes/index pointers, including external landscape reviews.
 3. ops/: lightweight operational index pointers.
+
+## Current Notes
+
+1. docs/notes/COMPETITIVE_LANDSCAPE_2026-04-11.md: OpenClaw and alternatives review with Companion V3 comparison and roadmap-impact decisions.
 
 ## Guidance
 

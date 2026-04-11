@@ -606,6 +606,52 @@ def _read_recent_jsonl(path: str, limit: int) -> list[dict]:
     except Exception:
         return []
 
+
+def _summarize_computer_use_audit(rows: list[dict]) -> dict:
+    """Build compact diagnostics for recent computer-use audit rows."""
+    status_counts: dict[str, int] = {}
+    reason_counts: dict[str, int] = {}
+    action_counts: dict[str, int] = {}
+    artifact_missing_count = 0
+    recent_attempts: list[dict] = []
+
+    for row in rows:
+        status = str(row.get('status') or 'unknown').strip().lower() or 'unknown'
+        reason = str(row.get('reason') or row.get('error') or '').strip().lower() or 'none'
+        action = str(row.get('action') or 'unknown').strip().lower() or 'unknown'
+        artifact_path = str(row.get('artifact_path') or '').strip()
+
+        status_counts[status] = status_counts.get(status, 0) + 1
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        action_counts[action] = action_counts.get(action, 0) + 1
+
+        artifact_exists = None
+        if artifact_path:
+            artifact_exists = os.path.exists(artifact_path)
+            if not artifact_exists:
+                artifact_missing_count += 1
+
+        recent_attempts.append({
+            'attempt_id': row.get('attempt_id'),
+            'ts': row.get('ts'),
+            'status': status,
+            'reason': reason,
+            'action': action,
+            'artifact_exists': artifact_exists,
+        })
+
+    latest = rows[-1] if rows else {}
+    return {
+        'rows_considered': len(rows),
+        'status_counts': status_counts,
+        'reason_counts': reason_counts,
+        'action_counts': action_counts,
+        'artifact_missing_count': artifact_missing_count,
+        'latest_attempt_id': latest.get('attempt_id'),
+        'latest_ts': latest.get('ts'),
+        'recent_attempts': list(reversed(recent_attempts[-10:])),
+    }
+
 @system_bp.route('/api/health')
 def health():
     try:
@@ -720,7 +766,14 @@ def local_model_runtime():
         else:
             profile = data.get('profile') if 'profile' in data else None
             runtime = data.get('runtime') if 'runtime' in data else None
-            cfg = core_config.set_local_model_runtime_overrides(profile=profile, runtime=runtime)
+            local_heavy_model = data.get('local_heavy_model') if 'local_heavy_model' in data else None
+            chat_provider = data.get('chat_provider') if 'chat_provider' in data else None
+            cfg = core_config.set_local_model_runtime_overrides(
+                profile=profile,
+                runtime=runtime,
+                local_heavy_model=local_heavy_model,
+                chat_provider=chat_provider,
+            )
     except ValueError as ve:
         return jsonify({'error': str(ve)}), 400
     except Exception as e:
@@ -781,6 +834,65 @@ def computer_use_artifact(attempt_id: str):
     except Exception as e:
         logger.error(f"Computer-use artifact read error: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@system_bp.route('/api/computer-use/diagnostics', methods=['GET'])
+def computer_use_diagnostics():
+    """Return policy + approval + audit diagnostics for computer-use hardening."""
+    token = request.headers.get('X-API-TOKEN') or request.cookies.get('api_token')
+    if not core_config.require_auth(token):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    limit_raw = request.args.get('limit', '120')
+    try:
+        limit = max(1, min(int(limit_raw), 500))
+    except Exception:
+        limit = 120
+
+    rows = _read_recent_jsonl(system_tools_module.COMPUTER_USE_AUDIT_PATH, limit)
+    audit_summary = _summarize_computer_use_audit(rows)
+
+    pending_total = 0
+    pending_computer_use = 0
+    pending_probe_error = None
+    try:
+        from companion_ai.tools.registry import get_pending_approvals
+
+        pending = get_pending_approvals() or []
+        pending_total = len(pending)
+        for req in pending:
+            if not isinstance(req, dict):
+                continue
+            tool_name = str(
+                req.get('tool_name')
+                or req.get('tool')
+                or req.get('operation')
+                or ''
+            ).strip().lower()
+            if tool_name == 'use_computer':
+                pending_computer_use += 1
+    except Exception as e:
+        pending_probe_error = str(e)
+
+    return jsonify({
+        'enabled': bool(core_config.ENABLE_COMPUTER_USE),
+        'policy': {
+            'mode': core_config.COMPUTER_USE_POLICY_MODE,
+            'allowlist_strategy': core_config.COMPUTER_USE_ALLOWLIST_STRATEGY,
+            'require_two_step_high_risk': bool(core_config.COMPUTER_USE_REQUIRE_TWO_STEP_HIGH_RISK),
+            'two_step_actions': sorted(core_config.get_computer_use_two_step_actions()),
+            'second_confirm_ttl_seconds': int(core_config.COMPUTER_USE_SECOND_CONFIRM_TTL_SECONDS),
+            'artifact_retention_days': int(core_config.COMPUTER_USE_ARTIFACT_RETENTION_DAYS),
+            'replay_access': core_config.COMPUTER_USE_REPLAY_ACCESS,
+        },
+        'approvals': {
+            'pending_total': pending_total,
+            'pending_computer_use': pending_computer_use,
+            'probe_error': pending_probe_error,
+        },
+        'audit': audit_summary,
+        'trace_id': state.get_request_trace_id(),
+    })
 
 
 @system_bp.route('/api/permissions', methods=['GET', 'POST'])

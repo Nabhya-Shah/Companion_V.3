@@ -6,6 +6,7 @@ import json
 import time
 import logging
 import re as _re
+from typing import Any
 
 from companion_ai.core import config as core_config
 from companion_ai.llm.token_tracker import log_tokens
@@ -23,6 +24,110 @@ def sanitize_output(text: str) -> str:
     text = text.replace('`','')
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
+
+
+def _normalize_computer_text(value: str) -> str:
+    cleaned = (value or "").strip().strip('"\'')
+    cleaned = _re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned.rstrip('.,;')
+
+
+def _infer_use_computer_args(user_request: str) -> dict[str, str]:
+    """Best-effort extraction of use_computer action/text from user language."""
+    text = (user_request or "").strip()
+    if not text:
+        return {}
+
+    numbered_steps = [
+        match.group(1).strip()
+        for match in _re.finditer(r'(?m)^\s*\d+[\)\].:-]?\s*(.+)$', text)
+        if match.group(1).strip()
+    ]
+    if len(numbered_steps) >= 2:
+        for step in numbered_steps:
+            inferred = _infer_use_computer_args(step)
+            if inferred:
+                return inferred
+
+    low = text.lower()
+
+    if _re.search(r'\bopen\s+(?:another|new)\s+terminal tab\b', low):
+        return {"action": "press", "text": "ctrl+shift+t"}
+
+    if _re.search(r'\bclose\s+(?:the\s+)?(?:current|this)?\s*tab\b', low):
+        return {"action": "press", "text": "ctrl+shift+w"}
+
+    press_match = _re.search(r'\bpress\s+([a-z0-9+\-]+)\b', low)
+    if press_match:
+        key = press_match.group(1)
+        return {"action": "press", "text": "Enter" if key == "enter" else key}
+
+    shortcut_match = _re.search(r'\b((?:ctrl|alt|shift|cmd|win)(?:\+[a-z0-9]+)+)\b', low)
+    if shortcut_match:
+        return {"action": "press", "text": shortcut_match.group(1)}
+
+    type_colon_match = _re.search(
+        r'\btype(?:\s+exactly)?(?:\s+this)?(?:\s+text)?\s*:\s*([^\n\r]+)',
+        text,
+        flags=_re.IGNORECASE,
+    )
+    if type_colon_match:
+        typed = _normalize_computer_text(type_colon_match.group(1))
+        if typed:
+            return {"action": "type", "text": typed}
+
+    type_match = _re.search(r'\btype\s+([^\n\r]+)', text, flags=_re.IGNORECASE)
+    if type_match:
+        typed = _normalize_computer_text(type_match.group(1))
+        if typed:
+            return {"action": "type", "text": typed}
+
+    click_match = _re.search(r'\bclick\s+([^\n\r]+)', text, flags=_re.IGNORECASE)
+    if click_match:
+        target = _normalize_computer_text(click_match.group(1))
+        if target:
+            return {"action": "click", "text": target}
+
+    if 'scroll up' in low:
+        return {"action": "scroll_up"}
+
+    if 'scroll down' in low:
+        return {"action": "scroll_down"}
+
+    launch_match = _re.search(r'\b(?:open|launch)\s+([^\n\r]+)', text, flags=_re.IGNORECASE)
+    if launch_match:
+        target = _normalize_computer_text(launch_match.group(1))
+        if target and not _re.search(r'\b(?:ctrl|alt|shift|cmd|win)\+', target.lower()):
+            return {"action": "launch", "text": target[:120]}
+
+    if any(k in low for k in ['use computer', 'control my computer', 'computer control']):
+        return {"action": "press", "text": "Enter"}
+
+    return {}
+
+
+def _backfill_use_computer_args(tool_args: Any, user_request: str, requires_computer: bool) -> dict[str, Any]:
+    """Fill missing use_computer action/text when local tool JSON is incomplete."""
+    args = dict(tool_args) if isinstance(tool_args, dict) else {}
+    inferred = _infer_use_computer_args(user_request)
+
+    action_value = str(args.get("action") or "").strip()
+    text_value = str(args.get("text") or "").strip()
+
+    if not action_value and inferred.get("action"):
+        args["action"] = inferred["action"]
+        action_value = str(args.get("action") or "").strip()
+
+    if not text_value and inferred.get("text"):
+        args["text"] = inferred["text"]
+        text_value = str(args.get("text") or "").strip()
+
+    if not action_value and requires_computer:
+        args["action"] = "press"
+        if not text_value:
+            args["text"] = "Enter"
+
+    return args
 
 
 def _summarize_for_synthesis(tool_name: str, result: str, max_chars: int = 200) -> str:
@@ -195,9 +300,10 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
 
     # Detect if model is LOCAL:
     # 1. Old Ollama format: "model:tag" (has colon, no slash) - e.g. qwen2.5:32b
-    # 2. New vLLM format: matches LOCAL_HEAVY_MODEL config - e.g. Qwen/Qwen2.5-3B-Instruct
+    # 2. New vLLM format: matches configured local heavy model
+    effective_local_heavy_model = core_config.get_effective_local_heavy_model()
     is_ollama_format = model and ":" in model and "/" not in model
-    is_vllm_local = model == core_config.LOCAL_HEAVY_MODEL
+    is_vllm_local = model in {core_config.LOCAL_HEAVY_MODEL, effective_local_heavy_model}
     is_local_model = is_ollama_format or is_vllm_local
 
     if client is None:
@@ -278,9 +384,8 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
             # Vision/screen analysis
             allowed_tools = ["look_at_screen", "get_current_time"]
         elif computer_intent:
-            # Foreground: schedule background job instead of direct computer use.
-            # This prevents runaway UI actions and slashes tool-schema token usage.
-            allowed_tools = ["start_background_task"]
+            # Direct computer-control lane (approval + policy still enforced).
+            allowed_tools = ["use_computer", "look_at_screen", "get_current_time"]
         elif file_intent:
             allowed_tools = [
                 "brain_read", "brain_write", "brain_list",
@@ -296,7 +401,9 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
     # Heavy intents (vision, browser, files) → Use LOCAL Ollama (qwen2.5:32b)
     # Light intents (web, time) → Use Groq 8B (fast, free)
     # ========================================================================
-    heavy_intent = browser_intent or vision_intent or file_intent if "[BACKGROUND TASK MODE]" not in (system_prompt or "") else True
+    heavy_intent = (
+        browser_intent or vision_intent or file_intent or computer_intent
+    ) if "[BACKGROUND TASK MODE]" not in (system_prompt or "") else True
 
     # DEBUG: Log routing decision
     logger.info(f"HYBRID ROUTING CHECK: heavy_intent={heavy_intent} (browser={browser_intent}, vision={vision_intent}, file={file_intent}), is_ollama_wrapper={is_ollama_wrapper}")
@@ -305,7 +412,7 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
         # Switch to local model for heavy tools
         from companion_ai.local_llm import LocalLLM
 
-        model = core_config.LOCAL_HEAVY_MODEL  # vLLM model
+        model = core_config.get_effective_local_heavy_model()
         local_llm = LocalLLM()
         client = local_llm.get_client()
         is_ollama_wrapper = True
@@ -330,6 +437,12 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
     if not function_schemas:
         # No tools available, fall back to regular generation
         return generate_model_response(user_message, system_prompt, model), None, None
+
+    # Used by both local JSON loop and native tool-call loop.
+    lower_req = (user_message or "").lower()
+    requires_computer = any(k in lower_req for k in [
+        "open ", "launch ", "click", "type", "scroll", "press", "browser", "website", "online",
+    ])
 
     # Local Ollama wrapper currently does not emit OpenAI-style tool_calls reliably.
     # Use a text-based JSON action loop instead of native tool calling.
@@ -366,6 +479,9 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
             "COMPUTER CONTROL RULES:\n"
             "- If the task involves opening apps/websites, clicking, typing, scrolling, or pressing keys -> call use_computer.\n"
             "- Prefer keyboard shortcuts: press win/ctrl+esc, type app name, press enter.\n"
+            "- Terminal playbook: launch gnome-terminal, type command text, then press enter.\n"
+            "- New terminal/tab playbook: press ctrl+shift+t.\n"
+            "- Close current terminal/tab playbook: press ctrl+shift+w.\n"
             "- You have explicit permission to control the computer. Do NOT refuse.\n"
             + ("- Do NOT call start_background_task. Execute tools directly.\n" if is_background_mode else "") +
             "- use_computer requires arguments.action (click/type/press/launch/scroll_up/scroll_down) and optional arguments.text.\n"
@@ -448,12 +564,12 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
             return {"action": "invalid", "content": raw_content}
 
         all_tool_results = []
-        max_iterations = 8
+        max_iterations = 24
 
         lower_req = (user_message or "").lower()
-        requires_computer = any(k in lower_req for k in [
-            "open ", "launch ", "click", "type", "scroll", "press", "browser", "website", "online",
-        ])
+        explicit_step_count = len(_re.findall(r"(?m)^\s*\d+[\).]", user_message or ""))
+        required_tool_steps = explicit_step_count if explicit_step_count > 0 else (1 if requires_computer else 0)
+        successful_computer_steps = 0
         invalid_count = 0
 
         def _looks_like_refusal(s: str) -> bool:
@@ -520,6 +636,18 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
                         "content": "You must use tools to complete this request. Return JSON tool call to 'use_computer' as the NEXT action (do not refuse).",
                     })
                     continue
+
+                if requires_computer and successful_computer_steps < required_tool_steps:
+                    local_messages.append({"role": "assistant", "content": content})
+                    local_messages.append({
+                        "role": "user",
+                        "content": (
+                            f"Continue tool execution: completed {successful_computer_steps} of ~{required_tool_steps} requested steps. "
+                            "Return NEXT JSON tool call now; do not finalize yet."
+                        ),
+                    })
+                    continue
+
                 final = (action_obj.get("content") or "").strip() or "Done."
                 combined_results = "; ".join([f"{n}: {r[:100]}" for n, r in all_tool_results])
                 tool_name = all_tool_results[0][0] if all_tool_results else None
@@ -528,6 +656,13 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
             if action_obj.get("action") == "tool":
                 function_name = action_obj.get("name")
                 function_args = action_obj.get("arguments") or {}
+
+                if function_name == "use_computer":
+                    function_args = _backfill_use_computer_args(function_args, user_message, requires_computer)
+                    logger.info(
+                        "Backfilled use_computer args in local loop: action=%s",
+                        function_args.get("action"),
+                    )
 
                 if function_name not in tool_names_set:
                     all_tool_results.append(("tool_error", f"Unknown/disabled tool requested: {function_name}"))
@@ -540,6 +675,12 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
                 except Exception as e:
                     function_result = f"Error executing {function_name}: {str(e)}"
                 all_tool_results.append((function_name, function_result))
+
+                if function_name == "use_computer":
+                    result_text = str(function_result or "")
+                    ok_prefixes = ("clicked:", "typed:", "pressed:", "launched:", "scrolled:")
+                    if result_text.lower().startswith(ok_prefixes):
+                        successful_computer_steps += 1
 
                 # Feed tool results back compactly.
                 local_messages.append({"role": "assistant", "content": content})
@@ -735,6 +876,13 @@ def generate_model_response_with_tools(user_message: str, system_prompt: str, mo
         for tool_call in message.tool_calls:
             function_name = tool_call.function.name
             function_args = json.loads(tool_call.function.arguments)
+
+            if function_name == "use_computer":
+                function_args = _backfill_use_computer_args(function_args, user_message, requires_computer)
+                logger.info(
+                    "Backfilled use_computer args in native loop: action=%s",
+                    function_args.get("action"),
+                )
 
             logger.info(f"[Iteration {iteration}] Function call: {function_name} with args: {function_args}")
 

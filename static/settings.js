@@ -302,13 +302,17 @@ function renderLocalRuntime(payload) {
   const chipsEl = document.getElementById('localRuntimeChips');
   const runtimeSelect = document.getElementById('localRuntimeSelect');
   const profileSelect = document.getElementById('localProfileSelect');
+  const chatProviderSelect = document.getElementById('localChatProviderSelect');
+  const localHeavyModelSelect = document.getElementById('localHeavyModelSelect');
   const modelsEl = document.getElementById('localRuntimeModels');
   const commandsEl = document.getElementById('localRuntimeCommands');
 
   if (summaryEl) {
     const available = readiness?.selected_runtime_available ? 'available' : 'unavailable';
     const fallback = readiness?.cloud_fallback_enabled ? 'enabled' : 'disabled';
-    summaryEl.textContent = `runtime ${available} • cloud fallback ${fallback}`;
+    const chatProvider = String(localModels.chat_provider || 'cloud_primary');
+    const primaryLabel = chatProvider === 'local_primary' ? 'local' : 'cloud';
+    summaryEl.textContent = `runtime ${available} • primary ${primaryLabel} • cloud fallback ${fallback}`;
   }
 
   if (chipsEl) {
@@ -316,11 +320,19 @@ function renderLocalRuntime(payload) {
       `runtime ${escapeHtml(String(localModels.runtime || 'hybrid'))}`,
       `profile ${escapeHtml(String(localModels.profile || 'balanced'))}`,
       `chat ${escapeHtml(String(localModels.chat_provider || 'cloud_primary'))}`,
+      `chat configured ${escapeHtml(String(localModels.chat_provider_configured || localModels.chat_provider || 'cloud_primary'))}`,
       `memory ${escapeHtml(String(localModels.memory_provider_effective || 'groq'))}`,
       `vllm ${readiness?.vllm_available ? 'up' : 'down'}`,
       `ollama ${readiness?.ollama_available ? 'up' : 'down'}`,
     ];
     chipsEl.innerHTML = chips.map((c) => `<span class="queue-chip">${c}</span>`).join('');
+  }
+
+  if (chatProviderSelect && Array.isArray(localModels.chat_provider_choices)) {
+    chatProviderSelect.innerHTML = localModels.chat_provider_choices
+      .map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`)
+      .join('');
+    chatProviderSelect.value = localModels.chat_provider || localModels.chat_provider_configured || 'cloud_primary';
   }
 
   if (runtimeSelect && Array.isArray(localModels.runtime_choices)) {
@@ -335,6 +347,25 @@ function renderLocalRuntime(payload) {
       .map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`)
       .join('');
     profileSelect.value = localModels.profile || 'balanced';
+  }
+
+  if (localHeavyModelSelect) {
+    const choices = Array.isArray(localModels.local_heavy_model_choices)
+      ? localModels.local_heavy_model_choices
+      : [];
+    if (choices.length) {
+      localHeavyModelSelect.innerHTML = choices
+        .map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`)
+        .join('');
+    }
+    const preferredHeavy = String(localModels?.preferred_models?.local_heavy || '').trim();
+    if (preferredHeavy) {
+      const hasChoice = choices.includes(preferredHeavy);
+      if (!hasChoice) {
+        localHeavyModelSelect.innerHTML += `<option value="${escapeHtml(preferredHeavy)}">${escapeHtml(preferredHeavy)}</option>`;
+      }
+      localHeavyModelSelect.value = preferredHeavy;
+    }
   }
 
   if (modelsEl) {
@@ -382,11 +413,18 @@ export async function loadLocalRuntimePanel(retry = false) {
 async function saveLocalRuntimePanel(retry = false) {
   const runtime = document.getElementById('localRuntimeSelect')?.value || 'hybrid';
   const profile = document.getElementById('localProfileSelect')?.value || 'balanced';
+  const chatProvider = document.getElementById('localChatProviderSelect')?.value || '';
+  const localHeavyModel = document.getElementById('localHeavyModelSelect')?.value || '';
   try {
     const r = await fetch('/api/local-model/runtime', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ runtime, profile }),
+      body: JSON.stringify({
+        runtime,
+        profile,
+        chat_provider: chatProvider,
+        local_heavy_model: localHeavyModel,
+      }),
     });
     if (r.status === 401 && !retry) {
       const tok = prompt('API token required:');

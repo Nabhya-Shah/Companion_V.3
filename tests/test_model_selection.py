@@ -94,6 +94,12 @@ def test_local_model_runtime_config_contract():
     assert 'preferred_models' in cfg
     assert 'local_heavy' in cfg['preferred_models']
     assert 'embedding' in cfg['preferred_models']
+    assert isinstance(cfg.get('local_heavy_model_choices'), list)
+    assert 'huihui_ai/qwen3.5-abliterated:27b' in cfg.get('local_heavy_model_choices', [])
+    assert 'huihui_ai/gemma-4-abliterated:31b' in cfg.get('local_heavy_model_choices', [])
+    assert cfg.get('chat_provider') in {'cloud_primary', 'local_primary'}
+    assert cfg.get('chat_provider_configured') in {'cloud_primary', 'local_primary'}
+    assert set(cfg.get('chat_provider_choices', [])) == {'cloud_primary', 'local_primary'}
 
 
 def test_effective_memory_provider_auto_uses_profile(monkeypatch):
@@ -109,16 +115,29 @@ def test_effective_memory_provider_auto_uses_profile(monkeypatch):
 def test_local_runtime_overrides_apply_and_clear(monkeypatch):
     monkeypatch.setattr(config, '_RUNTIME_LOCAL_MODEL_PROFILE_OVERRIDE', None)
     monkeypatch.setattr(config, '_RUNTIME_LOCAL_MODEL_RUNTIME_OVERRIDE', None)
+    monkeypatch.setattr(config, '_RUNTIME_LOCAL_HEAVY_MODEL_OVERRIDE', None)
+    monkeypatch.setattr(config, '_RUNTIME_LOCAL_CHAT_PROVIDER_OVERRIDE', None)
 
-    cfg = config.set_local_model_runtime_overrides(profile='quality', runtime='ollama')
+    cfg = config.set_local_model_runtime_overrides(
+        profile='quality',
+        runtime='ollama',
+        local_heavy_model='huihui_ai/qwen3.5-abliterated:27b',
+        chat_provider='local_primary',
+    )
     assert cfg['profile'] == 'quality'
     assert cfg['runtime'] == 'ollama'
     assert cfg['profile_override_active'] is True
     assert cfg['runtime_override_active'] is True
+    assert cfg['local_heavy_model_override_active'] is True
+    assert cfg['chat_provider_override_active'] is True
+    assert cfg['chat_provider'] == 'local_primary'
+    assert cfg['preferred_models']['local_heavy'] == 'huihui_ai/qwen3.5-abliterated:27b'
 
     cfg_cleared = config.clear_local_model_runtime_overrides()
     assert cfg_cleared['profile_override_active'] is False
     assert cfg_cleared['runtime_override_active'] is False
+    assert cfg_cleared['local_heavy_model_override_active'] is False
+    assert cfg_cleared['chat_provider_override_active'] is False
 
 
 def test_profile_aware_local_heavy_model(monkeypatch):

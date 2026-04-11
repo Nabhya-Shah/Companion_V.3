@@ -1,7 +1,7 @@
 # Companion V3 Unified Reference
 
 Status: Canonical current-state document
-Last updated: 2026-03-31
+Last updated: 2026-04-11
 Primary platform: Linux (Pop!_OS / Ubuntu-class)
 
 ## 1. Documentation Model
@@ -37,6 +37,7 @@ Legend:
 |---|---|---|---|
 | Web chat + SSE streaming | Live | Streaming responses, history stream, stop control, diagnostics | companion_ai/web/chat_routes.py, static/chat.js |
 | Orchestrator routing | Live | answer, delegate, plan, background, memory_search actions | companion_ai/orchestrator.py |
+| Local/cloud chat mode control | Live | Runtime-selectable chat provider (`cloud_primary` or `local_primary`) with explicit fallback semantics in API + UI | companion_ai/core/config.py, companion_ai/orchestrator.py, companion_ai/web/system_routes.py, static/settings.js |
 | Specialist loops | Live | memory loop, tool loop, vision loop | companion_ai/local_loops/ |
 | Hybrid memory | Live | Mem0 + SQLite + brain index via unified recall/remember entry points | companion_ai/memory/knowledge.py |
 | Memory quality pipeline | Live | confidence labels, pending review, dedup/provenance tracking | companion_ai/memory/sqlite_backend.py, companion_ai/memory/ai_processor.py |
@@ -71,6 +72,17 @@ Legend:
 
 Orchestrator decides, loops execute, memory layer stores/retrieves, and web layer streams + enforces policy.
 
+### 4.4 Local/Cloud Chat Selection Semantics
+
+Current runtime behavior:
+
+1. `LOCAL_CHAT_PROVIDER` controls primary chat lane: `cloud_primary` or `local_primary`.
+2. Runtime overrides via `POST /api/local-model/runtime` can adjust `profile`, `runtime`, `local_heavy_model`, and `chat_provider` without restart.
+3. If `chat_provider=local_primary` and local backend is available, orchestrator uses local client + effective local heavy model.
+4. If `chat_provider=local_primary` and local backend is unavailable, cloud is used only when `LOCAL_MODEL_ALLOW_CLOUD_FALLBACK=true`.
+5. If `chat_provider=cloud_primary` and cloud client is unavailable, orchestrator falls back to local when local backend is available.
+6. Settings UI surfaces configured vs effective chat provider so operators can distinguish intended mode from active mode.
+
 ## 5. Memory and Knowledge Model (Current)
 
 Companion uses a hybrid approach:
@@ -96,6 +108,7 @@ Tool execution is policy-first:
 3. Approval-required flow for high-risk tools.
 4. Restricted sandbox mode with blocked tool list.
 5. Workspace feature permissions (tools_execute, memory_write, workflows_run, files_upload, retrieval_connectors).
+6. Sensitive write endpoints (including approval resolution paths) require configured API token auth.
 
 ## 7. Web and API Surface (Current)
 
@@ -157,6 +170,12 @@ Last documented full-suite baseline (from prior recorded run):
 
 Important: treat this as a historical baseline. Re-run tests after significant changes.
 
+Recent targeted validation (2026-04-11):
+
+1. 75 passed
+2. 0 failed
+3. Scope: runtime chat-provider overrides, local-model runtime endpoint contracts, models/config payload contracts, orchestrator client selection paths
+
 Recent live validation artifacts (2026-04-08):
 
 1. OFF lane real UI pre-restart: `data/benchmarks/webchat_off_real_pre_2026-04-08.json`
@@ -214,3 +233,18 @@ Archives:
 3. docs/archive/PLAN_B_BLUEPRINT_ARCHIVE.md
 4. docs/archive/IMPLEMENTATION_SPEC_REPO_INSIGHTS_ARCHIVE.md
 5. docs/archive/RELEASE_DAILY_USE_CHECKLIST_ARCHIVE.md
+
+## 13. External Benchmark Snapshot (2026-04-11)
+
+Competitive review was completed against OpenClaw plus major and mid-tier alternatives.
+
+Primary artifact:
+
+1. docs/notes/COMPETITIVE_LANDSCAPE_2026-04-11.md
+
+Decision summary:
+
+1. Keep hardening-first execution as default project strategy.
+2. Pull in only high-ROI improvements that preserve the current architecture.
+3. Immediate high-ROI imports are: unified run timeline and replay, resumable stream cursor contracts, skill/plugin trust manifests, and per-workspace budget and policy envelopes.
+4. Defer large architecture pivots (full no-code flow platform shift, broad channel explosion, full shell replacement) until current hardening tracks are complete.

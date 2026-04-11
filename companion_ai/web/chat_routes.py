@@ -6,7 +6,7 @@ import re
 import time
 import queue
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Regex to strip TTS emotion tags like [cheerful], [whisper], etc.
 _EMOTION_TAG_RE = re.compile(r'\[(?:cheerful|whisper|sad|dramatic|excited|neutral|angry|laugh|sigh)\]\s*', re.IGNORECASE)
@@ -30,6 +30,11 @@ chat_bp = Blueprint('chat', __name__)
 _plan_event_queue: queue.Queue = queue.Queue()
 
 
+def _utc_now_iso() -> str:
+    """Return timezone-aware UTC timestamp in ISO-8601 format."""
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _inject_offline_insights(active_history: list[dict]) -> int:
     """Append undelivered proactive insights into chat history once."""
     try:
@@ -39,7 +44,7 @@ def _inject_offline_insights(active_history: list[dict]) -> int:
         if not rows:
             return 0
 
-        now_iso = datetime.now().isoformat()
+        now_iso = _utc_now_iso()
         for row in rows:
             title = (row.get('title') or 'Proactive Insight').strip()
             body = (row.get('body') or '').strip()
@@ -161,7 +166,7 @@ def chat_streaming():
                 entry = {
                     'user': user_message,
                     'ai': full_response,
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': _utc_now_iso(),
                     'persona': 'Companion',
                     'tokens': token_usage,
                 }
@@ -223,7 +228,7 @@ def debug_chat():
         entry = {
             'user': user_message,
             'ai': ai_response,
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': _utc_now_iso(),
             'persona': persona,
             'source': 'debug_api'
         }
@@ -319,12 +324,12 @@ def chat_history_stream():
             if current_version != last_version:
                 state.sse_sequence += 1
                 state.sse_counters['history.updated'] = state.sse_counters.get('history.updated', 0) + 1
-                state.sse_last_event_ts = datetime.now().isoformat()
+                state.sse_last_event_ts = _utc_now_iso()
                 payload = json.dumps({
                     'type': 'history',
                     'event': 'history.updated',
                     'seq': state.sse_sequence,
-                    'ts': datetime.now().isoformat(),
+                    'ts': _utc_now_iso(),
                     'payload': {'history': snapshot, 'count': len(snapshot)},
                     'history': snapshot,
                     'count': len(snapshot),
@@ -341,12 +346,12 @@ def chat_history_stream():
                         if job['status'] in ('COMPLETED', 'FAILED') and job['id'] not in notified_jobs:
                             state.sse_sequence += 1
                             state.sse_counters['job.updated'] = state.sse_counters.get('job.updated', 0) + 1
-                            state.sse_last_event_ts = datetime.now().isoformat()
+                            state.sse_last_event_ts = _utc_now_iso()
                             payload = json.dumps({
                                 'type': 'job_update',
                                 'event': 'job.updated',
                                 'seq': state.sse_sequence,
-                                'ts': datetime.now().isoformat(),
+                                'ts': _utc_now_iso(),
                                 'payload': {'job': job},
                                 'job': job,
                             })
@@ -362,12 +367,12 @@ def chat_history_stream():
                     if pending:
                         state.sse_sequence += 1
                         state.sse_counters['approval.pending'] = state.sse_counters.get('approval.pending', 0) + 1
-                        state.sse_last_event_ts = datetime.now().isoformat()
+                        state.sse_last_event_ts = _utc_now_iso()
                         payload = json.dumps({
                             'type': 'approval_request',
                             'event': 'approval.pending',
                             'seq': state.sse_sequence,
-                            'ts': datetime.now().isoformat(),
+                            'ts': _utc_now_iso(),
                             'payload': {'approvals': pending},
                         })
                         yield f"data: {payload}\n\n"
@@ -381,12 +386,12 @@ def chat_history_stream():
                         state.sse_sequence += 1
                         evt_type = plan_evt["event_type"]
                         state.sse_counters[evt_type] = state.sse_counters.get(evt_type, 0) + 1
-                        state.sse_last_event_ts = datetime.now().isoformat()
+                        state.sse_last_event_ts = _utc_now_iso()
                         payload = json.dumps({
                             'type': 'plan_update',
                             'event': evt_type,
                             'seq': state.sse_sequence,
-                            'ts': datetime.now().isoformat(),
+                            'ts': _utc_now_iso(),
                             'payload': plan_evt["data"],
                             'plan_id': plan_evt["plan_id"],
                         })
@@ -401,12 +406,12 @@ def chat_history_stream():
                     for insight in claim_live_insights(limit=5):
                         state.sse_sequence += 1
                         state.sse_counters['insight.new'] = state.sse_counters.get('insight.new', 0) + 1
-                        state.sse_last_event_ts = datetime.now().isoformat()
+                        state.sse_last_event_ts = _utc_now_iso()
                         payload = json.dumps({
                             'type': 'insight',
                             'event': 'insight.new',
                             'seq': state.sse_sequence,
-                            'ts': datetime.now().isoformat(),
+                            'ts': _utc_now_iso(),
                             'payload': {'insight': insight},
                         })
                         yield f"data: {payload}\n\n"

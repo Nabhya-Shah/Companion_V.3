@@ -110,15 +110,43 @@ class Orchestrator:
         return self._groq_client
     
     def _get_client_and_model(self):
-        """Get the Groq client and 120B model for orchestration.
-        
-        The main orchestrator ALWAYS uses Groq 120B.
-        Local Ollama models are only used within loops.
-        Returns (client, model_name, is_local=False)
+        """Resolve orchestration client/model based on effective chat provider.
+
+        Returns:
+            tuple: (client, model_name, is_local)
         """
+        chat_provider = core_config.get_effective_local_chat_provider()
+
+        if chat_provider == "local_primary":
+            try:
+                from companion_ai.local_llm import LocalLLM
+
+                local_llm = LocalLLM()
+                if local_llm.is_available():
+                    return local_llm.get_client(), core_config.get_effective_local_heavy_model(), True
+            except Exception as e:
+                logger.warning(f"Local-primary chat requested but local backend initialization failed: {e}")
+
+            if not core_config.LOCAL_MODEL_ALLOW_CLOUD_FALLBACK:
+                return None, None, False
+
+            logger.warning("Local-primary chat unavailable; falling back to cloud primary model")
+
         groq_client = self._get_groq_client()
         if groq_client:
             return groq_client, core_config.PRIMARY_MODEL, False
+
+        if chat_provider == "cloud_primary":
+            try:
+                from companion_ai.local_llm import LocalLLM
+
+                local_llm = LocalLLM()
+                if local_llm.is_available():
+                    logger.warning("Cloud-primary chat unavailable; falling back to local model")
+                    return local_llm.get_client(), core_config.get_effective_local_heavy_model(), True
+            except Exception:
+                pass
+
         return None, None, False
 
     @staticmethod
@@ -302,22 +330,90 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
         if not msg or cls._is_explanatory_computer_question(low):
             return None
 
-        if 'press enter' in low:
-            return {'operation': 'use_computer', 'action': 'press', 'text': 'Enter'}
+        def _clean_text(value: str) -> str:
+            cleaned = (value or '').strip().strip('"\'')
+            cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+            return cleaned.rstrip('.,;')
 
-        press_match = re.search(r'\bpress\s+([a-z0-9+\-]+)\b', low)
-        if press_match:
-            key = press_match.group(1)
-            key = 'Enter' if key == 'enter' else key
-            return {'operation': 'use_computer', 'action': 'press', 'text': key}
+        def _derive_from_text(text: str) -> Optional[Dict[str, Any]]:
+            segment = (text or '').strip()
+            if not segment:
+                return None
 
-        launch_match = re.search(r'\b(?:open|launch)\s+([a-z0-9 _\-.]+)', low)
-        if launch_match:
-            return {
-                'operation': 'use_computer',
-                'action': 'launch',
-                'text': launch_match.group(1).strip()[:120],
-            }
+            low_segment = segment.lower()
+            candidates: List[Tuple[int, Dict[str, Any]]] = []
+
+            def _add_task(index: int, action: str, text_value: Optional[str] = None, max_len: int = 240) -> None:
+                task: Dict[str, Any] = {'operation': 'use_computer', 'action': action}
+                if text_value is not None:
+                    cleaned = _clean_text(text_value)
+                    if not cleaned:
+                        return
+                    task['text'] = cleaned[:max_len]
+                candidates.append((index, task))
+
+            open_tab_match = re.search(r'\bopen\s+(?:another|new)\s+terminal tab\b', low_segment)
+            if open_tab_match:
+                _add_task(open_tab_match.start(), 'press', 'ctrl+shift+t')
+
+            close_tab_match = re.search(r'\bclose\s+(?:the\s+)?(?:current|this)?\s*tab\b', low_segment)
+            if close_tab_match:
+                _add_task(close_tab_match.start(), 'press', 'ctrl+shift+w')
+
+            for press_match in re.finditer(r'\bpress\s+([a-z0-9+\-]+)\b', low_segment):
+                key = press_match.group(1)
+                key = 'Enter' if key == 'enter' else key
+                _add_task(press_match.start(), 'press', key)
+
+            for shortcut_match in re.finditer(r'\b((?:ctrl|alt|shift|cmd|win)(?:\+[a-z0-9]+)+)\b', low_segment):
+                _add_task(shortcut_match.start(), 'press', shortcut_match.group(1))
+
+            for type_match in re.finditer(r'\btype(?:\s+exactly)?(?:\s+this)?(?:\s+text)?\s*:\s*([^\n\r]+)', segment, flags=re.IGNORECASE):
+                _add_task(type_match.start(), 'type', type_match.group(1))
+
+            for type_match in re.finditer(r'\btype\s+([^\n\r]+)', segment, flags=re.IGNORECASE):
+                _add_task(type_match.start(), 'type', type_match.group(1))
+
+            for click_match in re.finditer(r'\bclick\s+([^\n\r]+)', segment, flags=re.IGNORECASE):
+                _add_task(click_match.start(), 'click', click_match.group(1))
+
+            scroll_up_index = low_segment.find('scroll up')
+            if scroll_up_index >= 0:
+                _add_task(scroll_up_index, 'scroll_up')
+
+            scroll_down_index = low_segment.find('scroll down')
+            if scroll_down_index >= 0:
+                _add_task(scroll_down_index, 'scroll_down')
+
+            for launch_match in re.finditer(r'\b(?:open|launch)\s+([^\n\r]+)', segment, flags=re.IGNORECASE):
+                launch_target = _clean_text(launch_match.group(1))
+                if not launch_target:
+                    continue
+                # If a shortcut is explicitly present, prefer pressing that shortcut.
+                if re.search(r'\b(?:ctrl|alt|shift|cmd|win)\+', launch_target.lower()):
+                    continue
+                _add_task(launch_match.start(), 'launch', launch_target, max_len=120)
+
+            if not candidates:
+                return None
+
+            candidates.sort(key=lambda item: item[0])
+            return candidates[0][1]
+
+        numbered_steps = [
+            m.group(1).strip()
+            for m in re.finditer(r'(?m)^\s*\d+[\)\].:-]?\s*(.+)$', msg)
+            if m.group(1).strip()
+        ]
+        if len(numbered_steps) >= 2:
+            for step in numbered_steps:
+                task = _derive_from_text(step)
+                if task:
+                    return task
+
+        task = _derive_from_text(msg)
+        if task:
+            return task
 
         if any(k in low for k in ['use computer', 'control my computer', 'computer control']):
             return {'operation': 'use_computer', 'action': 'press', 'text': 'Enter'}
@@ -538,6 +634,8 @@ IMPORTANT: When user shares ANY personal info (name, location, job, preferences)
         
         loop_name = decision.loop
         task = dict(decision.task or {})
+        if loop_name == "tools" and user_message:
+            task.setdefault("user_request", user_message)
         trace_id = str(context.get("trace_id") or "").strip()
         if trace_id:
             task.setdefault("trace_id", trace_id)

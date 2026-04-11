@@ -535,20 +535,54 @@ function showApprovalModal(req) {
 }
 
 async function resolveApproval(requestId, decision) {
-  try {
-    const res = await fetch(`/api/approvals/${requestId}`, {
-      method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ decision })
+  const el = document.getElementById(`approval-${requestId}`);
+  const actionButtons = el ? Array.from(el.querySelectorAll('.approval-btn')) : [];
+
+  const setButtonsBusy = (busy) => {
+    actionButtons.forEach((btn) => {
+      btn.disabled = !!busy;
     });
-    if (!res.ok) throw new Error('Failed to resolve');
+  };
+
+  const postDecision = () => fetch(`/api/approvals/${requestId}`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ decision })
+  });
+
+  setButtonsBusy(true);
+
+  try {
+    let res = await postDecision();
+
+    if (res.status === 401 || res.status === 403) {
+      const promptMsg = state.API_TOKEN
+        ? 'Approval token was rejected. Enter API_AUTH_TOKEN and retry:'
+        : 'Approval requires API_AUTH_TOKEN. Enter token to retry:';
+      const tok = window.prompt(promptMsg, state.API_TOKEN || '');
+      if (tok && tok.trim()) {
+        setApiToken(tok.trim());
+        res = await postDecision();
+      }
+    }
+
+    if (!res.ok) {
+      let errText = 'Failed to resolve approval';
+      try {
+        const payload = await res.json();
+        if (payload && payload.error) errText = payload.error;
+      } catch (_) {}
+      throw new Error(errText);
+    }
+
     showToast(`Tool ${decision === 'approve' ? 'approved' : 'denied'}`, decision === 'approve' ? 'success' : 'info');
+    if (el) el.remove();
+    _shownApprovalIds.delete(requestId);
   } catch (err) {
     console.error(err);
-    showToast('Failed to resolve approval', 'error');
+    showToast(err.message || 'Failed to resolve approval', 'error');
+    setButtonsBusy(false);
   }
-  const el = document.getElementById(`approval-${requestId}`);
-  if (el) el.remove();
-  _shownApprovalIds.delete(requestId);
 }
 
 // ---- Plan Progress Tracker ----
