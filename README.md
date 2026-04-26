@@ -8,8 +8,14 @@ Documentation and planning are centralized:
 
 1. PLAN.md: canonical current-state reference (architecture, features, operations, validation, known gaps).
 2. ROADMAP.md: canonical future plan (priorities, milestones, NEW.md strategy integration).
+3. Additional planning drafts and temporary backlogs live under docs/notes/planning and docs/archive/planning.
+4. Root/file placement rules are defined in docs/ops/ROOT_STRUCTURE_POLICY.md.
 
 Supporting docs are index/archive only.
+
+If the project tree feels overwhelming, use the beginner map:
+
+1. docs/notes/BEGINNER_FOLDER_GUIDE.md
 
 ## Quick Start (Linux)
 

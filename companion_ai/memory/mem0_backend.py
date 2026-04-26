@@ -11,7 +11,10 @@ Uses local Ollama as LLM backend (no cloud API needed for memory operations).
 from __future__ import annotations
 import os
 import re
+import time
 import logging
+import threading
+import requests
 from datetime import datetime
 from uuid import uuid4
 from typing import Optional, List, Dict, Any
@@ -24,11 +27,107 @@ from companion_ai.memory import write_queue
 logger = logging.getLogger(__name__)
 
 # Ollama model for memory operations (local, fast, private)
-OLLAMA_MEM0_MODEL = os.getenv("OLLAMA_MEM0_MODEL", "qwen3:14b")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 # Fallback to Groq if Ollama not available
 USE_OLLAMA = os.getenv("MEM0_USE_OLLAMA", "true").lower() == "true"
+
+# Keep Mem0 embedding on CPU by default so local Ollama chat can retain GPU VRAM.
+MEM0_EMBEDDING_MODEL = os.getenv(
+    "MEM0_EMBEDDING_MODEL",
+    "sentence-transformers/all-MiniLM-L6-v2",
+)
+MEM0_EMBEDDER_DEVICE = os.getenv("MEM0_EMBEDDER_DEVICE", "cpu").strip().lower() or "cpu"
+
+# Runtime safeguard: if a CUDA OOM occurs, force subsequent Mem0 embedder inits to CPU.
+_mem0_force_cpu_embedder = False
+
+# Serialize Mem0 initialization to avoid concurrent Qdrant local-path lock errors.
+_memory_init_lock = threading.Lock()
+_mem0_init_backoff_until = 0.0
+_mem0_init_last_error = ""
+
+
+def _is_qdrant_lock_error(message: str | None) -> bool:
+    text = str(message or "").lower()
+    return "already accessed by another instance of qdrant client" in text
+
+
+def _is_cuda_oom_error(message: str | None) -> bool:
+    text = str(message or "").lower()
+    return (
+        "cuda error: out of memory" in text
+        or "cudaerrormemoryallocation" in text
+        or "cuda out of memory" in text
+    )
+
+
+def _get_mem0_embedder_device() -> str:
+    if _mem0_force_cpu_embedder:
+        return "cpu"
+    return MEM0_EMBEDDER_DEVICE
+
+
+def _get_mem0_ollama_model() -> str:
+    """Resolve local Mem0 model with sensible fallbacks for current runtime/profile."""
+    def _is_ollama_tag(value: str | None) -> bool:
+        token = str(value or "").strip()
+        # Ollama models are typically tagged (name:tag). HF model IDs used by vLLM
+        # usually omit the ':tag' suffix and cause 404 on /api/chat.
+        return bool(token and ":" in token)
+
+    explicit = os.getenv("OLLAMA_MEM0_MODEL") or os.getenv("MEM0_LLM_MODEL")
+    candidates: list[str] = []
+    if explicit:
+        candidates.append(str(explicit).strip())
+
+    try:
+        candidate = core_config.get_effective_local_heavy_model()
+        if _is_ollama_tag(candidate):
+            candidates.append(str(candidate).strip())
+    except Exception:
+        pass
+
+    try:
+        candidate = getattr(core_config, "MEMORY_LOCAL_MODEL", None)
+        if _is_ollama_tag(candidate):
+            candidates.append(str(candidate).strip())
+    except Exception:
+        pass
+
+    # Practical fallbacks for common local installs.
+    candidates.extend([
+        "qwen3.6:35b",
+        "gemma4:31b",
+        "qwen3:14b",
+        "qwen2.5:7b",
+    ])
+
+    ordered: list[str] = []
+    for item in candidates:
+        model = str(item or "").strip()
+        if not _is_ollama_tag(model):
+            continue
+        if model not in ordered:
+            ordered.append(model)
+
+    # Prefer models that are actually installed in the local Ollama runtime.
+    try:
+        response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=3)
+        if response.status_code == 200:
+            payload = response.json() if isinstance(response.json(), dict) else {}
+            models = payload.get("models", [])
+            installed = {
+                str(m.get("name") or "").strip()
+                for m in models if isinstance(m, dict)
+            }
+            for model in ordered:
+                if model in installed:
+                    return model
+    except Exception:
+        pass
+
+    return ordered[0] if ordered else "qwen3.6:35b"
 
 
 def _get_mem0_groq_model() -> str:
@@ -44,7 +143,7 @@ def get_runtime_descriptor(use_ollama: bool | None = None) -> dict[str, str]:
     """Return the configured Mem0 runtime provider/model for UI and tracing."""
     resolved_use_ollama = USE_OLLAMA if use_ollama is None else use_ollama
     if resolved_use_ollama and USE_OLLAMA:
-        return {"provider": "local", "model": OLLAMA_MEM0_MODEL}
+        return {"provider": "local", "model": _get_mem0_ollama_model()}
     return {"provider": "groq", "model": _get_mem0_groq_model()}
 
 
@@ -115,16 +214,17 @@ def _get_mem0_config(use_ollama: bool = True) -> dict:
 
     if use_ollama and USE_OLLAMA:
         # Use local Ollama model
+        mem0_model = _get_mem0_ollama_model()
         llm_config = {
             "provider": "ollama",
             "config": {
-                "model": OLLAMA_MEM0_MODEL,
+                "model": mem0_model,
                 "ollama_base_url": OLLAMA_URL,
                 "temperature": 0.1,
                 "max_tokens": 1000,
             }
         }
-        logger.info(f"Mem0 using Ollama: {OLLAMA_MEM0_MODEL}")
+        logger.info(f"Mem0 using Ollama: {mem0_model}")
     else:
         # Fallback to Groq
         fallback_groq_model = _get_mem0_groq_model()
@@ -140,12 +240,20 @@ def _get_mem0_config(use_ollama: bool = True) -> dict:
         }
         logger.info(f"Mem0 using Groq: {fallback_groq_model}")
 
+    embedder_device = _get_mem0_embedder_device()
+    logger.info(
+        "Mem0 embedder using HuggingFace model=%s device=%s",
+        MEM0_EMBEDDING_MODEL,
+        embedder_device,
+    )
+
     return {
         "llm": llm_config,
         "embedder": {
             "provider": "huggingface",
             "config": {
-                "model": "sentence-transformers/all-MiniLM-L6-v2",
+                "model": MEM0_EMBEDDING_MODEL,
+                "model_kwargs": {"device": embedder_device},
                 "embedding_dims": 384,  # MiniLM outputs 384 dimensions
             }
         },
@@ -175,13 +283,36 @@ def _reset_memory(use_ollama: bool = True):
 
 def get_memory() -> Any:
     """Get or create the Mem0 memory instance."""
-    global _memory_instance
-    
-    if _memory_instance is None:
+    global _memory_instance, _mem0_init_backoff_until, _mem0_init_last_error
+
+    if _memory_instance is not None:
+        return _memory_instance
+
+    now = time.time()
+    if now < _mem0_init_backoff_until:
+        wait_s = int(_mem0_init_backoff_until - now)
+        raise RuntimeError(
+            f"Mem0 initialization cooling down ({wait_s}s remaining): {_mem0_init_last_error}"
+        )
+
+    with _memory_init_lock:
+        # Another thread may have initialized Mem0 while we waited.
+        if _memory_instance is not None:
+            return _memory_instance
+
+        now = time.time()
+        if now < _mem0_init_backoff_until:
+            wait_s = int(_mem0_init_backoff_until - now)
+            raise RuntimeError(
+                f"Mem0 initialization cooling down ({wait_s}s remaining): {_mem0_init_last_error}"
+            )
+
         try:
             _reset_memory(use_ollama=USE_OLLAMA)
             backend = "Ollama" if USE_OLLAMA else "Groq"
             logger.info(f"Mem0 initialized with {backend} backend")
+            _mem0_init_backoff_until = 0.0
+            _mem0_init_last_error = ""
         except ImportError:
             logger.error("Mem0 not installed. Run: pip install mem0ai")
             raise
@@ -193,14 +324,20 @@ def get_memory() -> Any:
                 try:
                     _reset_memory(use_ollama=False)
                     logger.info("Mem0 initialized with Groq fallback")
+                    _mem0_init_backoff_until = 0.0
+                    _mem0_init_last_error = ""
                 except Exception as e2:
                     logger.error(f"Groq fallback also failed: {e2}")
+                    _mem0_init_last_error = str(e2)
+                    cooldown = 45 if _is_qdrant_lock_error(e2) else 15
+                    _mem0_init_backoff_until = time.time() + cooldown
                     raise
             else:
+                _mem0_init_last_error = str(e)
+                cooldown = 45 if _is_qdrant_lock_error(e) else 15
+                _mem0_init_backoff_until = time.time() + cooldown
                 raise
-    else:
-        logger.info("Reusing existing Mem0 instance")
-    
+
     return _memory_instance
 
 
@@ -225,6 +362,7 @@ def add_memory(
         Result from Mem0
     """
     request_id = request_id or str(uuid4())
+    global _mem0_force_cpu_embedder
     existing = _maybe_existing_committed_status(request_id)
     if existing:
         return existing
@@ -313,6 +451,14 @@ def add_memory(
                 memory = _reset_memory(use_ollama=False)
                 result = memory.add(payload, user_id=user_id, metadata=metadata or {})
                 logger.info(f"Mem0 add raw result (fallback): {result}")
+            elif _is_cuda_oom_error(error_text):
+                logger.warning(
+                    "Mem0 add hit CUDA OOM; forcing CPU embedder and retrying once."
+                )
+                _mem0_force_cpu_embedder = True
+                memory = _reset_memory(use_ollama=USE_OLLAMA)
+                result = memory.add(payload, user_id=user_id, metadata=metadata or {})
+                logger.info(f"Mem0 add raw result (cpu-fallback): {result}")
             else:
                 logger.error(f"Mem0 add failed: {e}")
                 raise
@@ -418,7 +564,18 @@ def search_memories(
     """
     try:
         memory = get_memory()
-        response = memory.search(query, user_id=user_id, limit=limit)
+        try:
+            response = memory.search(query, user_id=user_id, limit=limit)
+        except Exception as e:
+            msg = str(e)
+            if "Top-level entity parameters" in msg and "user_id" in msg:
+                # Mem0 >=2.0 expects scoped entity filters instead of top-level user_id.
+                try:
+                    response = memory.search(query, filters={"user_id": user_id}, limit=limit)
+                except Exception:
+                    response = memory.search(query, filter={"user_id": user_id}, limit=limit)
+            else:
+                raise
         # Mem0 returns {'results': [...]}
         results = response.get('results', []) if isinstance(response, dict) else response
         results = sqlite_memory.rank_memories_by_quality(results, user_scope=user_id, query=query)
@@ -440,7 +597,17 @@ def get_all_memories(user_id: str = "default") -> List[Dict[str, Any]]:
     """
     try:
         memory = get_memory()
-        response = memory.get_all(user_id=user_id)
+        try:
+            response = memory.get_all(user_id=user_id)
+        except Exception as e:
+            msg = str(e)
+            if "Top-level entity parameters" in msg and "user_id" in msg:
+                try:
+                    response = memory.get_all(filters={"user_id": user_id})
+                except Exception:
+                    response = memory.get_all(filter={"user_id": user_id})
+            else:
+                raise
         # Mem0 returns {'results': [...]}
         results = response.get('results', []) if isinstance(response, dict) else response
         return results

@@ -123,7 +123,7 @@ def _recall_impl(
     if include_brain:
         started = time.perf_counter()
         try:
-            from companion_ai.brain_index import get_brain_index
+            from companion_ai.brain import get_brain_index
             index = get_brain_index()
             brain_hits = index.search(query, limit=limit)
             for hit in brain_hits:

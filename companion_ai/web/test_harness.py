@@ -74,7 +74,7 @@ def install_hooks():
 
     # --- Orchestrator decision hook ---
     try:
-        from companion_ai.orchestrator import Orchestrator
+        from companion_ai.runtime import Orchestrator
 
         _orig_execute = Orchestrator._execute_decision
 
@@ -258,7 +258,7 @@ def harness_status():
 
     # Orchestrator
     try:
-        from companion_ai.orchestrator import get_orchestrator
+        from companion_ai.runtime import get_orchestrator
         status['orchestrator'] = 'available'
     except Exception:
         status['orchestrator'] = 'unavailable'

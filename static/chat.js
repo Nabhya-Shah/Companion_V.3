@@ -484,7 +484,7 @@ export async function sendMessage(retry = false) {
   roleLabel.textContent = 'Companion';
   const textDiv = document.createElement('div');
   textDiv.className = 'message-text';
-  textDiv.innerHTML = '<span class="text-content"></span><span class="streaming-cursor">▋</span>';
+  textDiv.innerHTML = '<span class="typing-status">Preparing response...</span><span class="text-content"></span><span class="streaming-cursor">▋</span>';
 
   content.appendChild(roleLabel);
   content.appendChild(textDiv);
@@ -495,6 +495,7 @@ export async function sendMessage(retry = false) {
   scrollToBottom();
 
   const textEl = textDiv.querySelector('.text-content');
+  const typingStatusEl = textDiv.querySelector('.typing-status');
   const cursorEl = textDiv.querySelector('.streaming-cursor');
   state.currentCursorEl = cursorEl;
 
@@ -506,8 +507,28 @@ export async function sendMessage(retry = false) {
   let displayedText = '';
   let pendingText = '';
   let isTyping = false;
+  let hasReceivedChunk = false;
   let receivedMetadata = null;
   let actionToastShown = false;
+  let typingEscalationTimer = null;
+
+  function setTypingStatus(text) {
+    if (!typingStatusEl) return;
+    typingStatusEl.textContent = text;
+    typingStatusEl.style.display = 'inline';
+  }
+
+  function clearTypingStatus() {
+    if (!typingStatusEl) return;
+    typingStatusEl.style.display = 'none';
+  }
+
+  setTypingStatus('Preparing response...');
+  typingEscalationTimer = setTimeout(() => {
+    if (!hasReceivedChunk) {
+      setTypingStatus('Still generating...');
+    }
+  }, 2500);
 
   function maybeShowActionToast(metadata) {
     if (actionToastShown || !metadata || !metadata.action_feedback || !window.showToast) return;
@@ -583,6 +604,16 @@ export async function sendMessage(retry = false) {
             if (data.meta) {
               receivedMetadata = data.meta;
               maybeShowActionToast(receivedMetadata);
+              const source = String(receivedMetadata.source || '').toLowerCase();
+              if (!hasReceivedChunk) {
+                if (source.includes('orchestrator_pending')) {
+                  setTypingStatus('Planning response...');
+                } else if (source.includes('loop_')) {
+                  setTypingStatus('Running tools...');
+                } else if (source.includes('local_streaming_direct')) {
+                  setTypingStatus('Generating locally...');
+                }
+              }
             }
             if (data.token_meta) {
               receivedMetadata = { ...receivedMetadata, ...data.token_meta };
@@ -605,6 +636,14 @@ export async function sendMessage(retry = false) {
             }
 
             if (data.chunk) {
+              if (!hasReceivedChunk && data.chunk.trim()) {
+                hasReceivedChunk = true;
+                clearTypingStatus();
+                if (typingEscalationTimer) {
+                  clearTimeout(typingEscalationTimer);
+                  typingEscalationTimer = null;
+                }
+              }
               queueText(data.chunk);
               if (window._streamingEmergencyTimeout) clearTimeout(window._streamingEmergencyTimeout);
               window._streamingEmergencyTimeout = setTimeout(() => {
@@ -619,6 +658,10 @@ export async function sendMessage(retry = false) {
             }
 
             if (data.done) {
+              if (typingEscalationTimer) {
+                clearTimeout(typingEscalationTimer);
+                typingEscalationTimer = null;
+              }
               if (window._streamingEmergencyTimeout) clearTimeout(window._streamingEmergencyTimeout);
               if (data.tokens && state.showTokens) {
                 const total = (data.tokens.input || 0) + (data.tokens.output || 0);
@@ -677,6 +720,10 @@ export async function sendMessage(retry = false) {
     waitForTyping();
 
   } catch (e) {
+    if (typingEscalationTimer) {
+      clearTimeout(typingEscalationTimer);
+      typingEscalationTimer = null;
+    }
     state.isStreaming = false;
     state.abortController = null;
     if (e.name === 'AbortError') {

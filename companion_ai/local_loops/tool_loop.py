@@ -340,7 +340,7 @@ and return the result. Be precise and concise."""
             return LoopResult.failure("No query provided")
         
         try:
-            from companion_ai.brain_index import brain_search
+            from companion_ai.brain import brain_search
             
             result = brain_search(query)
             

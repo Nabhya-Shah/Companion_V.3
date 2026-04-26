@@ -150,7 +150,7 @@ def _save_uploaded_file(file, analyze_images: bool = True):
     # Auto-index uploaded documents into brain index for unified search
     if not is_image:
         try:
-            from companion_ai.brain_index import get_brain_index
+            from companion_ai.brain import get_brain_index
             index = get_brain_index()
             store_path = f"uploads/{safe_filename}"
             chunks = index.index_file(Path(file_path), store_path=store_path)
@@ -413,7 +413,7 @@ def brain_upload():
 
     try:
         from werkzeug.utils import secure_filename
-        from companion_ai.brain_index import get_brain_index
+        from companion_ai.brain import get_brain_index
 
         filename = secure_filename(file.filename)
         filepath = os.path.join(target_dir, filename)
@@ -452,7 +452,7 @@ def brain_upload_batch():
     os.makedirs(target_dir, exist_ok=True)
 
     try:
-        from companion_ai.brain_index import get_brain_index
+        from companion_ai.brain import get_brain_index
         index = get_brain_index()
         uploaded = []
         errors = []
@@ -482,7 +482,7 @@ def brain_upload_batch():
 def brain_stats():
     """Get brain index statistics."""
     try:
-        from companion_ai.brain_index import get_brain_index
+        from companion_ai.brain import get_brain_index
         index = get_brain_index()
         stats = index.get_stats()
         return jsonify(stats)
@@ -500,7 +500,7 @@ def brain_files_list():
         if not root_path.exists():
             return jsonify({'files': [], 'count': 0})
 
-        from companion_ai.brain_index import get_brain_index
+        from companion_ai.brain import get_brain_index
         index = get_brain_index()
         stats = index.get_stats()
         chunk_map = {
@@ -603,7 +603,7 @@ def brain_file_delete():
     try:
         os.remove(abs_path)
         normalized = str(rel).replace('\\', '/').lstrip('/')
-        from companion_ai.brain_index import get_brain_index
+        from companion_ai.brain import get_brain_index
         index = get_brain_index()
         index.remove_file(normalized)
         return jsonify({'deleted': True, 'path': normalized})
@@ -620,7 +620,7 @@ def brain_reindex():
         return blocked
     try:
         os.environ['BRAIN_DIR'] = _brain_dir_for_workspace()
-        from companion_ai.brain_index import get_brain_index
+        from companion_ai.brain import get_brain_index
         index = get_brain_index()
         results = index.index_all()
         return jsonify({
@@ -642,7 +642,7 @@ def brain_search_api():
         return jsonify({'error': 'No query provided'}), 400
 
     try:
-        from companion_ai.brain_index import get_brain_index
+        from companion_ai.brain import get_brain_index
         index = get_brain_index()
         results = index.search(query, limit=10)
         return jsonify({'query': query, 'results': results})

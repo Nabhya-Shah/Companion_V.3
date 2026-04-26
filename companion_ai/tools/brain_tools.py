@@ -24,7 +24,7 @@ from companion_ai.tools.registry import tool
 def tool_brain_search(query: str) -> str:
     """Search brain folder documents semantically."""
     try:
-        from companion_ai.brain_index import brain_search
+        from companion_ai.brain import brain_search
         return brain_search(query)
     except Exception as e:
         return f"Brain search error: {str(e)}"
@@ -49,7 +49,7 @@ def tool_brain_search(query: str) -> str:
 })
 def tool_brain_read(path: str) -> str:
     """Read from brain folder."""
-    from companion_ai.brain_manager import brain_read
+    from companion_ai.brain import brain_read
     return brain_read(path)
 
 
@@ -80,7 +80,7 @@ def tool_brain_read(path: str) -> str:
 })
 def tool_brain_write(path: str, content: str, append: bool = False) -> str:
     """Write to brain folder."""
-    from companion_ai.brain_manager import brain_write
+    from companion_ai.brain import brain_write
     return brain_write(path, content, append)
 
 
@@ -103,5 +103,5 @@ def tool_brain_write(path: str, content: str, append: bool = False) -> str:
 })
 def tool_brain_list(subdir: str = "") -> str:
     """List brain folder contents."""
-    from companion_ai.brain_manager import brain_list
+    from companion_ai.brain import brain_list
     return brain_list(subdir)

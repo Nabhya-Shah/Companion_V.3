@@ -118,6 +118,9 @@ class OllamaClientWrapper:
                     "model": model,
                     "messages": messages,
                     "stream": False,
+                    # Disable reasoning-only output by default so callers receive
+                    # assistant content instead of long hidden "thinking" traces.
+                    "think": kwargs.get("think", False),
                     "options": {
                         "temperature": kwargs.get("temperature", 0.7),
                         "num_predict": kwargs.get("max_tokens", 1024),
@@ -527,6 +530,7 @@ class OllamaBackend(LocalLLMBackend):
                     "model": model,
                     "prompt": prompt,
                     "stream": False,
+                    "think": False,
                 },
                 timeout=120
             )
@@ -555,6 +559,7 @@ class OllamaBackend(LocalLLMBackend):
                     "prompt": prompt,
                     "images": [image_data],
                     "stream": False,
+                    "think": False,
                 },
                 timeout=120
             )

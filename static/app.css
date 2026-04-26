@@ -455,6 +455,14 @@ body {
   white-space: pre-wrap;
 }
 
+.typing-status {
+  display: inline;
+  margin-right: 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
 .streaming-cursor {
   display: inline-block;
   animation: blink 0.7s step-end infinite;

@@ -17,7 +17,7 @@ from typing import Dict, List, Tuple
 
 from flask import request, jsonify, has_request_context, g
 
-from companion_ai.conversation_manager import ConversationSession
+from companion_ai.runtime import ConversationSession
 from companion_ai.core import config as core_config
 
 logger = logging.getLogger(__name__)

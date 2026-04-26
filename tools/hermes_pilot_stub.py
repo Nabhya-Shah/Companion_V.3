@@ -18,7 +18,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from companion_ai.orchestrator import process_message
+from companion_ai.runtime import process_message
 
 
 logger = logging.getLogger(__name__)

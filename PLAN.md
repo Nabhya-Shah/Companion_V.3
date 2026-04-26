@@ -36,15 +36,15 @@ Legend:
 | Capability Area | Status | What Exists Today | Key Files |
 |---|---|---|---|
 | Web chat + SSE streaming | Live | Streaming responses, history stream, stop control, diagnostics | companion_ai/web/chat_routes.py, static/chat.js |
-| Orchestrator routing | Live | answer, delegate, plan, background, memory_search actions | companion_ai/orchestrator.py |
-| Local/cloud chat mode control | Live | Runtime-selectable chat provider (`cloud_primary` or `local_primary`) with explicit fallback semantics in API + UI | companion_ai/core/config.py, companion_ai/orchestrator.py, companion_ai/web/system_routes.py, static/settings.js |
+| Orchestrator routing | Live | answer, delegate, plan, background, memory_search actions | companion_ai/runtime/orchestrator.py |
+| Local/cloud chat mode control | Live | Runtime-selectable chat provider (`cloud_primary` or `local_primary`) with explicit fallback semantics in API + UI | companion_ai/core/config.py, companion_ai/runtime/orchestrator.py, companion_ai/web/system_routes.py, static/settings.js |
 | Specialist loops | Live | memory loop, tool loop, vision loop | companion_ai/local_loops/ |
 | Hybrid memory | Live | Mem0 + SQLite + brain index via unified recall/remember entry points | companion_ai/memory/knowledge.py |
 | Memory quality pipeline | Live | confidence labels, pending review, dedup/provenance tracking | companion_ai/memory/sqlite_backend.py, companion_ai/memory/ai_processor.py |
-| Retrieval observability | Live | retrieval stage traces and SSE stage events | companion_ai/memory/knowledge.py, companion_ai/conversation_manager.py |
+| Retrieval observability | Live | retrieval stage traces and SSE stage events | companion_ai/memory/knowledge.py, companion_ai/runtime/conversation.py |
 | Tool governance and approvals | Live | allowlists, sandbox mode, risk tiers, approval queue | companion_ai/tools/registry.py |
 | Session/profile/workspace scoping | Live | scoped IDs, permission gating by workspace | companion_ai/web/state.py |
-| Files/brain knowledge workflows | Live | uploads, extraction, summaries, search, indexing | companion_ai/web/files_routes.py, companion_ai/brain_index.py |
+| Files/brain knowledge workflows | Live | uploads, extraction, summaries, search, indexing | companion_ai/web/files_routes.py, companion_ai/brain/index.py |
 | Jobs/schedules/workflows | Live | schedule CRUD, run-now, task plans, workflow execution | companion_ai/services/jobs.py, companion_ai/services/task_planner.py |
 | Persona/insights/continuity | Live | adaptive persona, proactive insights, continuity snapshots | companion_ai/services/persona.py, companion_ai/services/insights.py, companion_ai/services/continuity.py |
 | Smart home (Loxone) | Beta/Partial | health + core light control paths | companion_ai/web/loxone_routes.py, companion_ai/integrations/loxone.py |
@@ -211,6 +211,7 @@ Rules:
 2. Update ROADMAP.md for any plan/scope/prioritization change.
 3. Keep index/pointer docs lightweight and non-duplicative.
 4. Move superseded long-form planning docs into docs/archive.
+5. Follow docs/ops/ROOT_STRUCTURE_POLICY.md for root-level file placement.
 
 ## 12. Canonical and Archive Links
 
@@ -223,8 +224,9 @@ Indexes:
 
 1. README.md (onboarding + canonical links)
 2. ARCHITECTURE.md (architecture pointer)
-3. IMPROVEMENTS_ROADMAP.md (roadmap pointer)
+3. docs/ops/IMPROVEMENTS_ROADMAP.md (roadmap pointer)
 4. docs/README.md (docs folder index)
+5. docs/ops/ROOT_STRUCTURE_POLICY.md (root structure policy)
 
 Archives:
 
@@ -233,6 +235,12 @@ Archives:
 3. docs/archive/PLAN_B_BLUEPRINT_ARCHIVE.md
 4. docs/archive/IMPLEMENTATION_SPEC_REPO_INSIGHTS_ARCHIVE.md
 5. docs/archive/RELEASE_DAILY_USE_CHECKLIST_ARCHIVE.md
+6. docs/archive/planning/NEW.md
+
+Working planning notes (non-canonical):
+
+1. docs/notes/planning/PRACTICAL_FEATURE_PLAN.md
+2. docs/notes/planning/TEMP_FEATURE_TODO.md
 
 ## 13. External Benchmark Snapshot (2026-04-11)
 

@@ -14,7 +14,7 @@ _EMOTION_TAG_RE = re.compile(r'\[(?:cheerful|whisper|sad|dramatic|excited|neutra
 from flask import Blueprint, request, jsonify, Response, stream_with_context
 
 from companion_ai.core import config as core_config
-from companion_ai.conversation_manager import ConversationSession
+from companion_ai.runtime import ConversationSession
 from companion_ai.services.tts import tts_manager
 from companion_ai.services import jobs as job_manager_module
 from companion_ai.services.persona import record_interaction, trigger_evolution_background

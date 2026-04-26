@@ -44,6 +44,6 @@ def test_streaming_mem0_write_uses_trace_request_id(monkeypatch):
     monkeypatch.setattr(threading, 'Thread', _ImmediateThread)
 
     session = ConversationSession()
-    list(session.process_message_streaming('hello', [], memory_user_id='u-test', trace_id='trace-test-001'))
+    list(session.process_message_streaming('my name is alice', [], memory_user_id='u-test', trace_id='trace-test-001'))
 
     assert captured['request_id'] == 'trace-test-001:chat_async'

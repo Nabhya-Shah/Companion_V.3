@@ -128,7 +128,7 @@ def _build_brain_context() -> str:
     Limited to ~500 chars per section to avoid token bloat.
     """
     try:
-        from companion_ai.brain_manager import get_brain
+        from companion_ai.brain import get_brain
         brain = get_brain()
         
         context_parts = []

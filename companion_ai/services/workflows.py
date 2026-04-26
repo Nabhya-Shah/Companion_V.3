@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
-from companion_ai.orchestrator import Orchestrator
+from companion_ai.runtime import Orchestrator
 
 logger = logging.getLogger(__name__)
 

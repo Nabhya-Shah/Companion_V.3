@@ -17,7 +17,7 @@ from flask import Blueprint, request, jsonify, render_template, make_response
 from companion_ai.llm_interface import (
     generate_response, get_token_stats, reset_token_stats, get_last_token_usage,
 )
-from companion_ai.conversation_manager import ConversationSession
+from companion_ai.runtime import ConversationSession
 from companion_ai.core import config as core_config
 from companion_ai.core import metrics
 from companion_ai.memory.sqlite_backend import get_memory_stats
@@ -76,7 +76,7 @@ def shutdown():
 
     # Save session log to brain folder
     try:
-        from companion_ai.brain_manager import get_brain
+        from companion_ai.brain import get_brain
         workspace_key = state._resolve_workspace_key(data)
         brain = get_brain(workspace_id=workspace_key)
 
@@ -178,7 +178,7 @@ def brain_auto_write():
         if not core_config.require_auth(token):
             return jsonify({'error': 'Unauthorized'}), 401
 
-        from companion_ai.brain_manager import get_brain
+        from companion_ai.brain import get_brain
         from companion_ai.llm_interface import generate_model_response
 
         workspace_key = state._resolve_workspace_key()

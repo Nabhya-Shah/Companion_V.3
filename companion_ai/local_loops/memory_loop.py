@@ -165,7 +165,7 @@ relevant memories from the provided list. Return the indices of relevant memorie
 
         try:
             from companion_ai.memory.knowledge import remember
-            from companion_ai.brain_manager import get_brain
+            from companion_ai.brain import get_brain
             from datetime import datetime
 
             memory_request_id = f"{trace_id}:loop_save" if trace_id else None

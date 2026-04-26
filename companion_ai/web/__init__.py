@@ -131,7 +131,7 @@ def create_app() -> Flask:
     # ------------------------------------------------------------------
     def _start_brain_indexing():
         try:
-            from companion_ai.brain_index import start_background_indexing
+            from companion_ai.brain import start_background_indexing
             start_background_indexing()
         except Exception as e:
             logger.warning(f"Could not start brain indexing: {e}")

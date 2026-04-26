@@ -22,7 +22,7 @@ from companion_ai.memory.sqlite_backend import (
     delete_memory_quality_entry, upsert_memory_quality_entry, list_memory_write_status,
 )
 from companion_ai.memory import mem0_backend as mem0
-from companion_ai.conversation_manager import ConversationSession
+from companion_ai.runtime import ConversationSession
 from companion_ai.web import state
 
 logger = logging.getLogger(__name__)
