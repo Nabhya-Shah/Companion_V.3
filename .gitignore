@@ -1,10 +1,17 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 *.pyo
 *.pyd
-*.log
+
+# C extensions
+*.so
+
+# SQLite databases - may contain personal data
 *.sqlite
-*.db*
+*.sqlite3
+*.db
 
 # Environment files - NEVER commit these
 .env
@@ -17,12 +24,16 @@ __pycache__/
 # Runtime data & logs - may contain personal conversations
 data/
 !data/.gitkeep
+!data/plugin_policy.json
 companion_ai/data/
 
 # Brain folder - contains personal memories
 BRAIN/
 !BRAIN/system/
 !BRAIN/system/core_rules.md
+
+# Provider benchmark candidates - may contain real API keys
+scripts/provider_benchmark_candidates.yaml
 
 # Memory exports - contain personal data
 memory_export_*.txt
@@ -38,57 +49,44 @@ tools/*.log
 node_modules/
 package-lock.json
 
+# Python environments
 venv/
 .venv/
 env/
-build/
-dist/
-memory_export_*.txt
+ENV/
+env.bak/
+venv.bak/
+.venv-gaming/
+
+# Python cache
 /.pytest_cache/
 /.mypy_cache/
 /.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+__pypackages__/
+.vscode/
+
+# Build artifacts
+build/
+dist/
 coverage.xml
 htmlcov/
-/.DS_Store
+.nox/
+.tox/
+.cache
+
+# System files
+.DS_Store
 Thumbs.db
 
 # Gaming AI - Model weights (too large for git)
 *.pt
 *.onnx
 *.pth
-.venv-gaming/
-
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
-
-# C extensions
-*.so
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
 
 # PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
 
@@ -97,44 +95,23 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 # Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
 .coverage
 .coverage.*
-.cache
-nosetests.xml
-coverage.xml
 *.cover
 *.py,cover
-.hypothesis/
-.pytest_cache/
-cover/
+nosetests.xml
 
 # Translations
 *.mo
 *.pot
 
-# Django stuff:
-*.log
+# Django
 local_settings.py
-db.sqlite3
 db.sqlite3-journal
-data/logs/*.jsonl
 
-# Flask stuff:
+# Flask
 instance/
 .webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-.pybuilder/
-target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -143,106 +120,52 @@ target/
 profile_default/
 ipython_config.py
 
-# pyenv
-#   For a library or package, you might want to ignore these files since the code is
-#   intended to run in multiple environments; otherwise, check them in:
-# .python-version
-
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
-
-# UV
-#   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#uv.lock
-
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-#poetry.lock
-
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#pdm.lock
-#   pdm stores project-wide configurations in .pdm.toml, but it is recommended to not include it
-#   in version control.
-#   https://pdm.fming.dev/latest/usage/project/#working-with-version-control
-.pdm.toml
+# Documentation tools
+docs/_build/
+.pypirc
 .pdm-python
+.pdm.toml
 .pdm-build/
 
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-__pypackages__/
+# Misc tool configs
+.coverage
+.coverage.*
+.hypothesis/
+.pyre/
+.pytype/
+.cython_debug/
+.spyderproject
+.spyproject
+.ropeproject
+.mkdocs
+/site
 
-# Celery stuff
+# Celery
 celerybeat-schedule
 celerybeat.pid
 
-# SageMath parsed files
-*.sage.py
+# Recording/session files (PII from audio/video)
+*.rec
+*.recording
+*.session
+recordings/
 
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+# Session cache and artifacts
+companion_ai/cache/
+data/computer_use_artifacts/
+data/logs/metrics_state.json
+*.cache
 
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# PyCharm
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
-
-# Ruff stuff:
-.ruff_cache/
-
-# PyPI configuration file
-.pypirc
-
-# Cursor  
-#  Cursor is an AI-powered code editor.`.cursorignore` specifies files/directories to 
-#  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
-#  refer to https://docs.cursor.com/context/ignore-files
-.cursorignore
-.cursorindexingignore
+# Additional artifacts
+*.aud
+*.audit
 
 # Planning docs - internal only, may contain sensitive discussion
 V4_PLANNING.md
 *_PLANNING.md
-# Backlog tracking
 GITHUB PROJECT.md
+REVIEW/
+*.review
+
+# Scripts that may contain environment-specific settings
+scripts/diagnostic/provider_benchmark_candidates.yaml

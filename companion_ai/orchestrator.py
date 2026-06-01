@@ -1,11 +1,22 @@
 """Compatibility alias for legacy orchestrator import path.
 
-This module path resolves to companion_ai.runtime.orchestrator so monkeypatches
-on companion_ai.orchestrator continue to affect canonical behavior.
+All symbols are re-exported from companion_ai.runtime.orchestrator for backward compatibility.
 """
 
 import sys as _sys
 
-from companion_ai.runtime import orchestrator as _orchestrator_module
+from companion_ai.runtime.orchestrator import (
+    Orchestrator,
+    OrchestratorDecision,
+    OrchestratorAction,
+    process_message,
+    get_orchestrator,
+)
 
-_sys.modules[__name__] = _orchestrator_module
+__all__ = [
+    "Orchestrator",
+    "OrchestratorDecision",
+    "OrchestratorAction",
+    "process_message",
+    "get_orchestrator",
+]

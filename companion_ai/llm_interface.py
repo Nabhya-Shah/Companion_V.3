@@ -1,22 +1,11 @@
-# companion_ai/llm_interface.py   backwards-compatibility shim
-"""All real code now lives in companion_ai.llm.* sub-modules.
+"""Compatibility alias for legacy llm_interface import path.
 
-This file re-exports every public symbol so that existing
-``from companion_ai.llm_interface import X`` statements keep working.
+All symbols are re-exported from companion_ai.llm for backward compatibility.
 """
 
-# --- Token tracking ---
-from companion_ai.llm.token_tracker import (          # noqa: F401
-    reset_last_request_tokens,
-    get_last_token_usage,
-    log_tokens_step,
-    log_tokens,
-    get_token_stats,
-    reset_token_stats,
-)
+import sys as _sys
 
-# --- Groq provider ---
-from companion_ai.llm.groq_provider import (          # noqa: F401
+from companion_ai.llm import (
     sanitize_output,
     get_groq_client,
     groq_client,
@@ -26,10 +15,6 @@ from companion_ai.llm.groq_provider import (          # noqa: F401
     generate_model_response,
     generate_model_response_streaming,
     generate_groq_response,
-)
-
-# --- Ollama provider ---
-from companion_ai.llm.ollama_provider import (         # noqa: F401
     get_embedding,
     get_embeddings_batch,
     generate_local_response,
@@ -38,17 +23,46 @@ from companion_ai.llm.ollama_provider import (         # noqa: F401
     OLLAMA_VISION_MODEL,
     OLLAMA_EMBED_MODEL,
     OLLAMA_CODE_MODEL,
-)
-
-# --- Router (high-level) ---
-from companion_ai.llm.router import (                 # noqa: F401
     generate_response,
     generate_response_streaming,
+    extract_profile_facts,
+    generate_summary,
+    generate_insight,
+    reset_last_request_tokens,
+    get_last_token_usage,
+    log_tokens_step,
+    log_tokens,
+    get_token_stats,
+    reset_token_stats,
 )
 
-# --- Memory extraction (canonical module: memory/ai_processor.py) ---
-from companion_ai.memory.ai_processor import (         # noqa: F401
-    extract_smart_profile_facts as extract_profile_facts,
-    generate_smart_summary as generate_summary,
-    generate_contextual_insight as generate_insight,
-)
+__all__ = [
+    "sanitize_output",
+    "get_groq_client",
+    "groq_client",
+    "groq_tool_client",
+    "groq_memory_client",
+    "generate_model_response_with_tools",
+    "generate_model_response",
+    "generate_model_response_streaming",
+    "generate_groq_response",
+    "get_embedding",
+    "get_embeddings_batch",
+    "generate_local_response",
+    "OLLAMA_URL",
+    "OLLAMA_TEXT_MODEL",
+    "OLLAMA_VISION_MODEL",
+    "OLLAMA_EMBED_MODEL",
+    "OLLAMA_CODE_MODEL",
+    "generate_response",
+    "generate_response_streaming",
+    "extract_profile_facts",
+    "generate_summary",
+    "generate_insight",
+    "reset_last_request_tokens",
+    "get_last_token_usage",
+    "log_tokens_step",
+    "log_tokens",
+    "get_token_stats",
+    "reset_token_stats",
+]

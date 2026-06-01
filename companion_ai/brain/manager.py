@@ -65,6 +65,7 @@ class BrainManager:
     def __init__(self, base_path: Path = BRAIN_BASE):
         self.base_path = Path(base_path)
         self._ensure_structure()
+        self._last_transaction: Optional[Dict] = None
     
     def _ensure_structure(self):
         """Create brain folder structure if it doesn't exist."""
@@ -155,11 +156,11 @@ class BrainManager:
         """
         try:
             path = self._validate_path(relative_path, write=True)
+            existing_content = path.read_text(encoding='utf-8') if path.exists() else None
             
             # Prepare content
             if append and path.exists():
-                existing = path.read_text(encoding='utf-8')
-                content = existing + "\n" + content
+                content = existing_content + "\n" + content
             
             # Check limits
             self._check_limits(content, path)
@@ -169,15 +170,46 @@ class BrainManager:
             
             # Write with timestamp comment
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-            if not append:
+            if not append and not content.startswith("<!-- Updated:"):
                 content = f"<!-- Updated: {timestamp} -->\n{content}"
             
             path.write_text(content, encoding='utf-8')
             logger.info(f"Brain write: {relative_path}")
+            
+            self._last_transaction = {
+                "path": path,
+                "previous_content": existing_content,
+                "action": "write"
+            }
             return True
             
         except Exception as e:
             logger.error(f"Brain write error: {e}")
+            return False
+            
+    def rollback_last_change(self) -> bool:
+        """Revert the most recent brain write operation."""
+        if getattr(self, '_last_transaction', None) is None:
+            logger.warning("No brain transaction to rollback.")
+            return False
+            
+        try:
+            path = self._last_transaction["path"]
+            prev_content = self._last_transaction["previous_content"]
+            
+            if prev_content is None:
+                # File was newly created, so delete it
+                if path.exists():
+                    path.unlink()
+            else:
+                # Restore previous content
+                path.write_text(prev_content, encoding='utf-8')
+                
+            logger.info(f"Brain rollback successful: {path.name}")
+            self._last_transaction = None
+            return True
+        except Exception as e:
+            logger.error(f"Brain rollback error: {e}")
             return False
     
     def list_files(self, subdir: str = "") -> list[dict]:

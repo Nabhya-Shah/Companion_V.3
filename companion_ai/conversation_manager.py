@@ -1,11 +1,12 @@
 """Compatibility alias for legacy conversation_manager import path.
 
-This module path resolves to companion_ai.runtime.conversation so monkeypatches
-on companion_ai.conversation_manager continue to affect canonical behavior.
+All symbols are re-exported from companion_ai.runtime.conversation for backward compatibility.
 """
 
 import sys as _sys
 
-from companion_ai.runtime import conversation as _conversation_module
+from companion_ai.runtime.conversation import ConversationSession
 
-_sys.modules[__name__] = _conversation_module
+_sys.modules[__name__] = _sys.modules.get("companion_ai.runtime.conversation")
+
+__all__ = ["ConversationSession"]

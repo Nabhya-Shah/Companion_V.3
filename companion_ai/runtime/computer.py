@@ -18,6 +18,9 @@ import time
 
 logger = logging.getLogger(__name__)
 
+# Destructive command blacklist for heuristic validation
+_DESTRUCTIVE_PATTERNS = re.compile(r'\b(rm|del|format|dd|mkfs|shutdown|reboot|sudo)\b', re.IGNORECASE)
+
 
 class ComputerAgent:
     """Best-effort computer control runtime used by tool_use_computer."""
@@ -97,6 +100,11 @@ class ComputerAgent:
         target = str(name or "").strip()
         if not target:
             return "launch failed: missing app or target"
+
+        # Heuristic security filter: block clearly destructive OS commands
+        if _DESTRUCTIVE_PATTERNS.search(target):
+            logger.warning(f"Blocked destructive command in launch_app: {target}")
+            return "launch failed: security policy blocked destructive command"
 
         if self._looks_like_url(target):
             try:
